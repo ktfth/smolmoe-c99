@@ -64,9 +64,9 @@ static void usage(FILE *out) {
           "  --config/--tokenizer default to the copies embedded by smolmoe-bundle.\n\n"
           "input\n"
           "  --prompt-file FILE   raw UTF-8/byte prompt instead of --prompt\n"
-          "  --chat               wrap the prompt in a Qwen2 ChatML single-turn template\n"
+          "  --chat               wrap the prompt in the model's single-turn chat template\n"
           "  --interactive, -i    multi-turn chat on stdin/stdout (default without a prompt)\n"
-          "  --system TEXT        ChatML system message (default: Brazilian Portuguese)\n"
+          "  --system TEXT        chat system message (default: Brazilian Portuguese)\n"
           "  --no-tools           chat without the built-in tools (date, days until a date)\n"
           "  --now YYYY-MM-DDTHH:MM  fixed local time for the tools (default: the clock)\n"
           "generation\n"
@@ -497,7 +497,7 @@ int main(int argc, char **argv) {
     run.out = &out;
     run.tok = load_tokenizer(&o, &src, c.vocab, &mem);
     if ((o.chat || o.interactive) && !tokenizer_supports_chat(run.tok))
-        die("chat needs a chat model (Qwen tokenizer); pass --prompt for plain text continuation");
+        die("chat needs a chat model (a tokenizer with a chat template); pass --prompt for plain text continuation");
     run.prompt_cap = (uint32_t)(context < MAX_CONTEXT / PROMPT_BYTES_PER_TOKEN ? context * PROMPT_BYTES_PER_TOKEN
                                                                                : MAX_CONTEXT);
     {

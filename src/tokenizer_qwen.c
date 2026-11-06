@@ -5,26 +5,43 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "unicode.h"
+#include "tokenizer_pretok.h"
 
 #define MAX_PIECE 65536u
 #define MAX_PAYLOAD 67108864u
+#define MAX_TRUSTED 2u
+#define PHI_ROLES 3u
 
 typedef struct { uint32_t a, b, out; } QwenMerge;
 
-#define TOOL_OPEN_TEXT "<tool_call>"
-#define TOOL_CLOSE_TEXT "</tool_call>"
+/* A control token the operator's system text may spell out. rstrip: the
+ * whitespace after it belongs to the marker (HF added-token rstrip). */
+typedef struct {
+    const char *text;
+    int rstrip;
+    uint32_t id, len; /* id is UINT32_MAX when the vocabulary lacks it */
+} Marker;
+
+static const char *const CHATML_MARKERS[MAX_TRUSTED] = {"<tool_call>", "</tool_call>"};
+static const char *const PHI_MARKERS[MAX_TRUSTED] = {"<|tool|>", "<|/tool|>"};
+static const char *const PHI_ROLE_NAMES[PHI_ROLES] = {"system", "user", "assistant"};
+static const char *const PHI_ROLE_TOKENS[PHI_ROLES] = {"<|system|>", "<|user|>", "<|assistant|>"};
 
 struct QwenTokenizer {
-    uint32_t vocab, nmerge, im_start, hash_size, capacity, max_piece;
-    uint32_t tool_open, tool_close; /* special tokens, or UINT32_MAX when the vocabulary lacks them */
+    uint32_t vocab, nmerge, hash_size, capacity, max_piece;
+    uint32_t normalizer, pretok, chat;
+    uint32_t im_start;                /* ChatML */
+    uint32_t role[PHI_ROLES];         /* Phi: <|system|>, <|user|>, <|assistant|> */
+    uint32_t tool_open, tool_close;   /* ChatML tool calls, or UINT32_MAX */
+    Marker trusted[MAX_TRUSTED];
     unsigned char **piece, *special, *normalized;
+    uint8_t *cls;
     uint32_t *length, *hash, *cp, *offset, *symbols;
     QwenMerge *merge;
 };
 
 static void read_exact(ByteReader *r, void *buf, size_t n, const char *what) {
-    if (!br_read(r, buf, n)) die("truncated Qwen tokenizer: %s", what);
+    if (!br_read(r, buf, n)) die("truncated SMQBP1 tokenizer: %s", what);
 }
 
 static void insert_merge(QwenTokenizer *q, uint32_t i) {
@@ -32,7 +49,7 @@ static void insert_merge(QwenTokenizer *q, uint32_t i) {
     uint32_t slot = (uint32_t)mix64(((uint64_t)m->a << 32) | m->b) & (q->hash_size - 1);
     while (q->hash[slot]) {
         const QwenMerge *old = &q->merge[q->hash[slot] - 1];
-        if (old->a == m->a && old->b == m->b) die("duplicate Qwen merge");
+        if (old->a == m->a && old->b == m->b) die("duplicate SMQBP1 merge");
         slot = (slot + 1) & (q->hash_size - 1);
     }
     q->hash[slot] = i + 1;
@@ -45,28 +62,95 @@ static void validate_merge(const QwenTokenizer *q, const QwenMerge *m) {
         q->length[m->a] + q->length[m->b] != q->length[m->out] ||
         memcmp(q->piece[m->out], q->piece[m->a], q->length[m->a]) ||
         memcmp(q->piece[m->out] + q->length[m->a], q->piece[m->b], q->length[m->b]))
-        die("invalid Qwen merge");
+        die("invalid SMQBP1 merge");
+}
+
+static int piece_is(const QwenTokenizer *q, uint32_t id, const char *text) {
+    uint32_t n = (uint32_t)strlen(text);
+    return q->length[id] == n && !memcmp(q->piece[id], text, n);
 }
 
 static uint32_t find_special(const QwenTokenizer *q, const char *text) {
-    uint32_t i, n = (uint32_t)strlen(text);
+    uint32_t i;
     for (i = 256; i < q->vocab; ++i)
-        if (q->special[i] && q->length[i] == n && !memcmp(q->piece[i], text, n)) return i;
+        if (q->special[i] && piece_is(q, i, text)) return i;
     return UINT32_MAX;
 }
 
+static uint32_t require_special(const QwenTokenizer *q, const char *text) {
+    uint32_t id = find_special(q, text);
+    if (id == UINT32_MAX) die("SMQBP1 chat template needs a %s token", text);
+    return id;
+}
+
+/* v1 implies NFC, the Qwen2 pre-tokenizer and ChatML with im_start in the header. */
+static uint32_t read_header(QwenTokenizer *q, ByteReader *f, uint32_t vocab) {
+    unsigned char h[32];
+    uint32_t version, total;
+    if (!br_read(f, h, 8) || memcmp(h, "SMQBP1\0", 7) || (h[7] != 1 && h[7] != 2)) die("invalid SMQBP1 tokenizer header");
+    version = h[7];
+    if (!br_read(f, h + 8, version == 1 ? 16 : 24) || rd_u32(h + 8) != vocab || vocab < 258)
+        die("invalid SMQBP1 tokenizer header");
+    q->nmerge = rd_u32(h + 12);
+    total = rd_u32(h + 16);
+    if (version == 1) {
+        q->normalizer = QBP_NORM_NFC;
+        q->pretok = QBP_PRETOK_QWEN2;
+        q->chat = QBP_CHAT_CHATML;
+        q->im_start = rd_u32(h + 20);
+    } else {
+        q->normalizer = rd_u32(h + 20);
+        q->pretok = rd_u32(h + 24);
+        q->chat = rd_u32(h + 28);
+        q->im_start = UINT32_MAX;
+        if (q->normalizer > QBP_NORM_NFC) die("unsupported SMQBP1 normalizer %u", q->normalizer);
+        if (q->pretok != QBP_PRETOK_QWEN2 && q->pretok != QBP_PRETOK_O200K)
+            die("unsupported SMQBP1 pre-tokenizer %u", q->pretok);
+        if (q->chat > QBP_CHAT_PHI) die("unsupported SMQBP1 chat template %u", q->chat);
+    }
+    if (q->nmerge > MAX_MERGES || total > MAX_PAYLOAD || (version == 1 && q->im_start >= vocab))
+        die("invalid SMQBP1 tokenizer dimensions");
+    return total;
+}
+
+static void set_markers(QwenTokenizer *q, const char *const *text, int rstrip) {
+    uint32_t i;
+    for (i = 0; i < MAX_TRUSTED; ++i) {
+        q->trusted[i].text = text[i];
+        q->trusted[i].rstrip = rstrip;
+        q->trusted[i].len = (uint32_t)strlen(text[i]);
+        q->trusted[i].id = find_special(q, text[i]);
+    }
+}
+
+/* BOS and EOS are control tokens; each template's markers are found by text. */
+static void resolve_template(QwenTokenizer *q) {
+    uint32_t i;
+    if (!q->special[BOS_ID] || !q->special[EOS_ID]) die("SMQBP1 tokens 256 and 257 must be flagged special");
+    q->tool_open = q->tool_close = UINT32_MAX;
+    for (i = 0; i < MAX_TRUSTED; ++i) q->trusted[i].id = UINT32_MAX;
+    if (q->chat == QBP_CHAT_CHATML) {
+        if (!piece_is(q, EOS_ID, "<|im_end|>")) die("SMQBP1 token 257 must be <|im_end|> for ChatML");
+        if (q->im_start == UINT32_MAX) q->im_start = require_special(q, "<|im_start|>");
+        else if (!q->special[q->im_start] || !piece_is(q, q->im_start, "<|im_start|>"))
+            die("SMQBP1 im_start must be the <|im_start|> token");
+        set_markers(q, CHATML_MARKERS, 0);
+        q->tool_open = q->trusted[0].id;
+        q->tool_close = q->trusted[1].id;
+    } else if (q->chat == QBP_CHAT_PHI) {
+        if (!piece_is(q, BOS_ID, "<|endoftext|>")) die("SMQBP1 token 256 must be <|endoftext|> for the Phi template");
+        if (!piece_is(q, EOS_ID, "<|end|>")) die("SMQBP1 token 257 must be <|end|> for the Phi template");
+        for (i = 0; i < PHI_ROLES; ++i) q->role[i] = require_special(q, PHI_ROLE_TOKENS[i]);
+        set_markers(q, PHI_MARKERS, 1); /* rstrip=true on every Phi marker */
+    }
+}
+
 QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
-    unsigned char header[24], rec[12], *data;
+    unsigned char rec[12], *data;
     uint32_t i, total, used = 0;
     QwenTokenizer *q = (QwenTokenizer *)mem_alloc(mem, 1, sizeof(*q));
-    if (!br_read(f, header, 24) || memcmp(header, "SMQBP1\0\1", 8) || rd_u32(header + 8) != vocab)
-        die("invalid Qwen tokenizer header");
+    total = read_header(q, f, vocab);
     q->vocab = vocab;
-    q->nmerge = rd_u32(header + 12);
-    total = rd_u32(header + 16);
-    q->im_start = rd_u32(header + 20);
-    if (q->nmerge > MAX_MERGES || total > MAX_PAYLOAD || q->im_start >= vocab)
-        die("invalid Qwen tokenizer dimensions");
     q->piece = (unsigned char **)mem_alloc(mem, vocab, sizeof(*q->piece));
     q->length = (uint32_t *)mem_alloc(mem, vocab, sizeof(uint32_t));
     q->special = (unsigned char *)mem_alloc(mem, vocab, 1);
@@ -80,18 +164,17 @@ QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
         read_exact(f, rec, 8, "token record");
         n = rd_u32(rec);
         flag = rd_u32(rec + 4);
-        if (!n || n > MAX_PIECE || n > total - used || flag > 1) die("invalid Qwen piece");
+        if (!n || n > MAX_PIECE || n > total - used || flag > 1) die("invalid SMQBP1 piece");
         q->piece[i] = data + used;
         q->length[i] = n;
         q->special[i] = (unsigned char)flag;
         used += n;
         if (n > q->max_piece) q->max_piece = n;
         read_exact(f, q->piece[i], n, "piece bytes");
-        if (i < 256 && (n != 1 || q->piece[i][0] != i || flag)) die("invalid Qwen byte-token permutation");
+        if (i < 256 && (n != 1 || q->piece[i][0] != i || flag)) die("invalid SMQBP1 byte-token permutation");
     }
-    if (used != total) die("Qwen piece byte count mismatch");
-    q->tool_open = find_special(q, TOOL_OPEN_TEXT);
-    q->tool_close = find_special(q, TOOL_CLOSE_TEXT);
+    if (used != total) die("SMQBP1 piece byte count mismatch");
+    resolve_template(q);
     for (i = 0; i < q->nmerge; ++i) {
         QwenMerge *m = &q->merge[i];
         read_exact(f, rec, 12, "merges");
@@ -101,7 +184,7 @@ QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
         validate_merge(q, m);
         insert_merge(q, i);
     }
-    if (!br_at_end(f)) die("extra Qwen tokenizer payload");
+    if (!br_at_end(f)) die("extra SMQBP1 tokenizer payload");
     return q;
 }
 
@@ -112,6 +195,7 @@ uint32_t qwen_prepare(QwenTokenizer *q, uint32_t max_bytes, Memory *mem) {
     q->offset = (uint32_t *)mem_alloc(mem, (size_t)q->capacity + 1, sizeof(uint32_t));
     q->symbols = (uint32_t *)mem_alloc(mem, q->capacity, sizeof(uint32_t));
     q->normalized = (unsigned char *)mem_alloc(mem, q->capacity, 4);
+    q->cls = (uint8_t *)mem_alloc(mem, q->capacity, 1);
     return q->capacity;
 }
 
@@ -125,89 +209,45 @@ static uint32_t merge_rank(const QwenTokenizer *q, uint32_t a, uint32_t b) {
     return UINT32_MAX;
 }
 
-static int unicode_space(uint32_t c) {
-    return (c >= 9 && c <= 13) || c == 32 || c == 0x85 || c == 0xa0 || c == 0x1680 ||
-           (c >= 0x2000 && c <= 0x200a) || c == 0x2028 || c == 0x2029 || c == 0x202f ||
-           c == 0x205f || c == 0x3000;
-}
-static uint32_t ascii_lower(uint32_t c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
-static int punctuation(uint32_t c) { return !unicode_space(c) && !unicode_kind(c); }
-
-/* End of the pre-token starting at i, following Qwen2's regex alternatives:
- * contractions, letters (with one leading non-letter), single digits,
- * punctuation runs, newline-terminated and trailing whitespace. */
-static uint32_t qwen_boundary(const uint32_t *c, uint32_t n, uint32_t i) {
-    uint32_t j = i, k;
-    if (c[i] == '\'' && i + 1 < n) {
-        uint32_t a = ascii_lower(c[i + 1]);
-        if (a == 's' || a == 't' || a == 'm' || a == 'd') return i + 2;
-        if (i + 2 < n) {
-            uint32_t b = ascii_lower(c[i + 2]);
-            if ((a == 'r' && b == 'e') || (a == 'v' && b == 'e') || (a == 'l' && b == 'l')) return i + 3;
-        }
-    }
-    if (unicode_kind(c[j]) != 1 && c[j] != '\r' && c[j] != '\n' && !unicode_kind(c[j]) &&
-        j + 1 < n && unicode_kind(c[j + 1]) == 1)
-        ++j;
-    if (unicode_kind(c[j]) == 1) {
-        do { ++j; } while (j < n && unicode_kind(c[j]) == 1);
-        return j;
-    }
-    if (unicode_kind(c[i]) == 2) return i + 1;
-    j = i;
-    if (c[j] == 32 && j + 1 < n && punctuation(c[j + 1])) ++j;
-    if (punctuation(c[j])) {
-        do { ++j; } while (j < n && punctuation(c[j]));
-        while (j < n && (c[j] == '\r' || c[j] == '\n')) ++j;
-        return j;
-    }
-    j = i;
-    while (j < n && unicode_space(c[j])) ++j;
-    if (j > i) {
-        uint32_t last = UINT32_MAX;
-        for (k = i; k < j; ++k)
-            if (c[k] == '\r' || c[k] == '\n') last = k;
-        if (last != UINT32_MAX) return last + 1;
-        if (j == n) return j;
-        if (j - i > 1) return j - 1;
-        return j;
-    }
-    die("Qwen pre-tokenizer made no progress");
-}
-
 static void push_id(uint32_t *ids, uint32_t *n, uint32_t cap, uint32_t id) {
-    if (*n >= cap) die("Qwen prompt workspace exceeded");
+    if (*n >= cap) die("prompt workspace exceeded");
     ids[(*n)++] = id;
 }
 
+/* Byte-level BPE of one pre-token: lowest-rank merge first, leftmost on ties. */
+static void merge_piece(QwenTokenizer *q, uint32_t start, uint32_t count, uint32_t *ids, uint32_t *n) {
+    uint32_t k;
+    if (count > q->capacity) die("byte workspace exceeded");
+    for (k = 0; k < count; ++k) q->symbols[k] = q->normalized[start + k];
+    for (;;) {
+        uint32_t best = UINT32_MAX, pos = 0;
+        for (k = 0; k + 1 < count; ++k) {
+            uint32_t r = merge_rank(q, q->symbols[k], q->symbols[k + 1]);
+            if (r < best) { best = r; pos = k; }
+        }
+        if (best == UINT32_MAX) break;
+        q->symbols[pos] = q->merge[best].out;
+        memmove(q->symbols + pos + 1, q->symbols + pos + 2, (count - pos - 2) * sizeof(uint32_t));
+        --count;
+    }
+    for (k = 0; k < count; ++k) push_id(ids, n, q->capacity, q->symbols[k]);
+}
+
+/* Normalize (NFC or not at all), classify, pre-tokenize, then merge each pre-token. */
 static void encode_text(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, uint32_t *ids, uint32_t *n) {
-    uint32_t nc = normalize_nfc(s, bytes, q->cp, q->capacity), i, j, total = 0;
+    uint32_t nc = q->normalizer == QBP_NORM_NFC ? normalize_nfc(s, bytes, q->cp, q->capacity)
+                                                : decode_utf8(s, bytes, q->cp, q->capacity);
+    uint32_t i, j, total = 0;
     for (i = 0; i < nc; ++i) {
         q->offset[i] = total;
-        if (total + 4 > q->capacity * 4) die("Qwen byte workspace exceeded");
+        if (total + 4 > q->capacity * 4) die("byte workspace exceeded");
         total += write_utf8(q->cp[i], q->normalized + total);
+        q->cls[i] = unicode_class_bits(q->cp[i]);
     }
     q->offset[nc] = total;
     for (i = 0; i < nc; i = j) {
-        uint32_t start, count, k;
-        j = qwen_boundary(q->cp, nc, i);
-        start = q->offset[i];
-        count = q->offset[j] - start;
-        if (count > q->capacity) die("Qwen byte workspace exceeded");
-        for (k = 0; k < count; ++k) q->symbols[k] = q->normalized[start + k];
-        /* Lowest-rank merge first, leftmost on ties. */
-        for (;;) {
-            uint32_t best = UINT32_MAX, pos = 0;
-            for (k = 0; k + 1 < count; ++k) {
-                uint32_t r = merge_rank(q, q->symbols[k], q->symbols[k + 1]);
-                if (r < best) { best = r; pos = k; }
-            }
-            if (best == UINT32_MAX) break;
-            q->symbols[pos] = q->merge[best].out;
-            memmove(q->symbols + pos + 1, q->symbols + pos + 2, (count - pos - 2) * sizeof(uint32_t));
-            --count;
-        }
-        for (k = 0; k < count; ++k) push_id(ids, n, q->capacity, q->symbols[k]);
+        j = q->pretok == QBP_PRETOK_O200K ? o200k_boundary(q->cp, q->cls, nc, i) : qwen2_boundary(q->cp, q->cls, nc, i);
+        merge_piece(q, q->offset[i], q->offset[j] - q->offset[i], ids, n);
     }
 }
 
@@ -215,54 +255,90 @@ static void encode_literal(QwenTokenizer *q, const char *s, uint32_t *ids, uint3
     encode_text(q, (const unsigned char *)s, (uint32_t)strlen(s), ids, n);
 }
 
-/* Position of the first tool marker at or after `from`, its length and token. */
+/* Bytes of leading \s (rstrip after a marker). */
+static uint32_t leading_space(const unsigned char *s, uint32_t bytes) {
+    uint32_t pos = 0;
+    while (pos < bytes) {
+        uint32_t next = pos;
+        if (!unicode_space(read_utf8(s, bytes, &next))) break;
+        pos = next;
+    }
+    return pos;
+}
+
+/* First trusted marker at or after s, or end (and *marker = NULL). */
 static const unsigned char *next_marker(const QwenTokenizer *q, const unsigned char *s, const unsigned char *end,
-                                        uint32_t *len, uint32_t *id) {
-    static const char *const text[2] = {TOOL_OPEN_TEXT, TOOL_CLOSE_TEXT};
-    const uint32_t token[2] = {q->tool_open, q->tool_close};
+                                        const Marker **marker) {
     for (; s < end; ++s) {
-        int k;
-        for (k = 0; k < 2; ++k) {
-            uint32_t n = (uint32_t)strlen(text[k]);
-            if (token[k] != UINT32_MAX && (size_t)(end - s) >= n && !memcmp(s, text[k], n)) {
-                *len = n;
-                *id = token[k];
+        uint32_t k;
+        for (k = 0; k < MAX_TRUSTED; ++k) {
+            const Marker *m = &q->trusted[k];
+            if (m->id != UINT32_MAX && (size_t)(end - s) >= m->len && !memcmp(s, m->text, m->len)) {
+                *marker = m;
                 return s;
             }
         }
     }
+    *marker = NULL;
     return end;
 }
 
-/* System text is the operator's: the tool-call markers in it become their
- * tokens, as in the template Qwen2.5 was trained on. User text never does. */
+/* System text is the operator's: the template's markers in it become their
+ * tokens, as in the templates the models were trained on. User text never does. */
 static void encode_trusted(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, uint32_t *ids, uint32_t *n) {
     const unsigned char *end = s + bytes;
     while (s < end) {
-        uint32_t len = 0, id = 0;
-        const unsigned char *at = next_marker(q, s, end, &len, &id);
+        const Marker *m;
+        const unsigned char *at = next_marker(q, s, end, &m);
         if (at > s) encode_text(q, s, (uint32_t)(at - s), ids, n);
-        if (at == end) break;
-        push_id(ids, n, q->capacity, id);
-        s = at + len;
+        if (!m) break;
+        push_id(ids, n, q->capacity, m->id);
+        s = at + m->len;
+        if (m->rstrip) s += leading_space(s, (uint32_t)(end - s));
     }
 }
 
-/* One ChatML message: <|im_start|>{role}\n{text}<|im_end|>\n, followed by the
- * assistant generation prefix when open_assistant is set. <|im_end|> is EOS (257). */
-static void chat_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
-                         int open_assistant, uint32_t *ids, uint32_t *n) {
+static void encode_content(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                           uint32_t *ids, uint32_t *n) {
+    if (!strcmp(role, "system")) encode_trusted(q, text, bytes, ids, n);
+    else encode_text(q, text, bytes, ids, n);
+}
+
+/* ChatML: <|im_start|>{role}\n{text}<|im_end|>\n, then <|im_start|>assistant\n
+ * when open_assistant. <|im_end|> is EOS (257). */
+static void chatml_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                           int open_assistant, uint32_t *ids, uint32_t *n) {
     push_id(ids, n, q->capacity, q->im_start);
     encode_literal(q, role, ids, n);
     encode_literal(q, "\n", ids, n);
-    if (!strcmp(role, "system")) encode_trusted(q, text, bytes, ids, n);
-    else encode_text(q, text, bytes, ids, n);
+    encode_content(q, role, text, bytes, ids, n);
     push_id(ids, n, q->capacity, EOS_ID);
     encode_literal(q, "\n", ids, n);
     if (open_assistant) {
         push_id(ids, n, q->capacity, q->im_start);
         encode_literal(q, "assistant\n", ids, n);
     }
+}
+
+/* Phi: <|role|>{text}<|end|>, then <|assistant|> when open_assistant; no newlines.
+ * Role markers have rstrip, so the text's leading whitespace is dropped. <|end|> is EOS (257). */
+static void phi_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                        int open_assistant, uint32_t *ids, uint32_t *n) {
+    uint32_t r, skip;
+    for (r = 0; r < PHI_ROLES && strcmp(role, PHI_ROLE_NAMES[r]); ++r) {}
+    if (r == PHI_ROLES) die("the Phi chat template has no role %s", role);
+    push_id(ids, n, q->capacity, q->role[r]);
+    skip = leading_space(text, bytes);
+    encode_content(q, role, text + skip, bytes - skip, ids, n);
+    push_id(ids, n, q->capacity, EOS_ID);
+    if (open_assistant) push_id(ids, n, q->capacity, q->role[2]);
+}
+
+static void chat_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                         int open_assistant, uint32_t *ids, uint32_t *n) {
+    if (q->chat == QBP_CHAT_PHI) phi_message(q, role, text, bytes, open_assistant, ids, n);
+    else if (q->chat == QBP_CHAT_CHATML) chatml_message(q, role, text, bytes, open_assistant, ids, n);
+    else die("this tokenizer has no chat template");
 }
 
 uint32_t qwen_encode(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, uint32_t *ids,
@@ -287,13 +363,14 @@ uint32_t qwen_chat_turn(QwenTokenizer *q, const char *role, const unsigned char 
 
 uint32_t qwen_chat_close(QwenTokenizer *q, uint32_t *ids) {
     uint32_t n = 0;
+    if (q->chat == QBP_CHAT_NONE) die("this tokenizer has no chat template");
     push_id(ids, &n, q->capacity, EOS_ID);
-    encode_literal(q, "\n", ids, &n);
+    if (q->chat == QBP_CHAT_CHATML) encode_literal(q, "\n", ids, &n);
     return n;
 }
 
 uint32_t qwen_decode(const QwenTokenizer *q, uint32_t id, unsigned char *buf) {
-    if (id >= q->vocab) die("invalid Qwen token ID %u", id);
+    if (id >= q->vocab) die("invalid SMQBP1 token ID %u", id);
     if (q->special[id]) return 0;
     memcpy(buf, q->piece[id], q->length[id]);
     return q->length[id];
@@ -302,6 +379,8 @@ uint32_t qwen_decode(const QwenTokenizer *q, uint32_t id, unsigned char *buf) {
 uint32_t qwen_max_piece(const QwenTokenizer *q) { return q->max_piece; }
 
 int qwen_is_special(const QwenTokenizer *q, uint32_t id) { return id < q->vocab && q->special[id]; }
+
+int qwen_supports_chat(const QwenTokenizer *q) { return q->chat != QBP_CHAT_NONE; }
 
 int qwen_tool_markers(const QwenTokenizer *q, uint32_t *open, uint32_t *close) {
     if (q->tool_open == UINT32_MAX || q->tool_close == UINT32_MAX) return 0;

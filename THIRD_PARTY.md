@@ -37,7 +37,9 @@ The Qwen model/tokenizer are Apache-2.0; the upstream license is retained in
 representation, token ID ordering and rotary row order; the provenance JSON
 records the transformation. The upstream inference code is not included.
 
-`src/unicode_data.h` is generated from Python's Unicode 15.0.0 database using
-`tools/generate_unicode.py`. See `licenses/Unicode-LICENSE.txt`. Tokenizer
-validation used Hugging Face tokenizers 0.21.4 as a development-only reference;
-its code/wheel is not bundled or required at runtime.
+`src/unicode_class.h` (UnicodeData.txt 16.0.0) and `src/unicode_nfc.h`
+(UnicodeData.txt and CompositionExclusions.txt 15.0.0) are generated from the
+Unicode Character Database by `scripts/gen-unicode.ts`, which pins each file's
+SHA-256. See `licenses/Unicode-LICENSE.txt`. Tokenizer validation used Hugging
+Face tokenizers 0.21.4 (Qwen) and js-tiktoken 1.0.21 `o200k_base` (Phi-4-mini)
+as development-only references; neither is bundled or required at runtime.
