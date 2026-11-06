@@ -1,0 +1,19 @@
+# Build outputs
+/build/
+/smolmoe
+/smolmoe-scalar
+*.exe
+*.o
+/tests/kernels
+/tools/q8pack
+__pycache__/
+node_modules/
+*.tmp
+
+# Model weights and derived tokenizers are distributed separately (see docs/MODELS.md)
+*.smoe
+*.qbp
+*.spb
+/bin/
+/examples/demo/
+/examples/numerical/

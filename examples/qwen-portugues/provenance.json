@@ -1,0 +1,10 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "revision": "eaa56b503cc0a8a4d15de1dd8bd2a7e95a716be2",
+  "source_sha256": "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe",
+  "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+  "quantization": "lossy Q8 block32",
+  "qk_permutation": "split-half rotary to adjacent-pair, including bias",
+  "tied_lm_head": true,
+  "full_kimi_compatible": false
+}

@@ -1,0 +1,116 @@
+{
+  "model": "karpathy/tinyllamas stories15M, converted Q8 (lossy)",
+  "prompt": "Once upon a time, there was a little robot",
+  "continuation": ". The robot was very sad because it was all alone. It wanted to find a friend to play with.\nOne day, the robot saw a big ball. The robot thought, \"Maybe I can find a friend to play with.\" So, the robot went to the ball and started to play. The robot was very happy.\nBut then, the robot saw a little girl. The girl",
+  "stats_without_trace": {
+    "backend": "avx2",
+    "budget_bytes": 16777216,
+    "tracked_peak_bytes": 16303815,
+    "rss_peak_bytes": 14417920,
+    "kv_bytes": 3538944,
+    "cache_bytes": 11535744,
+    "prompt_tokens": 11,
+    "generated_tokens": 80,
+    "processed_tokens": 90,
+    "load_seconds": 0.001448982,
+    "prefill_seconds": 0.056887111,
+    "decode_seconds": 0.39215408,
+    "ttft_seconds": 0.058379779,
+    "prefill_tokens_per_second": 193.365418,
+    "decode_tokens_per_second": 201.451429,
+    "cache_hits": 4820113,
+    "cache_misses": 24947,
+    "read_bytes": 1430016768,
+    "expert_read_bytes": 362288880,
+    "expert_calls": 540
+  },
+  "exact_budget_backend_checks": [
+    {
+      "budget_mib": 8,
+      "backend": "avx2",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 7914183,
+      "rss_peak_bytes": 11796480,
+      "read_bytes": 583742736
+    },
+    {
+      "budget_mib": 8,
+      "backend": "scalar",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 7914183,
+      "rss_peak_bytes": 14024704,
+      "read_bytes": 583742736
+    },
+    {
+      "budget_mib": 16,
+      "backend": "avx2",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 16303815,
+      "rss_peak_bytes": 14024704,
+      "read_bytes": 541024272
+    },
+    {
+      "budget_mib": 16,
+      "backend": "scalar",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 16303815,
+      "rss_peak_bytes": 14024704,
+      "read_bytes": 541024272
+    },
+    {
+      "budget_mib": 32,
+      "backend": "avx2",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 33083079,
+      "rss_peak_bytes": 20054016,
+      "read_bytes": 137412252
+    },
+    {
+      "budget_mib": 32,
+      "backend": "scalar",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 33083079,
+      "rss_peak_bytes": 20054016,
+      "read_bytes": 137412252
+    },
+    {
+      "budget_mib": 64,
+      "backend": "avx2",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 65068551,
+      "rss_peak_bytes": 21233664,
+      "read_bytes": 31648824
+    },
+    {
+      "budget_mib": 64,
+      "backend": "scalar",
+      "output_sha256": "b53376f73bd6fe630d5bdd426d564c77fd1b126033adfcb8dfa57221059bb31e",
+      "logits_sha256": "00b83cf374d18848c6593541aad272cb7ee6b87495781019b9ff6a28cc67aa4c",
+      "ids_sha256": "24137b3b4afa0c6701ef10aacd7974446b308d341c163849c1e68bde8fad1f1d",
+      "tracked_peak_bytes": 65068551,
+      "rss_peak_bytes": 21233664,
+      "read_bytes": 31648824
+    }
+  ],
+  "second_prompt": "The little bird found a",
+  "second_continuation": " nest in the tree. It was a nice and cozy nest. The bird was so happy to have a home.\nThe bird flew around the tree and sang a happy song. Suddenly, a big wind came and ble",
+  "original_f32_reference_checked": true,
+  "notes": "Single host; warm OS filesystem cache possible. Not a Kimi K3 or general chat evaluation.",
+  "original_f32_greedy_output_equal_for_this_prompt": true,
+  "original_f32_sha256": "cd590644d963867a2b6e5a1107f51fad663c41d79c149fbecbbb1f95fa81f49a",
+  "reference_binary_sha256": "2a0484e34fbcd14ea9f1a9394d21e1d63bc0d0e2b227b2ed365f435c1e5c59ce"
+}

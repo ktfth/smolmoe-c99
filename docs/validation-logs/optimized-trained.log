@@ -1,0 +1,38 @@
+cc  -O3 -std=c99 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off src/smolmoe.c -o smolmoe -lm
+cc  -O3 -std=c99 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off -DSM_NO_AVX2 src/smolmoe.c -o smolmoe-scalar -lm
+cc  -O3 -std=c99 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off tests/kernels.c -o tests/kernels -lm
+./tests/kernels
+kernel checks passed (avx2), exact dot products for all 1..32 tails
+python3 -m unittest discover -s tests -v
+test_corrupt_score_bpe_rejected (test_import.ImportTests.test_corrupt_score_bpe_rejected) ... ok
+test_import_shape_and_token_remapping (test_import.ImportTests.test_import_shape_and_token_remapping) ... ok
+test_import_source_size_validation (test_import.ImportTests.test_import_source_size_validation) ... ok
+test_imported_logits_independent_reference (test_import.ImportTests.test_imported_logits_independent_reference) ... ok
+test_no_special_alias_overwrite_and_tiny_budget (test_import.ImportTests.test_no_special_alias_overwrite_and_tiny_budget) ... ok
+test_score_bpe_merges_and_roundtrip (test_import.ImportTests.test_score_bpe_merges_and_roundtrip) ... ok
+test_actual_checkpoint_larger_than_budget (test_runtime.RuntimeTests.test_actual_checkpoint_larger_than_budget) ... ok
+test_bad_config_and_kimi_explicit_rejection (test_runtime.RuntimeTests.test_bad_config_and_kimi_explicit_rejection) ... ok
+test_bad_extent_and_shape (test_runtime.RuntimeTests.test_bad_extent_and_shape) ... ok
+test_budget_rejection_before_large_kv_allocation (test_runtime.RuntimeTests.test_budget_rejection_before_large_kv_allocation) ... ok
+test_empty_prompt_bos (test_runtime.RuntimeTests.test_empty_prompt_bos) ... ok
+test_eos_stops_generation (test_runtime.RuntimeTests.test_eos_stops_generation) ... ok
+test_exact_logits_across_budgets_and_backends (test_runtime.RuntimeTests.test_exact_logits_across_budgets_and_backends) ... ok
+test_invalid_bpe (test_runtime.RuntimeTests.test_invalid_bpe) ... ok
+test_invalid_cli_values (test_runtime.RuntimeTests.test_invalid_cli_values) ... ok
+test_nonfinite_scale_rejected (test_runtime.RuntimeTests.test_nonfinite_scale_rejected) ... ok
+test_output_cannot_overwrite_checkpoint_or_config (test_runtime.RuntimeTests.test_output_cannot_overwrite_checkpoint_or_config) ... ok
+test_packer_streaming_roundtrip (test_runtime.RuntimeTests.test_packer_streaming_roundtrip) ... ok
+test_prompt_and_tokenizer_roundtrip (test_runtime.RuntimeTests.test_prompt_and_tokenizer_roundtrip) ... ok
+test_prompt_over_context_rejected (test_runtime.RuntimeTests.test_prompt_over_context_rejected) ... ok
+test_q8_quantizer_error_bound (test_runtime.RuntimeTests.test_q8_quantizer_error_bound) ... ok
+test_reference_full_logits (test_runtime.RuntimeTests.test_reference_full_logits) ... ok
+test_seeded_sampling_budget_invariance (test_runtime.RuntimeTests.test_seeded_sampling_budget_invariance) ... ok
+test_selected_tensor_larger_than_entire_cache (test_runtime.RuntimeTests.test_selected_tensor_larger_than_entire_cache) ... ok
+test_sparse_offsets_beyond_8gib_under_address_limit (test_runtime.RuntimeTests.test_sparse_offsets_beyond_8gib_under_address_limit) ... ok
+test_stats_file_and_forced_scalar (test_runtime.RuntimeTests.test_stats_file_and_forced_scalar) ... ok
+test_truncated_checkpoint (test_runtime.RuntimeTests.test_truncated_checkpoint) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 1.580s
+
+OK

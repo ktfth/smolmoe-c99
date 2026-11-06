@@ -1,0 +1,10 @@
+{
+  "source_format": "legacy llama2.c F32",
+  "model_sha256": "cd590644d963867a2b6e5a1107f51fad663c41d79c149fbecbbb1f95fa81f49a",
+  "tokenizer_sha256": "50a52ef822ee9e83de5ce9d0be0a025a773d019437f58b5ff9dcafb063ece361",
+  "quantization": "Q8 block32 F32 scale, lossy",
+  "source_vocab_size": 32000,
+  "token_remapping": "byte n -> n+3; BOS256->1; EOS257->2; UNK258->0; others unchanged",
+  "dense_mapping": "one expert, top_k=1, no shared experts, zero router",
+  "full_kimi_compatible": false
+}

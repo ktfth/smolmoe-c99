@@ -1,0 +1,2 @@
+./smolmoe --model examples/qwen-portugues/model.smoe --config examples/qwen-portugues/config.ini --tokenizer examples/qwen-portugues/tokenizer.qbp --chat --prompt 'Escreva uma saudação curta para alguém que está aprendendo programação.' --tokens 64 --context 512 --memory-mib 256
+"Olá, aprendiz! Estou aqui para te ajudar com suas tarefas no código."
