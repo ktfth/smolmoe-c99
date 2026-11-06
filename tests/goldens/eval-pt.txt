@@ -1,0 +1,20 @@
+A cidade acordou cedo naquela segunda-feira. Antes das seis, os primeiros ônibus já cruzavam a avenida principal, levando trabalhadores para o centro. Na padaria da esquina, o cheiro de pão quente se misturava ao café coado, e o dono, um senhor de bigode branco, cumprimentava cada cliente pelo nome.
+
+— Bom dia, dona Marta. O de sempre?
+— Bom dia, seu Antônio. Hoje vou levar também um bolo de fubá. Meu neto chega da faculdade à tarde.
+
+Do outro lado da rua, uma fila se formava diante da agência dos Correios, que só abriria às nove horas. Havia quem lesse o jornal, quem conversasse sobre futebol e quem apenas olhasse o celular, à espera de que o tempo passasse mais rápido.
+
+A economia brasileira registrou crescimento moderado no último trimestre, segundo dados divulgados pelo instituto de estatística. O setor de serviços liderou a expansão, enquanto a indústria apresentou estabilidade. Economistas avaliam que a queda da inflação e a redução gradual dos juros devem estimular o consumo das famílias nos próximos meses, embora o cenário externo ainda inspire cautela.
+
+Para preparar um arroz soltinho, lave os grãos em água corrente até que ela fique transparente. Em uma panela, aqueça um fio de azeite e refogue meia cebola picada com um dente de alho. Acrescente o arroz e mexa por dois minutos. Em seguida, adicione água fervente na proporção de duas xícaras para cada xícara de arroz, tempere com sal e cozinhe em fogo baixo, com a panela semitampada, até a água secar. Desligue o fogo e deixe descansar por cinco minutos antes de servir.
+
+A fotossíntese é o processo pelo qual as plantas, as algas e algumas bactérias convertem a energia da luz em energia química. Nas folhas, a clorofila absorve a luz solar, que é usada para transformar gás carbônico e água em glicose e oxigênio. Além de alimentar a própria planta, esse processo libera o oxigênio que respiramos e sustenta praticamente todas as cadeias alimentares do planeta.
+
+Quando a professora entrou na sala, os alunos ainda discutiam o resultado do jogo de domingo. Ela esperou em silêncio, colocou o material sobre a mesa e escreveu no quadro uma única pergunta: o que vocês fariam se pudessem mudar uma coisa no bairro onde moram? Por alguns segundos, ninguém respondeu. Depois, uma menina do fundo levantou a mão e disse que plantaria árvores na praça, porque no verão não havia sombra para as crianças brincarem. Outro aluno falou em consertar a iluminação da rua, e logo a turma inteira participava, cheia de ideias.
+
+O programa recebe uma lista de números inteiros e devolve a soma dos valores pares. Primeiro, ele percorre a lista do início ao fim; para cada elemento, verifica se o resto da divisão por dois é zero. Se for, acrescenta o valor a um acumulador. Ao final, o acumulador contém o resultado. A complexidade é linear no tamanho da entrada, e a memória adicional usada é constante.
+
+No interior de Minas Gerais, as festas juninas ainda reúnem famílias inteiras em torno da fogueira. Há quadrilha, pé de moleque, canjica e quentão, e os mais velhos contam histórias de outros tempos, quando a festa durava a noite toda e a música vinha de uma sanfona emprestada. As crianças correm entre as barracas, e o céu, limpo e frio, parece mais estrelado do que em qualquer outra época do ano.
+
+Ao fim do dia, seu Antônio fechou a padaria, apagou as luzes e caminhou devagar até em casa. Pensava no neto de dona Marta, na conversa da fila dos Correios e no preço da farinha, que subira de novo. Na varanda, a esposa o esperava com um prato de sopa e a notícia de que a filha telefonara para dizer que viria no fim de semana.

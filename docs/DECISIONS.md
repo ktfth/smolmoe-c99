@@ -91,6 +91,57 @@ promessa e não uma capacidade.
 - Testes em Python (que dependiam de recursos removidos) deram lugar a testes C (kernels, pool) e a uma suíte
   TypeScript/Bun (integração, validação de entradas hostis, goldens do tokenizer, modelos reais).
 
+
+## Iteração 2: quantização abaixo de 8 bits
+
+Ferramentas novas para decidir com dados: `--perplexity` (NLL com teacher forcing no próprio runtime) e
+`smolmoe-quantize --simulate-bits N` (restringe os pesos Q8 a uma grade de N bits sem escrever kernels). Avaliação:
+`tests/goldens/eval-pt.txt`, 1038 tokens de português em vários registros (narrativa, notícia, receita, ciência,
+diálogo, código). **Limitação:** o texto foi escrito para o teste e é uma amostra única; diferenças abaixo de ~1% estão
+dentro do ruído.
+
+### Correção de uma afirmação minha
+
+Na iteração 1 eu escrevi que o decode estava "no teto de banda de memória". Isso só vale para o Q8 com 4 threads neste
+notebook (~15 GB/s). Um formato menor desloca o gargalo para a computação, porque o i7-10610U (15 W) baixa o clock com
+AVX2 em todos os núcleos. A frase "basta ler menos bytes" estava errada da forma como a escrevi.
+
+### Q4 (bloco 32, escala f16): derrubado
+
+| Variante | Bytes/token | Perplexidade | Δ vs Q8 |
+|---|---|---|---|
+| Q8 | 556 MB | 11,39 | — |
+| Q4 só no FFN | 380 MB | 12,86 | +12,9% |
+| Q4 exceto embedding | 355 MB | 13,36 | +17,3% |
+| Q4 em tudo | 278 MB | 13,76 | +20,8% |
+
+O critério de aceite era menos de 3%. Num modelo de 0,5B, 4 bits destrói qualidade; a simulação de 4 bits (13,80)
+reproduz o Q4 real, o que valida o método de simulação. Os kernels Q4 foram removidos. Um Q4 melhor (escalas por
+sub-bloco, estilo K-quant) só volta a ser considerado com modelos de 1,5B ou mais.
+
+### Q5 (bloco 32, escala f16, 22 bytes): mantido como opção de memória, não de velocidade
+
+| | Q8 | Q5 | Q5 com embedding Q8 |
+|---|---|---|---|
+| Bytes por token | 556 MB | 340 MB (−39%) | 399 MB |
+| Perplexidade | 11,39 | 11,58 (+1,7%) | 11,51 (+1,1%) |
+| Decode, 1 thread | 15,5 tok/s | 11,9 tok/s | — |
+| Decode, 4 threads | 27,3 tok/s | 17–22 tok/s | 19,2 tok/s |
+| Decode, 8 threads | 25,5 tok/s | 25,4 tok/s | — |
+
+Microbenchmark do kernel com dados no L1: Q8 1,7–2,2 ns por bloco, Q5 4,6 ns por bloco. O Q5 gasta cerca de 26
+micro-ops por bloco (desempacotar 5 bits) contra cerca de 12 do Q8, num núcleo que despacha 4 por ciclo. Duas
+otimizações foram medidas:
+
+- Conversão f16 por F16C (instrução exata): decode de 15,7 para 22,1 tok/s. **Ficou.**
+- Desempacotamento sem pressão na porta 5 e escalas pré-multiplicadas: nenhum ganho mensurável. Ficou por ser
+  equivalente e mais simples de ler.
+
+**Veredito:** neste hardware o Q5 não acelera; ele economiza 39% de RAM e disco por +1,7% de perplexidade. É útil em
+máquinas apertadas e decisivo para modelos maiores (um Qwen 1,5B cai de 1,7 GB para 1,05 GB). O padrão continua sendo
+Q8. Em máquinas com mais computação por byte de banda (desktops, servidores), o Q5 deve ganhar velocidade, mas isso
+**não foi medido**.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.
@@ -106,5 +157,6 @@ promessa e não uma capacidade.
 Ver [ROADMAP.md](ROADMAP.md). As suspeitas atuais, ainda sem medição:
 
 - `expf`/`cos`/`sin` da libm impedem hashes idênticos entre Windows e Linux.
-- O decode está perto do teto de banda de memória (cerca de 13 GB/s neste notebook), e só ler menos bytes (Q4) ajuda.
+- O kernel Q5 custa 2,6× o Q8 por bloco; uma variante com desempacotamento por tabela ou 2 blocos por iteração pode
+  torná-lo vantajoso também em velocidade.
 - Os conversores ainda estão em Python e o `q8pack.c` é só POSIX.

@@ -10,6 +10,9 @@
 #define TENSOR_NAME_SIZE 40u
 #define DTYPE_F32 0u
 #define DTYPE_Q8 1u
+#define DTYPE_Q5 2u
+/* modelfile_find() wildcard: any quantized matrix type (Q8 or Q5). */
+#define DTYPE_QUANTIZED 0xffffffffu
 
 typedef struct Tensor {
     char name[TENSOR_NAME_SIZE];

@@ -14,7 +14,8 @@
 
 typedef struct QMat {
     const unsigned char *data;
-    uint32_t rows, cols, nb;
+    uint32_t rows, cols, nb, dtype; /* DTYPE_Q8 or DTYPE_Q4 */
+    size_t row_bytes;
 } QMat;
 
 typedef struct Expert {

@@ -39,6 +39,15 @@ python3 tools/import_llama2c.py downloads/stories15M.bin downloads/tokenizer.bin
 perda (Q8 com escala F32 por bloco de 32) e permuta as linhas de Q/K para o RoPE de pares adjacentes. Os detalhes de
 cada modelo ficam na sua `provenance.json`, e o formato está em [FORMAT.md](FORMAT.md).
 
+## Variante Q5 (menos memória)
+
+```sh
+build/smolmoe-quantize --in models/qwen2.5-0.5b-instruct/model.smoe --out models/qwen2.5-0.5b-instruct/model-q5.smoe
+```
+
+Use `--model .../model-q5.smoe` com a mesma `config.ini` e o mesmo tokenizer. Custos e ganhos medidos estão em
+[DECISIONS.md](DECISIONS.md) (iteração 2).
+
 ## Licenças
 
 - Qwen2.5-0.5B-Instruct: Apache-2.0 (`models/qwen2.5-0.5b-instruct/LICENSE-Qwen.txt`).

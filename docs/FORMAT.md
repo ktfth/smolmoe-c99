@@ -85,7 +85,7 @@ Then tensor_count × 72-byte directory records:
 | 0 | char[40] | ASCII name, NUL terminated; writer zero pads |
 | 40 | uint32 | rows |
 | 44 | uint32 | columns |
-| 48 | uint32 | dtype 0=F32, 1=Q8 |
+| 48 | uint32 | dtype 0=F32, 1=Q8, 2=Q5 (runtime >= 0.2) |
 | 52 | uint32 | zero, reserved |
 | 56 | uint64 | absolute file byte offset |
 | 64 | uint64 | exact payload byte count |
@@ -100,6 +100,18 @@ Version 2 uses header magic `SMOEQ8`, NUL, byte `02`. Its record field at offset
 identical offset, byte count, shape and dtype. This is the sole exception to the
 version-1 no-alias/monotonically ordered payload rule. Other overlaps are rejected.
 The Qwen importer uses this to avoid duplicating its large tied output head.
+
+Q5 (dtype 2, written by `smolmoe-quantize`): blocks of 32 weights, 22 bytes each:
+
+```text
+float16_le scale          (signed; the block's extreme value maps toward -16)
+uint32_le  high_bits      bit j = bit 4 of element j
+uint8[16]  low_nibbles    byte j: element j in bits 0-3, element j+16 in bits 4-7
+```
+
+Weight = scale × (q − 16) with q in [0, 31]. Scales must be finite (checked at
+load). The converter picks each block scale from 21 candidates around
+`extreme / -16` to minimize squared error.
 
 F32: rows × cols × 4 bytes.
 

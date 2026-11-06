@@ -59,9 +59,20 @@ Saída real, sem edição:
 | `--batch N` | 32 | Tokens do prompt por passada (prefill) |
 | `--context N` | min(modelo, 2048) | Posições do cache KV |
 | `--memory-mib N` | 512 | Teto do heap; pesos mapeados não contam |
+| `--perplexity` | — | Mede a perplexidade do prompt (sem gerar) |
 | `--stats`, `--trace`, `--hash-logits`, `--token-ids` | — | Diagnóstico e regressão |
 
 A lista completa está em `smolmoe --help`.
+
+### Q5: 39% menos memória
+
+```sh
+build/smolmoe-quantize --in models/qwen2.5-0.5b-instruct/model.smoe --out models/qwen2.5-0.5b-instruct/model-q5.smoe
+```
+
+O arquivo Q5 tem 340 MB em vez de 556 MB, com perplexidade +1,7% (+1,1% mantendo o embedding em Q8 com
+`--keep embed --keep lm_head`). Neste notebook ele **não** é mais rápido: o desempacotamento de 5 bits custa mais
+computação do que a banda economizada. Use-o quando a memória for o limite.
 
 ## Como funciona
 

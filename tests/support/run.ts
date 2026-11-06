@@ -9,6 +9,7 @@ const EXE = process.platform === "win32" ? ".exe" : "";
 
 export const BINARY = join(BUILD, `smolmoe${EXE}`);
 export const SCALAR_BINARY = join(BUILD, `smolmoe-scalar${EXE}`);
+export const QUANTIZE_BINARY = join(BUILD, `smolmoe-quantize${EXE}`);
 
 export interface Stats {
   readonly version: string;

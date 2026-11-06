@@ -1,5 +1,6 @@
 /* smolmoe command-line interface. */
 #include <float.h>
+#include <math.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,13 +28,15 @@ typedef struct Options {
     const char *stats, *trace, *token_ids;
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
-    int scalar, chat, hash_logits, tokenize_only;
+    int scalar, chat, hash_logits, tokenize_only, perplexity;
 } Options;
 
 typedef struct Stats {
     double start, loaded, prefill_end, ended, first;
     uint32_t prompt_tokens, generated, processed;
     uint64_t logits_hash;
+    double nll;
+    uint32_t nll_tokens;
 } Stats;
 
 /* ---- UTF-8 aware streaming output -------------------------------------- */
@@ -113,6 +116,7 @@ static void usage(FILE *out) {
           "  --trace FILE         exact hexadecimal logits of every processed token\n"
           "  --hash-logits        FNV-1a64 of every raw logit, reported in the stats\n"
           "  --token-ids FILE     prompt and generated token IDs, one per line\n"
+          "  --perplexity         score the prompt (teacher-forced NLL, perplexity); no generation\n"
           "  --tokenize-only      encode and render the prompt; no model needed\n"
           "  --version, --help\n", out);
 }
@@ -135,6 +139,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--chat")) { o->chat = 1; continue; }
         if (!strcmp(opt, "--hash-logits")) { o->hash_logits = 1; continue; }
         if (!strcmp(opt, "--tokenize-only")) { o->tokenize_only = 1; continue; }
+        if (!strcmp(opt, "--perplexity")) { o->perplexity = 1; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         value = argv[++a];
         if (!strcmp(opt, "--model")) o->model = value;
@@ -171,6 +176,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         exit(1);
     }
     if (!o->seed || !o->memory_mib || !o->batch) die("seed, memory budget and batch must be nonzero");
+    if (o->perplexity) o->tokens = 0;
 }
 
 static void check_output_paths(const Options *o) {
@@ -236,13 +242,29 @@ static uint64_t hash_logits(uint64_t h, const float *logits, uint32_t vocab) {
     return h;
 }
 
+/* -log softmax(logits)[target], in double. */
+static double token_nll(const float *logits, uint32_t vocab, uint32_t target) {
+    double high = logits[0], sum = 0;
+    uint32_t i;
+    for (i = 1; i < vocab; ++i)
+        if (logits[i] > high) high = logits[i];
+    for (i = 0; i < vocab; ++i) sum += exp((double)logits[i] - high);
+    return high + log(sum) - (double)logits[target];
+}
+
+/* Traces, hashes and scores rows of logits for positions pos0.. . */
 static void record_logits(const Options *o, FILE *trace, Stats *st, const float *logits, uint32_t rows,
-                          uint32_t pos0, uint32_t vocab) {
+                          uint32_t pos0, uint32_t vocab, const uint32_t *ids, uint32_t np) {
     uint32_t r;
     for (r = 0; r < rows; ++r) {
         const float *row = logits + (size_t)r * vocab;
-        if (trace) trace_logits(trace, pos0 + r, row, vocab);
+        uint32_t pos = pos0 + r;
+        if (trace) trace_logits(trace, pos, row, vocab);
         if (o->hash_logits) st->logits_hash = hash_logits(st->logits_hash, row, vocab);
+        if (o->perplexity && pos + 1 < np) {
+            st->nll += token_nll(row, vocab, ids[pos + 1]);
+            ++st->nll_tokens;
+        }
     }
 }
 
@@ -257,12 +279,17 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
             "\"prompt_tokens\":%u,\"generated_tokens\":%u,\"processed_tokens\":%u,"
             "\"load_seconds\":%.6f,\"prefill_seconds\":%.6f,\"decode_seconds\":%.6f,\"ttft_seconds\":%.6f,"
             "\"prefill_tokens_per_second\":%.3f,\"decode_tokens_per_second\":%.3f,"
-            "\"expert_calls\":%" PRIu64 ",\"logits_hash\":\"%016" PRIx64 "\"}\n",
+            "\"expert_calls\":%" PRIu64 ",\"logits_hash\":\"%016" PRIx64 "\"",
             SMOLMOE_VERSION, backend, pool_threads(m->pool), m->batch, mem->limit, mem->peak, rss_peak_bytes(),
             mapped, model_kv_bytes(m), st->prompt_tokens, st->generated, st->processed,
             st->loaded - st->start, prefill, decode, st->first > 0 ? st->first - st->start : 0,
             prefill > 0 ? st->prompt_tokens / prefill : 0, decode > 0 ? decode_forwards / decode : 0,
             m->expert_calls, o->hash_logits ? st->logits_hash : 0);
+    if (o->perplexity) {
+        double mean = st->nll_tokens ? st->nll / st->nll_tokens : 0;
+        fprintf(f, ",\"perplexity_tokens\":%u,\"nll\":%.6f,\"perplexity\":%.6f", st->nll_tokens, mean, exp(mean));
+    }
+    fputs("}\n", f);
     if (ferror(f)) die("statistics write failed");
 }
 
@@ -335,7 +362,7 @@ int main(int argc, char **argv) {
     modelfile_verify_payload(&mf, pool);
     {
         uint32_t batch = o.batch < context ? o.batch : context;
-        int every_logit = o.trace || o.hash_logits;
+        int every_logit = o.trace || o.hash_logits || o.perplexity;
         model_init(&model, &c, &mf, context, batch, every_logit ? batch : 1, pool, &mem);
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
@@ -349,9 +376,9 @@ int main(int argc, char **argv) {
     for (pos = 0; pos < np;) {
         uint32_t n = np - pos < model.batch ? np - pos : model.batch;
         int last = pos + n == np;
-        LogitsMode mode = (trace || o.hash_logits) ? LOGITS_ALL : last ? LOGITS_LAST : LOGITS_NONE;
+        LogitsMode mode = (trace || o.hash_logits || o.perplexity) ? LOGITS_ALL : last ? LOGITS_LAST : LOGITS_NONE;
         model_forward(&model, ids + pos, n, pos, mode);
-        if (mode == LOGITS_ALL) record_logits(&o, trace, &st, model.logits, n, pos, c.vocab);
+        if (mode == LOGITS_ALL) record_logits(&o, trace, &st, model.logits, n, pos, c.vocab, ids, np);
         if (mode == LOGITS_ALL && last) memmove(model.logits, model.logits + (size_t)(n - 1) * c.vocab, c.vocab * sizeof(float));
         pos += n;
     }
@@ -370,7 +397,7 @@ int main(int argc, char **argv) {
         if (i + 1 < o.tokens) {
             LogitsMode mode = (trace || o.hash_logits) ? LOGITS_ALL : LOGITS_LAST;
             model_forward(&model, &token, 1, pos, mode);
-            if (mode == LOGITS_ALL) record_logits(&o, trace, &st, model.logits, 1, pos, c.vocab);
+            if (mode == LOGITS_ALL) record_logits(&o, trace, &st, model.logits, 1, pos, c.vocab, ids, np);
             ++pos;
             ++st.processed;
         }

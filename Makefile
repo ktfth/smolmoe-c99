@@ -1,5 +1,5 @@
 # smolmoe build. Linux, macOS and Windows (MSYS2/MinGW-w64 GCC or Clang).
-#   make                 optimized binary   -> build/smolmoe[.exe]
+#   make                 optimized binaries -> build/smolmoe[.exe], build/smolmoe-quantize[.exe]
 #   make test            kernel unit tests + bun integration suite
 #   make sanitize        ASan/UBSan build and tests (Linux/macOS)
 #   make release         stripped, statically linked where supported
@@ -34,6 +34,7 @@ LDLIBS   = -lm $(SYSLIBS)
 BIN        := $(BUILD)/smolmoe$(EXE)
 BIN_SCALAR := $(BUILD)/smolmoe-scalar$(EXE)
 TEST_KERN  := $(BUILD)/test-kernels$(EXE)
+QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
 
 OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
@@ -42,7 +43,7 @@ OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release clean bench
 
-all: $(BIN)
+all: $(BIN) $(QUANTIZE)
 scalar: $(BIN_SCALAR)
 tools: $(Q8PACK)
 
@@ -62,6 +63,9 @@ $(BIN): $(OBJ)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BIN_SCALAR): $(OBJ_SCALAR)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+$(QUANTIZE): $(BUILD)/obj/quantize_main.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
@@ -94,4 +98,4 @@ bench: $(BIN)
 clean:
 	rm -rf build tools/q8pack tools/q8pack.exe
 
--include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d
+-include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/obj/quantize_main.d

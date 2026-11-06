@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "f16.h"
 #include "kernels.h"
 #include "threadpool.h"
 #include "util.h"
@@ -43,6 +44,44 @@ static void random_weights(unsigned char *w, uint32_t nb, int extremes) {
             blk[4 + j] = (unsigned char)(int8_t)v;
         }
     }
+}
+
+static void test_f16(void) {
+    uint32_t h;
+    for (h = 0; h < 65536; ++h) {
+        float f = f16_to_f32((uint16_t)h);
+        if (f != f) continue; /* NaN payloads need not round-trip */
+        CHECK(f32_to_f16(f) == h, "f16 round trip 0x%04x", h);
+    }
+    CHECK(f32_to_f16(1.0f) == 0x3c00 && f32_to_f16(-2.0f) == 0xc000, "f16 constants");
+    CHECK(f32_to_f16(65520.0f) == 0x7c00, "f16 overflow rounds to inf");
+    CHECK(f32_to_f16(1.0f + 1.0f / 2048) == 0x3c00, "f16 ties to even");
+}
+
+/* Random rows packed with quantize_q5_row. */
+static void random_q5(unsigned char *w, uint32_t nb, float spread) {
+    static float row[MAX_BLOCKS * QK];
+    uint32_t i;
+    for (i = 0; i < nb * QK; ++i) row[i] = uniform(-spread, spread);
+    quantize_q5_row(row, nb * QK, w);
+}
+
+static void test_q5_roundtrip(void) {
+    static float x[MAX_BLOCKS * QK], back[MAX_BLOCKS * QK];
+    static unsigned char w[MAX_BLOCKS * Q5_BLOCK_BYTES];
+    uint32_t i, cols = 100;
+    for (i = 0; i < cols; ++i) x[i] = uniform(-1.0f, 1.0f);
+    x[7] = 3.0f; /* outlier sets the first block scale */
+    quantize_q5_row(x, cols, w);
+    dequantize_q5_row(w, cols, back);
+    for (i = 0; i < cols; ++i) {
+        float amax = i < 32 ? 3.0f : 1.0f;
+        CHECK(fabsf(back[i] - x[i]) <= amax / 15.0f, "q5 error at %u: %g vs %g", i, back[i], x[i]);
+    }
+    for (i = 0; i < 32; ++i) x[i] = 0;
+    quantize_q5_row(x, 32, w);
+    dequantize_q5_row(w, 32, back);
+    CHECK(back[0] == 0 && back[31] == 0, "zero block");
 }
 
 static void test_quantize(void) {
@@ -105,6 +144,25 @@ static void test_x4(DotQ8x4 fn, const char *name) {
     }
 }
 
+static void test_x4_q5(DotQ8x4 fn, const char *name) {
+    static unsigned char w[MAX_BLOCKS * Q5_BLOCK_BYTES];
+    static float x[4 * MAX_BLOCKS * QK], xd[4 * MAX_BLOCKS];
+    static int8_t xq[4 * MAX_BLOCKS * QK];
+    uint32_t trial, i, t;
+    for (trial = 0; trial < 100; ++trial) {
+        uint32_t nb = 1 + next() % MAX_BLOCKS;
+        float out[4];
+        random_q5(w, nb, 2.0f);
+        for (i = 0; i < 4 * nb * QK; ++i) x[i] = uniform(-20.0f, 20.0f);
+        quantize_q8(x, 4 * nb * QK, xd, xq);
+        fn(w, xd, xq, nb, nb, out);
+        for (t = 0; t < 4; ++t) {
+            float want = dot_q5_scalar(w, xd + t * nb, xq + t * nb * QK, nb);
+            CHECK(memcmp(&want, &out[t], sizeof(want)) == 0, "%s q5 x4 trial %u row %u", name, trial, t);
+        }
+    }
+}
+
 static void test_backends_bit_identical(void) {
 #if defined(SM_HAVE_AVX2)
     unsigned char w[MAX_BLOCKS * Q8_BLOCK_BYTES];
@@ -127,6 +185,19 @@ static void test_backends_bit_identical(void) {
         CHECK(memcmp(&a, &b, sizeof(a)) == 0, "trial %u nb=%u scalar %a avx2 %a", trial, nb, a, b);
     }
     test_x4(dot_q8_avx2_x4, "avx2");
+    for (trial = 0; trial < 200; ++trial) {
+        static unsigned char w5[MAX_BLOCKS * Q5_BLOCK_BYTES];
+        uint32_t i;
+        float a, b;
+        nb = 1 + next() % MAX_BLOCKS;
+        random_q5(w5, nb, 0.5f + (float)(trial % 7));
+        for (i = 0; i < nb * QK; ++i) x[i] = uniform(-50.0f, 50.0f);
+        quantize_q8(x, nb * QK, xd, xq);
+        a = dot_q5_scalar(w5, xd, xq, nb);
+        b = dot_q5_avx2(w5, xd, xq, nb);
+        CHECK(memcmp(&a, &b, sizeof(a)) == 0, "q5 trial %u nb=%u scalar %a avx2 %a", trial, nb, a, b);
+    }
+    test_x4_q5(dot_q5_avx2_x4, "avx2");
 #else
     puts("built without SIMD; backend identity skipped");
 #endif
@@ -206,9 +277,12 @@ static void test_split_range(void) {
 }
 
 int main(void) {
+    test_f16();
     test_quantize();
+    test_q5_roundtrip();
     test_dot_against_reference();
     test_x4(dot_q8_scalar_x4, "scalar");
+    test_x4_q5(dot_q5_scalar_x4, "scalar");
     test_backends_bit_identical();
     test_dot_f32();
     test_split_range();

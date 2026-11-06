@@ -1,4 +1,5 @@
 #include "modelfile.h"
+#include "f16.h"
 #include "kernels.h"
 
 #include <math.h>
@@ -9,8 +10,12 @@
 #define MAX_TENSORS 2000000u
 #define MAX_TENSOR_COLS 65536u
 
+static uint64_t block_bytes(uint32_t dtype) {
+    return dtype == DTYPE_Q8 ? Q8_BLOCK_BYTES : Q5_BLOCK_BYTES;
+}
+
 static uint64_t expected_bytes(const Tensor *t) {
-    if (t->dtype == DTYPE_Q8) return (uint64_t)t->rows * ((t->cols + QK - 1) / QK) * Q8_BLOCK_BYTES;
+    if (t->dtype != DTYPE_F32) return (uint64_t)t->rows * ((t->cols + QK - 1) / QK) * block_bytes(t->dtype);
     return (uint64_t)t->rows * t->cols * 4;
 }
 
@@ -48,7 +53,7 @@ void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Me
         t->offset = rd_u64(rec + 56);
         t->bytes = rd_u64(rec + 64);
         if (t->alias > 1 || (t->alias && mf->version != 2) || !t->rows || !t->cols ||
-            t->cols > MAX_TENSOR_COLS || t->dtype > DTYPE_Q8)
+            t->cols > MAX_TENSOR_COLS || t->dtype > DTYPE_Q5)
             die("invalid tensor metadata: %s", t->name);
         if (t->bytes != expected_bytes(t) || (!t->alias && t->offset < previous) || t->offset > size ||
             t->bytes > size - t->offset)
@@ -70,7 +75,8 @@ const Tensor *modelfile_find(const ModelFile *mf, const char *name, uint32_t row
         else hi = mid;
     }
     if (lo == mf->count || strcmp(mf->tensors[lo].name, name)) die("missing tensor: %s", name);
-    if (mf->tensors[lo].rows != rows || mf->tensors[lo].cols != cols || mf->tensors[lo].dtype != dtype)
+    if (mf->tensors[lo].rows != rows || mf->tensors[lo].cols != cols ||
+        (dtype == DTYPE_QUANTIZED ? mf->tensors[lo].dtype == DTYPE_F32 : mf->tensors[lo].dtype != dtype))
         die("wrong tensor shape/type: %s", name);
     return &mf->tensors[lo];
 }
@@ -87,6 +93,12 @@ static int verify_units(const Tensor *t, uint64_t begin, uint64_t end) {
             float s = rd_f32(t->data + u * Q8_BLOCK_BYTES);
             if (!isfinite(s) || s < 0) return 0;
         }
+    } else if (t->dtype == DTYPE_Q5) {
+        /* Q5 scales are signed: the extreme value maps to the -8 side. */
+        for (u = begin; u < end; ++u) {
+            const unsigned char *p = t->data + u * Q5_BLOCK_BYTES;
+            if (!isfinite(f16_to_f32((uint16_t)(p[0] | p[1] << 8)))) return 0;
+        }
     } else {
         for (u = begin; u < end; ++u)
             if (!isfinite(rd_f32(t->data + u * 4))) return 0;
@@ -99,7 +111,7 @@ static void verify_task(void *ctx, uint32_t index, uint32_t count) {
     uint32_t i;
     for (i = 0; i < v->mf->count; ++i) {
         const Tensor *t = &v->mf->tensors[i];
-        uint64_t units = t->dtype == DTYPE_Q8 ? t->bytes / Q8_BLOCK_BYTES : t->bytes / 4;
+        uint64_t units = t->dtype == DTYPE_F32 ? t->bytes / 4 : t->bytes / block_bytes(t->dtype);
         uint64_t begin = units * index / count, end = units * (index + 1) / count;
         if (t->alias) continue;
         if (!verify_units(t, begin, end)) {
@@ -116,5 +128,5 @@ void modelfile_verify_payload(const ModelFile *mf, Pool *pool) {
     v.mf = mf;
     v.bad = 0;
     pool_run(pool, verify_task, &v);
-    if (v.bad) die("non-finite or negative scale in tensor %s", mf->tensors[v.bad - 1].name);
+    if (v.bad) die("non-finite value or invalid scale in tensor %s", mf->tensors[v.bad - 1].name);
 }

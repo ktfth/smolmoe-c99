@@ -17,14 +17,15 @@
 #  error "smolmoe requires FLT_EVAL_METHOD == 0; on 32-bit x86 build with -msse2 -mfpmath=sse"
 #endif
 
-/* AVX2 is compiled per function and selected at runtime: no -mavx2 needed. */
+/* AVX2 (+F16C) is compiled per function and selected at runtime: no -mavx2 needed. */
 #if !defined(SM_NO_SIMD) && (defined(__x86_64__) || defined(__i386__)) && \
     (defined(__GNUC__) || defined(__clang__))
 #  define SM_HAVE_AVX2 1
 #endif
 
 #define QK 32u
-#define Q8_BLOCK_BYTES 36u
+#define Q8_BLOCK_BYTES 36u /* f32 scale + 32 x int8 */
+#define Q5_BLOCK_BYTES 22u /* f16 scale, u32 high bits (bit j = element j), 16 bytes of low nibbles (j low, j+16 high); value = q - 16 */
 
 typedef float (*DotQ8)(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 /* One weight row against 4 activation rows spaced `stride` blocks apart.
@@ -33,8 +34,8 @@ typedef float (*DotQ8)(const unsigned char *w, const float *xd, const int8_t *xq
 typedef void (*DotQ8x4)(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                         uint32_t stride, float out[4]);
 
-extern DotQ8 dot_q8;
-extern DotQ8x4 dot_q8_x4;
+extern DotQ8 dot_q8, dot_q5;
+extern DotQ8x4 dot_q8_x4, dot_q5_x4;
 
 /* Selects the fastest supported backend; returns its name. */
 const char *kernels_select(int force_scalar);
@@ -42,9 +43,15 @@ const char *kernels_select(int force_scalar);
 float dot_q8_scalar(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 void dot_q8_scalar_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                       uint32_t stride, float out[4]);
+float dot_q5_scalar(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
+void dot_q5_scalar_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                      uint32_t stride, float out[4]);
 #if defined(SM_HAVE_AVX2)
 float dot_q8_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 void dot_q8_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]);
+float dot_q5_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
+void dot_q5_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                     uint32_t stride, float out[4]);
 #endif
 
@@ -54,6 +61,11 @@ int quantize_q8(const float *x, uint32_t n, float *d, int8_t *q);
 
 /* Expands one Q8 row of `cols` values. */
 void dequantize_q8_row(const unsigned char *w, uint32_t cols, float *out);
+void dequantize_q5_row(const unsigned char *w, uint32_t cols, float *out);
+
+/* Quantizes one row of `cols` finite floats to Q5, choosing each block scale
+ * from a small candidate set to minimize squared error. Used by the converter. */
+void quantize_q5_row(const float *x, uint32_t cols, unsigned char *out);
 
 /* Sum of a[i]*b[i] in a fixed 8-lane order (vectorizable, deterministic). */
 float dot_f32(const float *a, const float *b, uint32_t n);

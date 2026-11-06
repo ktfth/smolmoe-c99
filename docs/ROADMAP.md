@@ -8,11 +8,11 @@ antes/depois registrada em [DECISIONS.md](DECISIONS.md).
 1. **Matemática determinística própria** (`expf`, `sin`/`cos`). Hoje os hashes de logits diferem entre Windows e Linux
    só por causa da libm. Polinômios próprios em float puro (sem FMA) dão bit-identidade entre sistemas operacionais,
    o que permite fixar hashes-ouro na suíte. Também permite vetorizar SiLU e softmax.
-2. **Quantização Q4 (bloco 32, ~4,5 bits/peso).** O decode é limitado pela banda de memória: são 531 MB lidos por
-   token. Com Q4 nas camadas e Q8 no embedding, devem ser cerca de 330 MB por token, ou ~1,6× de decode esperado.
-   Critério de aceite: perplexidade com piora menor que 3% no texto de referência (`scripts/compare-traces.ts`).
-3. **`--perplexity` no runtime.** Avaliação de qualidade embutida (NLL sobre um arquivo), sem precisar de traces de
-   centenas de MB.
+2. **Kernel Q5 mais barato.** O Q5 já existe e economiza 39% de memória por +1,7% de perplexidade, mas custa 2,6× o Q8
+   por bloco e não acelera neste notebook (ver DECISIONS, iteração 2). Opções: dois blocos por iteração
+   compartilhando a expansão dos bits altos, ou um layout com os bits altos já intercalados para SIMD.
+3. **Q4 com escalas por sub-bloco (estilo K-quant)**, só junto com modelos de 1,5B+. O Q4 simples custou +21% de
+   perplexidade no 0,5B e foi removido.
 4. **Kernels NEON (ARM64).** Mesma ordem de lanes. Abre Apple Silicon, Raspberry Pi e servidores Graviton.
 5. **Cache KV em F16.** Metade da memória e da banda em contextos longos.
 
@@ -66,7 +66,7 @@ programas, como o llamafile faz.
    continua sem prova.
 2. **Conversores em TypeScript/Bun.** Substituem os scripts Python e o `q8pack.c` (só POSIX). Leitura de safetensors
    em TS é direta (cabeçalho JSON e bytes crus).
-3. **Qwen2.5-1.5B/3B.** Maior qualidade em português, ao custo de 3× a 6× a memória. Só depois do Q4.
+3. **Qwen2.5-1.5B/3B.** Maior qualidade em português, ao custo de 3× a 6× a memória. Com Q5, o 1,5B cabe em ~1,05 GB.
 
 ## Operação
 

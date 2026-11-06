@@ -6,12 +6,16 @@ Reescrita do runtime para eficiência e para uso em produção. Números e justi
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ### Adicionado
+- Formato Q5 (dtype 2, 22 bytes por 32 pesos) e a ferramenta `smolmoe-quantize`: 39% menos memória por +1,7% de
+  perplexidade. Opcional; não acelera no hardware medido.
+- `--perplexity`: NLL e perplexidade do prompt com teacher forcing; texto de avaliação em `tests/goldens/eval-pt.txt`.
+- Kernels AVX2 agora exigem F16C (presente em todo CPU com AVX2 do mercado).
 - Suporte nativo a Windows (MinGW-w64 GCC/Clang): argv em UTF-8, console em UTF-8 e build estático em `make release`.
 - Pool de threads determinístico (`--threads`, padrão: núcleos físicos).
 - Prefill em lote (`--batch`, padrão 32) com kernel AVX2 de 4 tokens por linha de pesos.
 - Amostragem com `--top-k` (padrão 40) e `--top-p` (padrão 0,95).
 - `--version`, e os campos `version`, `threads`, `batch` e `mapped_bytes` nas estatísticas.
-- Suíte de testes: unitários em C (kernels e pool) e integração em TypeScript/Bun (35 testes).
+- Suíte de testes: unitários em C (kernels, f16, pool) e integração em TypeScript/Bun (40 testes).
 - Scripts `bench.ts`, `compare-traces.ts` e `make-fixture.ts`. CI para Linux, Windows e macOS.
 
 ### Alterado (incompatível)

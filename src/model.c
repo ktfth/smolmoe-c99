@@ -9,12 +9,14 @@
 /* ---- weights ----------------------------------------------------------- */
 
 static QMat qmat(const ModelFile *f, const char *name, uint32_t rows, uint32_t cols) {
-    const Tensor *t = modelfile_find(f, name, rows, cols, DTYPE_Q8);
+    const Tensor *t = modelfile_find(f, name, rows, cols, DTYPE_QUANTIZED);
     QMat q;
     q.data = t->data;
     q.rows = rows;
     q.cols = cols;
     q.nb = (cols + QK - 1) / QK;
+    q.dtype = t->dtype;
+    q.row_bytes = (size_t)q.nb * (t->dtype == DTYPE_Q8 ? Q8_BLOCK_BYTES : Q5_BLOCK_BYTES);
     return q;
 }
 
@@ -154,18 +156,20 @@ static int store(const MatItem *it, uint32_t token, uint32_t row, float y) {
 
 static int mat_rows(const MatTask *t, const MatItem *it, uint32_t r0, uint32_t r1) {
     const QMat *w = it->w;
-    size_t row_bytes = (size_t)w->nb * Q8_BLOCK_BYTES, xs = (size_t)t->nb * QK;
+    const DotQ8 dot = w->dtype == DTYPE_Q5 ? dot_q5 : dot_q8;
+    const DotQ8x4 dot_x4 = w->dtype == DTYPE_Q5 ? dot_q5_x4 : dot_q8_x4;
+    size_t xs = (size_t)t->nb * QK;
     uint32_t r, k, j;
     int ok = 1;
     for (r = r0; r < r1; ++r) {
-        const unsigned char *row = w->data + row_bytes * r;
+        const unsigned char *row = w->data + w->row_bytes * r;
         for (k = 0; k + 4 <= t->ntok; k += 4) {
             float y[4];
-            dot_q8_x4(row, t->xd + (size_t)k * t->nb, t->xq + k * xs, t->nb, t->nb, y);
+            dot_x4(row, t->xd + (size_t)k * t->nb, t->xq + k * xs, t->nb, t->nb, y);
             for (j = 0; j < 4; ++j) ok &= store(it, k + j, r, y[j]);
         }
         for (; k < t->ntok; ++k)
-            ok &= store(it, k, r, dot_q8(row, t->xd + (size_t)k * t->nb, t->xq + k * xs, t->nb));
+            ok &= store(it, k, r, dot(row, t->xd + (size_t)k * t->nb, t->xq + k * xs, t->nb));
     }
     return ok;
 }
@@ -445,8 +449,10 @@ void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, 
     if (!n || n > m->batch || pos0 > m->context || n > m->context - pos0) die("token batch exceeds context");
     for (t = 0; t < n; ++t) {
         if (tokens[t] >= c->vocab) die("token %u out of vocabulary", tokens[t]);
-        dequantize_q8_row(m->embed.data + (size_t)tokens[t] * m->embed.nb * Q8_BLOCK_BYTES, c->dim,
-                          m->x + (size_t)t * c->dim);
+        const unsigned char *row = m->embed.data + (size_t)tokens[t] * m->embed.row_bytes;
+        float *x = m->x + (size_t)t * c->dim;
+        if (m->embed.dtype == DTYPE_Q5) dequantize_q5_row(row, c->dim, x);
+        else dequantize_q8_row(row, c->dim, x);
     }
     rope_tables(m, n, pos0);
     for (l = 0; l < c->layers; ++l) {

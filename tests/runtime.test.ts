@@ -113,3 +113,21 @@ describe("statistics", () => {
     expect(list.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("perplexity", () => {
+  test("scores every next token, generates nothing and is batch-invariant", () => {
+    const score = (batch: number) => {
+      const r = runOk(["--model", medium.model, "--config", medium.config, "--tokenizer", medium.tokenizer,
+        "--prompt", "Hi! the quick brown fox jumps over the lazy dog", "--context", 128, "--perplexity",
+        "--batch", batch]);
+      return { stdout: r.stdout, stats: JSON.parse(r.stderr.trim().split("\n").at(-1)!) };
+    };
+    const a = score(32), b = score(3);
+    expect(a.stdout.length).toBe(0);
+    expect(a.stats.generated_tokens).toBe(0);
+    expect(a.stats.perplexity_tokens).toBe(a.stats.prompt_tokens - 1);
+    expect(a.stats.perplexity).toBeGreaterThan(1);
+    expect(Math.abs(Math.exp(a.stats.nll) / a.stats.perplexity - 1)).toBeLessThan(1e-5);
+    expect(b.stats.nll).toBe(a.stats.nll);
+  });
+});

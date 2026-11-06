@@ -53,7 +53,7 @@ describe("checkpoint", () => {
   test("non-finite and negative Q8 scales are rejected at load", () => {
     const embed = base.tensors.find((t) => t.name === "embed")!;
     const nan = variant("nan", (b) => { b.writeFloatLE(Number.NaN, embed.offset + 36 * 3); return b; });
-    expectError(cli(nan), /non-finite or negative scale in tensor embed/);
+    expectError(cli(nan), /invalid scale in tensor embed/);
     const negative = variant("neg", (b) => { b.writeFloatLE(-1, embed.offset); return b; });
     expectError(cli(negative), /tensor embed/);
   });
