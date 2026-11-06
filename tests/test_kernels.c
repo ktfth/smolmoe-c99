@@ -204,7 +204,9 @@ static void test_backends_bit_identical(void) {
 #endif
 }
 
+#if defined(SM_HAVE_AVX2)
 static int same_bits(const void *a, const void *b, size_t n) { return memcmp(a, b, n) == 0; }
+#endif
 
 /* Distance in units in the last place between two finite floats of any sign. */
 static long ulp_distance(float a, float b) {
