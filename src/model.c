@@ -216,6 +216,7 @@ static void rmsnorm(const float *x, const float *w, float *y, uint32_t n, float 
     float sq = 0, inv;
     uint32_t i;
     for (i = 0; i < n; ++i) sq += x[i] * x[i];
+    if (!isfinite(sq)) die("non-finite RMSNorm input");
     inv = 1.0f / sqrtf(sq / (float)n + eps);
     if (!isfinite(inv)) die("non-finite RMSNorm");
     for (i = 0; i < n; ++i) {

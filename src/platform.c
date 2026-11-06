@@ -176,6 +176,12 @@ uint32_t cpu_physical_cores(void) {
     return cores ? cores : cpu_logical_count();
 }
 
+static UINT original_output_cp;
+
+static void restore_console(void) {
+    if (original_output_cp) SetConsoleOutputCP(original_output_cp);
+}
+
 void platform_init(int *argc, char ***argv) {
     int n, i;
     LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &n);
@@ -188,7 +194,12 @@ void platform_init(int *argc, char ***argv) {
     *argc = n;
     *argv = out;
     _setmode(_fileno(stdout), _O_BINARY);
-    SetConsoleOutputCP(CP_UTF8);
+    /* 0 when no console is attached (pipes, services): nothing to change. */
+    original_output_cp = GetConsoleOutputCP();
+    if (original_output_cp && original_output_cp != CP_UTF8) {
+        SetConsoleOutputCP(CP_UTF8);
+        atexit(restore_console);
+    }
 }
 
 #else /* POSIX */

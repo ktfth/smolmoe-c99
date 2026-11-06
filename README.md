@@ -108,6 +108,9 @@ models/     pesos locais (fora do git)
 - Não é compatível com Kimi K3 nem com GGUF, e não há servidor HTTP nem modo multi-turno (estão no
   [roadmap](docs/ROADMAP.md)).
 - O Qwen 0.5B é pequeno: às vezes mistura idiomas ou ignora o formato pedido. Revise as respostas.
+- O checkpoint precisa ficar imutável durante a execução. No Windows o arquivo é aberto sem permitir escrita; no
+  Linux/macOS, truncar ou reescrever o `.smoe` enquanto ele roda derruba o processo (`SIGBUS`), como em qualquer
+  programa que usa `mmap`.
 
 Licença MIT. Os pesos convertidos mantêm suas licenças originais (Apache-2.0 para Qwen, MIT para TinyStories); ver
 [THIRD_PARTY.md](THIRD_PARTY.md).

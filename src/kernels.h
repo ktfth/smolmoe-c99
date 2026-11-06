@@ -8,7 +8,14 @@
 #ifndef SMOLMOE_KERNELS_H
 #define SMOLMOE_KERNELS_H
 
+#include <float.h>
 #include <stdint.h>
+
+/* The bit-identity contract needs plain binary32 evaluation (x87 extended
+ * precision would make scalar and SIMD results differ). */
+#if defined(FLT_EVAL_METHOD) && FLT_EVAL_METHOD != 0
+#  error "smolmoe requires FLT_EVAL_METHOD == 0; on 32-bit x86 build with -msse2 -mfpmath=sse"
+#endif
 
 /* AVX2 is compiled per function and selected at runtime: no -mavx2 needed. */
 #if !defined(SM_NO_SIMD) && (defined(__x86_64__) || defined(__i386__)) && \

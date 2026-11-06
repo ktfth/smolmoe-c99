@@ -132,10 +132,17 @@ static uint32_t merge_rank(const Tokenizer *t, uint32_t a, uint32_t b) {
     return UINT32_MAX;
 }
 
+/* Reads one line; 0 at end of file. Overlong lines are an error, never split. */
+static int read_line(char *line, int size, FILE *f) {
+    if (!fgets(line, size, f)) return 0;
+    if (!strchr(line, '\n') && !feof(f)) die("tokenizer line too long");
+    return 1;
+}
+
 static void bpe_load(Tokenizer *t, FILE *f, Memory *mem) {
     char line[128];
     uint32_t i;
-    if (!fgets(line, sizeof(line), f) || strcmp(trim(line), "SMBPE1")) die("invalid tokenizer magic");
+    if (!read_line(line, (int)sizeof(line), f) || strcmp(trim(line), "SMBPE1")) die("invalid tokenizer magic");
     t->kind = TOK_BPE;
     t->count = t->vocab - 258;
     t->max_piece = MAX_PIECE;
@@ -148,7 +155,7 @@ static void bpe_load(Tokenizer *t, FILE *f, Memory *mem) {
         char a[32], b[32], extra;
         uint32_t p;
         Merge *m = &t->merges[i];
-        if (!fgets(line, sizeof(line), f) || sscanf(line, "%31s %31s %c", a, b, &extra) != 2)
+        if (!read_line(line, (int)sizeof(line), f) || sscanf(line, "%31s %31s %c", a, b, &extra) != 2)
             die("invalid tokenizer merge %u", i);
         m->a = parse_u32(a, 257 + i, "merge token");
         m->b = parse_u32(b, 257 + i, "merge token");
@@ -162,7 +169,7 @@ static void bpe_load(Tokenizer *t, FILE *f, Memory *mem) {
         }
         t->hash[p] = i + 1;
     }
-    while (fgets(line, sizeof(line), f))
+    while (read_line(line, (int)sizeof(line), f))
         if (*trim(line)) die("extra tokenizer merges");
     if (ferror(f)) die("tokenizer read error");
 }

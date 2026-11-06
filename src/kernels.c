@@ -115,9 +115,9 @@ int quantize_q8(const float *x, uint32_t n, float *d, int8_t *q) {
         float amax = 0, scale, inv;
         for (j = 0; j < count; ++j) {
             float a = fabsf(x[j]);
+            if (!(a <= FLT_MAX)) return -1; /* rejects both inf and NaN */
             if (a > amax) amax = a;
         }
-        if (!isfinite(amax)) return -1;
         scale = amax / 127.0f;
         inv = scale > 0 ? 1.0f / scale : 0.0f;
         d[b] = scale;

@@ -103,6 +103,8 @@ describe("config and tokenizer", () => {
     expectError(cli({ ...base, tokenizer: tok }), /special token/);
     writeFileSync(tok, "NOTBPE\n");
     expectError(cli({ ...base, tokenizer: tok }), /invalid tokenizer magic/);
+    writeFileSync(tok, `SMBPE1\n72 105${" ".repeat(200)}\n258 33\n`);
+    expectError(cli({ ...base, tokenizer: tok }), /tokenizer line too long/);
   });
 });
 

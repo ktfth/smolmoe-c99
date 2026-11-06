@@ -60,7 +60,9 @@ static void test_quantize(void) {
     memset(x, 0, sizeof(x));
     CHECK(quantize_q8(x, 32, d, q) == 0 && d[0] == 0 && q[5] == 0, "zero block");
     x[3] = INFINITY;
-    CHECK(quantize_q8(x, 32, d, q) == -1, "non-finite input accepted");
+    CHECK(quantize_q8(x, 32, d, q) == -1, "infinite input accepted");
+    x[3] = NAN;
+    CHECK(quantize_q8(x, 32, d, q) == -1, "NaN input accepted");
 }
 
 static void test_dot_against_reference(void) {

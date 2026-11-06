@@ -10,6 +10,7 @@
 #  endif
 #  include <windows.h>
 #  include <process.h>
+#  define thread_yield() SwitchToThread()
 typedef HANDLE Thread;
 typedef SRWLOCK Mutex;
 typedef CONDITION_VARIABLE Cond;
@@ -23,6 +24,8 @@ typedef CONDITION_VARIABLE Cond;
 #  define cond_free(c) ((void)(c))
 #else
 #  include <pthread.h>
+#  include <sched.h>
+#  define thread_yield() sched_yield()
 typedef pthread_t Thread;
 typedef pthread_mutex_t Mutex;
 typedef pthread_cond_t Cond;
@@ -123,6 +126,7 @@ Pool *pool_create(uint32_t threads, Memory *mem) {
 }
 
 void pool_run(Pool *p, PoolTask task, void *ctx) {
+    uint32_t spins;
     if (p->threads == 1) {
         task(ctx, 0, 1);
         return;
@@ -135,7 +139,11 @@ void pool_run(Pool *p, PoolTask task, void *ctx) {
     cond_broadcast(&p->wake);
     mutex_unlock(&p->lock);
     task(ctx, 0, p->threads);
-    while (__atomic_load_n(&p->done, __ATOMIC_ACQUIRE) != p->threads - 1) cpu_relax();
+    for (spins = 0; __atomic_load_n(&p->done, __ATOMIC_ACQUIRE) != p->threads - 1; ++spins) {
+        /* Yield once spinning stops paying off (e.g. more threads than cores). */
+        if (spins < SPIN_LIMIT) cpu_relax();
+        else thread_yield();
+    }
 }
 
 uint32_t pool_threads(const Pool *p) {
