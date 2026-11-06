@@ -3,10 +3,11 @@
 #include "platform.h"
 #include "tokenizer_qwen.h"
 
-#include <errno.h>
+
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MAX_PIECE 65536u
@@ -50,10 +51,10 @@ static uint32_t piece_lookup(const Tokenizer *t, const unsigned char *p, uint32_
     return UINT32_MAX;
 }
 
-static void score_load(Tokenizer *t, FILE *f, Memory *mem) {
+static void score_load(Tokenizer *t, ByteReader *f, Memory *mem) {
     unsigned char header[20], rec[8], *data;
     uint32_t i, total, used = 0, vocab = t->vocab;
-    if (fread(header, 1, 20, f) != 20 || memcmp(header, "SMSPB1\0\1", 8)) die("invalid score-BPE header");
+    if (!br_read(f, header, 20) || memcmp(header, "SMSPB1\0\1", 8)) die("invalid score-BPE header");
     t->kind = TOK_SCORE;
     t->count = vocab - 258;
     t->max_piece = rd_u32(header + 12);
@@ -70,20 +71,20 @@ static void score_load(Tokenizer *t, FILE *f, Memory *mem) {
     t->hash = (uint32_t *)mem_alloc(mem, t->hash_size, sizeof(uint32_t));
     for (i = 0; i < vocab; ++i) {
         uint32_t n, slot;
-        if (fread(rec, 1, 8, f) != 8) die("truncated score-BPE record");
+        if (!br_read(f, rec, 8)) die("truncated score-BPE record");
         t->scores[i] = rd_f32(rec);
         n = rd_u32(rec + 4);
         if (!isfinite(t->scores[i]) || !n || n > t->max_piece || n > total - used) die("invalid score-BPE record");
         t->pieces[i] = data + used;
         t->lengths[i] = n;
         used += n;
-        if (fread(t->pieces[i], 1, n, f) != n) die("truncated score-BPE piece");
+        if (!br_read(f, t->pieces[i], n)) die("truncated score-BPE piece");
         if (piece_lookup(t, t->pieces[i], n) != UINT32_MAX) die("duplicate score-BPE piece");
         slot = (uint32_t)fnv1a(t->pieces[i], n) & (t->hash_size - 1);
         while (t->hash[slot]) slot = (slot + 1) & (t->hash_size - 1);
         t->hash[slot] = i + 1;
     }
-    if (used != total || fgetc(f) != EOF || ferror(f)) die("invalid score-BPE payload size");
+    if (used != total || !br_at_end(f)) die("invalid score-BPE payload size");
     if (piece_lookup(t, (const unsigned char *)" ", 1) == UINT32_MAX) die("score-BPE missing dummy prefix");
 }
 
@@ -132,17 +133,10 @@ static uint32_t merge_rank(const Tokenizer *t, uint32_t a, uint32_t b) {
     return UINT32_MAX;
 }
 
-/* Reads one line; 0 at end of file. Overlong lines are an error, never split. */
-static int read_line(char *line, int size, FILE *f) {
-    if (!fgets(line, size, f)) return 0;
-    if (!strchr(line, '\n') && !feof(f)) die("tokenizer line too long");
-    return 1;
-}
-
-static void bpe_load(Tokenizer *t, FILE *f, Memory *mem) {
+static void bpe_load(Tokenizer *t, ByteReader *f, Memory *mem) {
     char line[128];
     uint32_t i;
-    if (!read_line(line, (int)sizeof(line), f) || strcmp(trim(line), "SMBPE1")) die("invalid tokenizer magic");
+    if (!br_line(f, line, sizeof(line), "tokenizer") || strcmp(trim(line), "SMBPE1")) die("invalid tokenizer magic");
     t->kind = TOK_BPE;
     t->count = t->vocab - 258;
     t->max_piece = MAX_PIECE;
@@ -155,7 +149,7 @@ static void bpe_load(Tokenizer *t, FILE *f, Memory *mem) {
         char a[32], b[32], extra;
         uint32_t p;
         Merge *m = &t->merges[i];
-        if (!read_line(line, (int)sizeof(line), f) || sscanf(line, "%31s %31s %c", a, b, &extra) != 2)
+        if (!br_line(f, line, sizeof(line), "tokenizer") || sscanf(line, "%31s %31s %c", a, b, &extra) != 2)
             die("invalid tokenizer merge %u", i);
         m->a = parse_u32(a, 257 + i, "merge token");
         m->b = parse_u32(b, 257 + i, "merge token");
@@ -169,9 +163,8 @@ static void bpe_load(Tokenizer *t, FILE *f, Memory *mem) {
         }
         t->hash[p] = i + 1;
     }
-    while (read_line(line, (int)sizeof(line), f))
+    while (br_line(f, line, sizeof(line), "tokenizer"))
         if (*trim(line)) die("extra tokenizer merges");
-    if (ferror(f)) die("tokenizer read error");
 }
 
 /* Leftmost lowest-rank merge first, deliberately simple O(n^2). */
@@ -215,28 +208,29 @@ static uint32_t bpe_decode(Tokenizer *t, uint32_t id, unsigned char *buf) {
 
 /* ---- dispatch ---------------------------------------------------------- */
 
-Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem) {
+Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t vocab, Memory *mem) {
     Tokenizer *t = (Tokenizer *)mem_alloc(mem, 1, sizeof(*t));
-    unsigned char magic[8];
-    FILE *f = open_file(path, "rb");
-    if (!f) die("cannot open tokenizer %s: %s", path, strerror(errno));
+    ByteReader r = byte_reader(data, size);
     t->vocab = vocab;
-    if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, "SMQBP1\0\1", 8)) {
-        fclose(f);
+    if (size >= 8 && !memcmp(data, "SMQBP1\0\1", 8)) {
         t->kind = TOK_QWEN;
-        t->qwen = qwen_load(path, vocab, mem);
+        t->qwen = qwen_load(&r, vocab, mem);
         t->max_piece = qwen_max_piece(t->qwen);
-        return t;
-    }
-    rewind(f);
-    if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, "SMSPB1\0\1", 8)) {
-        rewind(f);
-        score_load(t, f, mem);
+    } else if (size >= 8 && !memcmp(data, "SMSPB1\0\1", 8)) {
+        score_load(t, &r, mem);
     } else {
-        rewind(f);
-        bpe_load(t, f, mem);
+        bpe_load(t, &r, mem);
     }
-    fclose(f);
+    return t;
+}
+
+/* Every loader copies what it keeps, so the file can be unmapped afterwards. */
+Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem) {
+    MappedFile f;
+    Tokenizer *t;
+    map_file(path, &f);
+    t = tokenizer_parse(f.data, (size_t)f.size, vocab, mem);
+    unmap_file(&f);
     return t;
 }
 
@@ -286,4 +280,15 @@ int tokenizer_is_control(const Tokenizer *t, uint32_t id) {
     if (id == BOS_ID) return 1;
     if (id == EOS_ID) return 0;
     return t->kind == TOK_QWEN && qwen_is_special(t->qwen, id);
+}
+
+uint32_t tokenizer_chat_turn(Tokenizer *t, const char *role, const unsigned char *text, uint32_t n,
+                             int open_assistant, uint32_t *ids) {
+    if (t->kind != TOK_QWEN) die("chat requires a Qwen tokenizer");
+    return qwen_chat_turn(t->qwen, role, text, n, open_assistant, ids);
+}
+
+uint32_t tokenizer_chat_close(Tokenizer *t, uint32_t *ids) {
+    if (t->kind != TOK_QWEN) die("chat requires a Qwen tokenizer");
+    return qwen_chat_close(t->qwen, ids);
 }

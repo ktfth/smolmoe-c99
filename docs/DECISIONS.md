@@ -142,6 +142,38 @@ máquinas apertadas e decisivo para modelos maiores (um Qwen 1,5B cai de 1,7 GB 
 Q8. Em máquinas com mais computação por byte de banda (desktops, servidores), o Q5 deve ganhar velocidade, mas isso
 **não foi medido**.
 
+
+## Iteração 3: o modelo é um arquivo, e o arquivo é um programa
+
+### Ideia derrubada: "modelo = três arquivos + flags, sem conversa"
+
+Para usar o Qwen era preciso apontar `--model`, `--config` e `--tokenizer`, montar um `--prompt` e rodar um processo por
+pergunta. Qualquer pessoa fora do terminal desistiria antes da primeira resposta.
+
+### O que entrou
+
+| Medida (i7-10610U, Windows) | Três arquivos | `qwen-pt.exe` |
+|---|---|---|
+| Arquivos necessários | 3 + executável | 1 |
+| Tamanho | 556 MB + 4 MB + 200 KB | 560 MB (340 MB com Q5) |
+| Partida (`load_seconds`) | 0,19 s | 0,15 s |
+| Hash dos logits | referência | idêntico (Windows e Linux, testado) |
+| Dependências | — | só DLLs do sistema (KERNEL32, UCRT, SHELL32) |
+
+- **Contêiner v3 com blobs** (`__config__`, `__tokenizer__`). O tokenizer e a config passaram a ser lidos de memória,
+  num leitor único que serve tanto arquivo quanto blob.
+- **`smolmoe-bundle`**: valida a consistência entre config, tokenizer e pesos construindo o modelo antes de escrever,
+  e revalida a saída depois. Ele recusa, por exemplo, uma config com o número de camadas errado.
+- **Chat multi-turno** com cache KV reaproveitado. A memória entre turnos foi testada ("Meu nome é Ana", depois "Qual é o
+  meu nome?" responde "Ana") e o `/limpar` também ("Ana" some).
+
+### Achados durante a iteração
+
+- **Bug real no Windows em português:** as mensagens de erro do sistema saíam como "n�o", porque `FormatMessageA` usa
+  a codepage local. Corrigido para `FormatMessageW` com conversão para UTF-8.
+- **Qualidade do modelo, não do runtime:** perguntado sobre a capital do Brasil, o Qwen 0,5B respondeu "São Paulo".
+  Um executável fácil de usar torna esses erros mais visíveis, e o README diz para revisar as respostas.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.

@@ -7,7 +7,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import golden from "./goldens/qwen-tokenizer.json";
-import { bundledModel, modelArgs, run, runOk, SCALAR_BINARY, tempDir } from "./support/run";
+import { bundledModel, modelArgs, run, runOk, runWithInput, SCALAR_BINARY, tempDir } from "./support/run";
 
 const qwen = bundledModel("qwen2.5-0.5b-instruct", "tokenizer.qbp");
 const stories = bundledModel("tinystories-15m", "tokenizer.spb");
@@ -94,4 +94,17 @@ describe.skipIf(!stories)("TinyStories 15M", () => {
     expect(r.code).toBe(0);
     expect(r.stdout.toString()).toBe("Lily saw a café, ünïcödé.");
   });
+});
+
+describe.skipIf(!qwen)("interactive chat", () => {
+  test("keeps conversation history across turns and forgets it after /limpar", () => {
+    const input = "Meu nome é Ana e eu moro em Recife.\nQual é o meu nome?\n/limpar\nQual é o meu nome?\n/sair\n";
+    const r = runWithInput([...modelArgs(qwen!), "--tokens", 48, "--context", 512], input);
+    expect(r.code).toBe(0);
+    const replies = r.stdout.toString().trim().split("\n");
+    expect(replies.length).toBe(3);
+    expect(replies[1]).toContain("Ana");
+    expect(replies[2]).not.toContain("Ana");
+    expect(r.stderr).toContain("(conversa reiniciada)");
+  }, SLOW);
 });

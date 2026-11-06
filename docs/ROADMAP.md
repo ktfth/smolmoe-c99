@@ -21,25 +21,18 @@ antes/depois registrada em [DECISIONS.md](DECISIONS.md).
 Objetivo: **um único arquivo** (`qwen-pt.exe` / `qwen-pt`) que contém runtime, config, tokenizer e pesos. Basta dar
 duplo clique ou executar. O caminho é incremental, e cada etapa entrega valor sozinha.
 
-### Etapa 1: contêiner único `SMOE v3`
+### Etapas 1 e 2: concluídas na v0.2 (iteração 3)
 
-Hoje são três arquivos (`model.smoe`, `config.ini`, `tokenizer.*`). A v3 do contêiner guarda a config e o tokenizer
-como blobs nomeados (`__config__`, `__tokenizer__`) no mesmo diretório ordenado que já existe. Assim, `--model` sozinho
-basta. O parser atual já valida diretório e extents, então a mudança é pequena e retrocompatível (v1/v2 continuam
-lendo).
-
-### Etapa 2: pesos embutidos no executável (Windows, Linux e macOS)
-
-- `smolmoe bundle --model m.smoe --out qwen-pt.exe` copia o próprio executável e anexa ao final o contêiner v3,
-  alinhado em 64 KiB, mais um trailer fixo: `magic "SMOEBNDL" | offset u64 | size u64 | sha256`.
-- Na partida, o runtime abre o próprio executável (`self_executable_path()` já existe em `src/platform.c`), lê o
-  trailer, mapeia o arquivo e passa `base + offset` ao `modelfile_parse`, que já recebe um ponteiro e um tamanho. Nada
-  muda no modelo.
-- Assinatura de código: no Windows, o Authenticode cobre o executável inteiro, então é preciso assinar **depois** de
-  anexar. No macOS, os dados anexados invalidam a assinatura e exigem notarização com o payload em
-  `__DATA,__smoe` (seção Mach-O). Ficam documentados como passos de release.
-- Limite: o Windows não executa PE acima de 4 GiB. Modelos maiores continuam com pesos externos, e o executável
-  procura `<nome>.smoe` ao lado de si.
+- **Contêiner v3:** config e tokenizer viajam como blobs `__config__` e `__tokenizer__`, então `--model` sozinho
+  basta. Leitores v1 e v2 recusam o v3 já no cabeçalho.
+- **Executável autocontido:** `smolmoe-bundle --exe` (ou `make qwen-pt`) anexa o contêiner ao runtime com um trailer
+  `SMOEBDL1`. Sem `--model`, o runtime se mapeia e roda. Testado no Windows e no Linux (ASan): o hash dos logits é
+  idêntico ao da execução com três arquivos, e a partida é igual ou mais rápida.
+- **Chat multi-turno**, que é o que torna o duplo clique útil: o cache KV é reaproveitado entre turnos, com
+  `/limpar` e `/sair`. No Windows a entrada é lida em UTF-16 e convertida, para os acentos chegarem intactos.
+- **Pendentes desta trilha:**
+  - Assinatura de código no CI (Authenticode depois do bundle; no macOS, notarização com o payload numa seção Mach-O).
+  - Fallback para `<nome>.smoe` ao lado do executável, para modelos acima de 4 GiB no Windows.
 
 ### Etapa 3: um binário para todos os sistemas (opcional)
 

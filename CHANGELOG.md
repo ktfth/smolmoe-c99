@@ -6,6 +6,11 @@ Reescrita do runtime para eficiência e para uso em produção. Números e justi
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ### Adicionado
+- **Executável único estilo llamafile**: `smolmoe-bundle` (contêiner v3 com config e tokenizer embutidos; `--exe` anexa ao
+  runtime) e `make qwen-pt`. Sem `--model`, o runtime usa o modelo anexado a si mesmo.
+- **Chat multi-turno** (`-i`, padrão sem `--prompt`) com cache KV reaproveitado, `/limpar` e `/sair`; entrada UTF-8 correta
+  no console do Windows.
+- Mensagens de erro do Windows em UTF-8 (antes saíam na codepage local).
 - Formato Q5 (dtype 2, 22 bytes por 32 pesos) e a ferramenta `smolmoe-quantize`: 39% menos memória por +1,7% de
   perplexidade. Opcional; não acelera no hardware medido.
 - `--perplexity`: NLL e perplexidade do prompt com teacher forcing; texto de avaliação em `tests/goldens/eval-pt.txt`.
@@ -15,7 +20,7 @@ Reescrita do runtime para eficiência e para uso em produção. Números e justi
 - Prefill em lote (`--batch`, padrão 32) com kernel AVX2 de 4 tokens por linha de pesos.
 - Amostragem com `--top-k` (padrão 40) e `--top-p` (padrão 0,95).
 - `--version`, e os campos `version`, `threads`, `batch` e `mapped_bytes` nas estatísticas.
-- Suíte de testes: unitários em C (kernels, f16, pool) e integração em TypeScript/Bun (40 testes).
+- Suíte de testes: unitários em C (kernels, f16, pool) e integração em TypeScript/Bun (53 testes).
 - Scripts `bench.ts`, `compare-traces.ts` e `make-fixture.ts`. CI para Linux, Windows e macOS.
 
 ### Alterado (incompatível)

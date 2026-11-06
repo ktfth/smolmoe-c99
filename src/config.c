@@ -2,33 +2,29 @@
 #include "platform.h"
 #include "util.h"
 
-#include <errno.h>
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 #define KEY_COUNT 15u
 #define ALL_KEYS ((1u << KEY_COUNT) - 1u)
+#define LINE_CAPACITY 512u
 
-Config config_read(const char *path) {
+Config config_parse(const unsigned char *text, size_t size) {
     static const char *keys[KEY_COUNT] = {
         "architecture", "dim", "hidden_dim", "layers", "heads", "kv_heads", "experts", "top_k",
         "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id", "rms_eps", "rope_theta"};
     Config c;
     uint32_t *fields[12];
-    char line[512];
+    char line[LINE_CAPACITY];
     unsigned seen = 0;
-    FILE *fp;
+    ByteReader r = byte_reader(text, size);
     memset(&c, 0, sizeof(c));
     fields[0] = &c.dim; fields[1] = &c.hidden; fields[2] = &c.layers; fields[3] = &c.heads;
     fields[4] = &c.kv_heads; fields[5] = &c.experts; fields[6] = &c.top_k; fields[7] = &c.vocab;
     fields[8] = &c.max_context; fields[9] = &c.shared; fields[10] = &c.bos; fields[11] = &c.eos;
-    fp = open_file(path, "r");
-    if (!fp) die("cannot open config %s: %s", path, strerror(errno));
-    while (fgets(line, sizeof(line), fp)) {
+    while (br_line(&r, line, sizeof(line), "config")) {
         char *s, *eq, *value, *comment;
         unsigned k;
-        if (!strchr(line, '\n') && !feof(fp)) die("config line too long");
         comment = strchr(line, '#');
         if (comment) *comment = 0;
         s = trim(line);
@@ -53,8 +49,6 @@ Config config_read(const char *path) {
             c.theta = (float)parse_real(value, s);
         }
     }
-    if (ferror(fp)) die("config read error");
-    fclose(fp);
     if (seen != ALL_KEYS) die("config is missing required fields");
     if (!c.dim || c.dim > MAX_DIM || !c.hidden || c.hidden > MAX_DIM || !c.layers || c.layers > 1024 ||
         !c.heads || c.heads > c.dim || c.dim % c.heads || (c.dim / c.heads) % 2 ||
@@ -63,5 +57,14 @@ Config config_read(const char *path) {
         !c.max_context || c.max_context > MAX_CONTEXT || c.bos != BOS_ID || c.eos != EOS_ID ||
         !(c.eps > 0 && c.eps < 1) || !(c.theta > 1) || !isfinite(c.theta))
         die("invalid config dimensions or special token IDs");
+    return c;
+}
+
+Config config_read(const char *path) {
+    MappedFile f;
+    Config c;
+    map_file(path, &f);
+    c = config_parse(f.data, (size_t)f.size);
+    unmap_file(&f);
     return c;
 }

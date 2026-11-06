@@ -14,6 +14,20 @@ quantizados em Q8 (formato `SMOEQ8`) no Windows, no Linux e no macOS. O caso pri
 
 Os números, o método e o que foi descartado no caminho estão em [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Um arquivo só: o executável já é o modelo
+
+```sh
+make qwen-pt                      # gera dist/qwen-pt.exe (Windows) ou dist/qwen-pt: runtime + Qwen, 560 MB
+dist/qwen-pt.exe                  # duplo clique ou terminal: abre o chat em português
+dist/qwen-pt.exe --prompt "..."   # uma resposta e sai (scripts, pipes)
+```
+
+Como o llamafile, o binário carrega os próprios pesos: não precisa de instalação, DLL extra, Python nem arquivo ao
+lado. O chat lembra a conversa (o cache KV é reaproveitado entre turnos); `/limpar` reinicia e `/sair` encerra. Para um
+executável de 340 MB, empacote a variante Q5 (veja abaixo) com `build/smolmoe-bundle --model ...-q5.smoe
+--config ... --tokenizer ... --exe build/smolmoe.exe --out dist/qwen-pt-q5.exe`. O formato do pacote está em
+[docs/FORMAT.md](docs/FORMAT.md).
+
 ## Início rápido
 
 ### Windows (MSYS2 UCRT64 ou qualquer MinGW-w64 GCC/Clang)
@@ -50,8 +64,9 @@ Saída real, sem edição:
 
 | Opção | Padrão | Efeito |
 |---|---|---|
-| `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno (Qwen) |
-| `--tokens N` | 64 | Máximo de tokens novos; para no EOS |
+| (sem `--prompt`) / `-i` | — | Chat multi-turno no terminal (modelos de chat) |
+| `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno com `--prompt` |
+| `--tokens N` | 64 (512 no chat) | Máximo de tokens novos; para no EOS |
 | `--temperature X` | 0 (guloso) | Amostragem quando > 0 |
 | `--top-k N` / `--top-p X` | 40 / 0,95 | Truncamento da amostragem |
 | `--seed N` | 1 | Amostragem reproduzível |
@@ -116,8 +131,7 @@ models/     pesos locais (fora do git)
   compartilhados) e `smolmoe_qwen2` (com viés em QKV). Qualquer outra é recusada explicitamente.
 - O roteamento MoE é testado só com checkpoints sintéticos. **Nenhum modelo MoE treinado é suportado ainda**; os modelos
   incluídos são densos, representados como um expert sempre ativo.
-- Não é compatível com Kimi K3 nem com GGUF, e não há servidor HTTP nem modo multi-turno (estão no
-  [roadmap](docs/ROADMAP.md)).
+- Não é compatível com Kimi K3 nem com GGUF, e ainda não há servidor HTTP (está no [roadmap](docs/ROADMAP.md)).
 - O Qwen 0.5B é pequeno: às vezes mistura idiomas ou ignora o formato pedido. Revise as respostas.
 - O checkpoint precisa ficar imutável durante a execução. No Windows o arquivo é aberto sem permitir escrita; no
   Linux/macOS, truncar ou reescrever o `.smoe` enquanto ele roda derruba o processo (`SIGBUS`), como em qualquer

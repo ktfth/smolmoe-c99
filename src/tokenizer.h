@@ -6,6 +6,7 @@
 #ifndef SMOLMOE_TOKENIZER_H
 #define SMOLMOE_TOKENIZER_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "util.h"
@@ -13,6 +14,8 @@
 typedef struct Tokenizer Tokenizer;
 typedef void (*ByteSink)(void *ctx, const unsigned char *bytes, uint32_t n);
 
+/* Parses a tokenizer from memory (a file or an embedded `__tokenizer__` blob). */
+Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t vocab, Memory *mem);
 Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem);
 
 /* Allocates encoding workspace for prompts up to max_bytes raw bytes and
@@ -31,6 +34,12 @@ uint32_t tokenizer_max_piece(const Tokenizer *t);
 /* Renders an encoded prompt back to text, as --tokenize-only prints it. */
 void tokenizer_render_prompt(Tokenizer *t, const uint32_t *ids, uint32_t n, unsigned char *buf,
                              ByteSink sink, void *ctx);
+
+/* Multi-turn ChatML (Qwen only): one message, optionally opening the assistant
+ * reply, and the tokens that close a generated reply. */
+uint32_t tokenizer_chat_turn(Tokenizer *t, const char *role, const unsigned char *text, uint32_t n,
+                             int open_assistant, uint32_t *ids);
+uint32_t tokenizer_chat_close(Tokenizer *t, uint32_t *ids);
 
 int tokenizer_supports_chat(const Tokenizer *t);
 /* Control tokens that must never be sampled (EOS excepted). */

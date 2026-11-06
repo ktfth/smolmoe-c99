@@ -15,15 +15,31 @@ static uint64_t block_bytes(uint32_t dtype) {
 }
 
 static uint64_t expected_bytes(const Tensor *t) {
+    if (t->dtype == DTYPE_BLOB) return t->bytes; /* any length */
     if (t->dtype != DTYPE_F32) return (uint64_t)t->rows * ((t->cols + QK - 1) / QK) * block_bytes(t->dtype);
     return (uint64_t)t->rows * t->cols * 4;
 }
 
+/* The only permitted alias: lm_head sharing embed's extent (tied weights). */
 static void check_alias(const ModelFile *mf, const Tensor *t, uint32_t index) {
-    const Tensor *e = &mf->tensors[0];
-    if (!index || strcmp(t->name, "lm_head") || strcmp(e->name, "embed") || t->offset != e->offset ||
-        t->bytes != e->bytes || t->rows != e->rows || t->cols != e->cols || t->dtype != e->dtype)
+    const Tensor *e = NULL;
+    uint32_t j;
+    for (j = 0; j < index; ++j)
+        if (!strcmp(mf->tensors[j].name, "embed")) e = &mf->tensors[j];
+    if (!e || strcmp(t->name, "lm_head") || t->offset != e->offset || t->bytes != e->bytes ||
+        t->rows != e->rows || t->cols != e->cols || t->dtype != e->dtype)
         die("invalid tied embedding alias");
+}
+
+static void check_metadata(const ModelFile *mf, const Tensor *t) {
+    if (t->dtype == DTYPE_BLOB) {
+        if (mf->version < 3 || t->rows != 1 || t->cols != 1 || t->alias || strncmp(t->name, "__", 2))
+            die("invalid blob record: %s", t->name);
+        return;
+    }
+    if (t->alias > 1 || (t->alias && mf->version < 2) || !t->rows || !t->cols || t->cols > MAX_TENSOR_COLS ||
+        t->dtype > DTYPE_Q5 || !strncmp(t->name, "__", 2))
+        die("invalid tensor metadata: %s", t->name);
 }
 
 void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Memory *mem) {
@@ -34,8 +50,8 @@ void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Me
     mf->base = data;
     mf->size = size;
     mf->version = data[7];
-    if (memcmp(data, "SMOEQ8\0", 7) || (mf->version != 1 && mf->version != 2) || rd_u32(data + 12))
-        die("unsupported checkpoint format (expected SMOEQ8 v1/v2)");
+    if (memcmp(data, "SMOEQ8\0", 7) || mf->version < 1 || mf->version > 3 || rd_u32(data + 12))
+        die("unsupported checkpoint format (expected SMOEQ8 v1-v3)");
     mf->count = rd_u32(data + 8);
     if (!mf->count || mf->count > MAX_TENSORS) die("invalid tensor count");
     previous = HEADER_BYTES + (uint64_t)mf->count * RECORD_BYTES;
@@ -52,9 +68,7 @@ void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Me
         t->alias = rd_u32(rec + 52);
         t->offset = rd_u64(rec + 56);
         t->bytes = rd_u64(rec + 64);
-        if (t->alias > 1 || (t->alias && mf->version != 2) || !t->rows || !t->cols ||
-            t->cols > MAX_TENSOR_COLS || t->dtype > DTYPE_Q5)
-            die("invalid tensor metadata: %s", t->name);
+        check_metadata(mf, t);
         if (t->bytes != expected_bytes(t) || (!t->alias && t->offset < previous) || t->offset > size ||
             t->bytes > size - t->offset)
             die("invalid tensor extent: %s", t->name);
@@ -62,8 +76,16 @@ void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Me
         else previous = t->offset + t->bytes;
         if (i && strcmp(mf->tensors[i - 1].name, t->name) >= 0)
             die("tensor directory must have unique sorted names");
+        if (t->dtype == DTYPE_BLOB) ++mf->blobs;
         t->data = data + t->offset;
     }
+}
+
+const Tensor *modelfile_blob(const ModelFile *mf, const char *name) {
+    uint32_t i;
+    for (i = 0; i < mf->count; ++i)
+        if (mf->tensors[i].dtype == DTYPE_BLOB && !strcmp(mf->tensors[i].name, name)) return &mf->tensors[i];
+    return NULL;
 }
 
 const Tensor *modelfile_find(const ModelFile *mf, const char *name, uint32_t rows, uint32_t cols,
@@ -113,7 +135,7 @@ static void verify_task(void *ctx, uint32_t index, uint32_t count) {
         const Tensor *t = &v->mf->tensors[i];
         uint64_t units = t->dtype == DTYPE_F32 ? t->bytes / 4 : t->bytes / block_bytes(t->dtype);
         uint64_t begin = units * index / count, end = units * (index + 1) / count;
-        if (t->alias) continue;
+        if (t->alias || t->dtype == DTYPE_BLOB) continue;
         if (!verify_units(t, begin, end)) {
             uint32_t expected = __atomic_load_n(&v->bad, __ATOMIC_RELAXED);
             while ((!expected || i + 1 < expected) &&

@@ -19,8 +19,8 @@ struct QwenTokenizer {
     QwenMerge *merge;
 };
 
-static void read_exact(FILE *f, void *buf, size_t n, const char *what) {
-    if (fread(buf, 1, n, f) != n) die("truncated Qwen tokenizer: %s", what);
+static void read_exact(ByteReader *r, void *buf, size_t n, const char *what) {
+    if (!br_read(r, buf, n)) die("truncated Qwen tokenizer: %s", what);
 }
 
 static void insert_merge(QwenTokenizer *q, uint32_t i) {
@@ -44,12 +44,11 @@ static void validate_merge(const QwenTokenizer *q, const QwenMerge *m) {
         die("invalid Qwen merge");
 }
 
-QwenTokenizer *qwen_load(const char *path, uint32_t vocab, Memory *mem) {
-    FILE *f = open_file(path, "rb");
+QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
     unsigned char header[24], rec[12], *data;
     uint32_t i, total, used = 0;
     QwenTokenizer *q = (QwenTokenizer *)mem_alloc(mem, 1, sizeof(*q));
-    if (!f || fread(header, 1, 24, f) != 24 || memcmp(header, "SMQBP1\0\1", 8) || rd_u32(header + 8) != vocab)
+    if (!br_read(f, header, 24) || memcmp(header, "SMQBP1\0\1", 8) || rd_u32(header + 8) != vocab)
         die("invalid Qwen tokenizer header");
     q->vocab = vocab;
     q->nmerge = rd_u32(header + 12);
@@ -89,8 +88,7 @@ QwenTokenizer *qwen_load(const char *path, uint32_t vocab, Memory *mem) {
         validate_merge(q, m);
         insert_merge(q, i);
     }
-    if (fgetc(f) != EOF || ferror(f)) die("extra Qwen tokenizer payload");
-    fclose(f);
+    if (!br_at_end(f)) die("extra Qwen tokenizer payload");
     return q;
 }
 
@@ -206,26 +204,46 @@ static void encode_literal(QwenTokenizer *q, const char *s, uint32_t *ids, uint3
 
 /* ChatML: <|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{prompt}
  * <|im_end|>\n<|im_start|>assistant\n — <|im_end|> is EOS (257). */
+/* One ChatML message: <|im_start|>{role}\n{text}<|im_end|>\n, followed by the
+ * assistant generation prefix when open_assistant is set. <|im_end|> is EOS. */
+static void chat_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                         int open_assistant, uint32_t *ids, uint32_t *n) {
+    push_id(ids, n, q->capacity, q->im_start);
+    encode_literal(q, role, ids, n);
+    encode_literal(q, "\n", ids, n);
+    encode_text(q, text, bytes, ids, n);
+    push_id(ids, n, q->capacity, EOS_ID);
+    encode_literal(q, "\n", ids, n);
+    if (open_assistant) {
+        push_id(ids, n, q->capacity, q->im_start);
+        encode_literal(q, "assistant\n", ids, n);
+    }
+}
+
 uint32_t qwen_encode(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, uint32_t *ids,
                      int chat, const char *system) {
     uint32_t n = 0;
     if (chat) {
-        push_id(ids, &n, q->capacity, q->im_start);
-        encode_literal(q, "system\n", ids, &n);
-        encode_literal(q, system, ids, &n);
-        push_id(ids, &n, q->capacity, EOS_ID);
-        encode_literal(q, "\n", ids, &n);
-        push_id(ids, &n, q->capacity, q->im_start);
-        encode_literal(q, "user\n", ids, &n);
-    }
-    encode_text(q, s, bytes, ids, &n);
-    if (chat) {
-        push_id(ids, &n, q->capacity, EOS_ID);
-        encode_literal(q, "\n", ids, &n);
-        push_id(ids, &n, q->capacity, q->im_start);
-        encode_literal(q, "assistant\n", ids, &n);
+        chat_message(q, "system", (const unsigned char *)system, (uint32_t)strlen(system), 0, ids, &n);
+        chat_message(q, "user", s, bytes, 1, ids, &n);
+    } else {
+        encode_text(q, s, bytes, ids, &n);
     }
     if (!n) push_id(ids, &n, q->capacity, BOS_ID);
+    return n;
+}
+
+uint32_t qwen_chat_turn(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                        int open_assistant, uint32_t *ids) {
+    uint32_t n = 0;
+    chat_message(q, role, text, bytes, open_assistant, ids, &n);
+    return n;
+}
+
+uint32_t qwen_chat_close(QwenTokenizer *q, uint32_t *ids) {
+    uint32_t n = 0;
+    push_id(ids, &n, q->capacity, EOS_ID);
+    encode_literal(q, "\n", ids, &n);
     return n;
 }
 

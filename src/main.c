@@ -1,15 +1,18 @@
 /* smolmoe command-line interface. */
 #include <float.h>
-#include <math.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "bundle.h"
+#include "chat.h"
 #include "config.h"
 #include "kernels.h"
 #include "model.h"
 #include "modelfile.h"
+#include "output.h"
 #include "platform.h"
 #include "sampler.h"
 #include "threadpool.h"
@@ -19,6 +22,8 @@
 #define DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
 #define DEFAULT_CONTEXT 2048u
 #define DEFAULT_BATCH 32u
+#define DEFAULT_TOKENS 64u
+#define DEFAULT_CHAT_TOKENS 512u
 #define MAX_BATCH 512u
 #define MAX_THREADS 256u
 #define PROMPT_BYTES_PER_TOKEN 4u
@@ -28,7 +33,7 @@ typedef struct Options {
     const char *stats, *trace, *token_ids;
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
-    int scalar, chat, hash_logits, tokenize_only, perplexity;
+    int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given;
 } Options;
 
 typedef struct Stats {
@@ -39,68 +44,28 @@ typedef struct Stats {
     uint32_t nll_tokens;
 } Stats;
 
-/* ---- UTF-8 aware streaming output -------------------------------------- */
-
-/* Holds back an incomplete trailing UTF-8 sequence so consoles never receive
- * half a character. Byte content is unchanged; it is only delayed. */
-typedef struct Output {
-    FILE *f;
-    unsigned char pending[4];
-    uint32_t n;
-} Output;
-
-static uint32_t incomplete_tail(const unsigned char *p, uint32_t n) {
-    uint32_t back;
-    for (back = 1; back <= 3 && back <= n; ++back) {
-        unsigned char c = p[n - back];
-        uint32_t need;
-        if ((c & 0xc0) == 0x80) continue;
-        need = (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 1;
-        return back < need ? back : 0;
-    }
-    return 0;
-}
-
-static void write_all(FILE *f, const unsigned char *p, size_t n) {
-    if (n && fwrite(p, 1, n, f) != n) die("output write failed");
-}
-
-static void output_bytes(void *ctx, const unsigned char *p, uint32_t n) {
-    Output *o = (Output *)ctx;
-    unsigned char tail[8];
-    uint32_t total = o->n + n, tl = total < 4 ? total : 4, i, hold;
-    for (i = 0; i < tl; ++i) {
-        uint32_t at = total - tl + i;
-        tail[i] = at < o->n ? o->pending[at] : p[at - o->n];
-    }
-    hold = incomplete_tail(tail, tl);
-    if (total - hold <= o->n) {
-        write_all(o->f, o->pending, total - hold);
-    } else {
-        write_all(o->f, o->pending, o->n);
-        write_all(o->f, p, total - hold - o->n);
-    }
-    memmove(o->pending, tail + tl - hold, hold);
-    o->n = hold;
-}
-
-static void output_finish(Output *o) {
-    write_all(o->f, o->pending, o->n);
-    o->n = 0;
-    if (fflush(o->f)) die("output flush failed");
-}
+/* Where the weights (and possibly the embedded config/tokenizer) come from. */
+typedef struct Source {
+    MappedFile file;
+    ModelFile mf;
+    int present;
+} Source;
 
 /* ---- command line ------------------------------------------------------ */
 
 static void usage(FILE *out) {
     fputs("smolmoe " SMOLMOE_VERSION " - CPU inference for SMOEQ8 checkpoints\n\n"
-          "usage: smolmoe --model FILE --config FILE --tokenizer FILE --prompt TEXT [options]\n\n"
+          "usage: smolmoe --model FILE [--config FILE --tokenizer FILE] [--prompt TEXT] [options]\n"
+          "       qwen-pt.exe [--prompt TEXT] [options]     (self-contained bundle: no files needed)\n"
+          "  Without a prompt, a chat model starts an interactive conversation.\n"
+          "  --config/--tokenizer default to the copies embedded by smolmoe-bundle.\n\n"
           "input\n"
           "  --prompt-file FILE   raw UTF-8/byte prompt instead of --prompt\n"
           "  --chat               wrap the prompt in a Qwen2 ChatML single-turn template\n"
+          "  --interactive, -i    multi-turn chat on stdin/stdout (default without a prompt)\n"
           "  --system TEXT        ChatML system message (default: Brazilian Portuguese)\n"
           "generation\n"
-          "  --tokens N           max new tokens (default 64)\n"
+          "  --tokens N           max new tokens (default 64; 512 per reply in chat)\n"
           "  --temperature X      0 = greedy (default), positive = sample\n"
           "  --top-k N            sample among the N most likely tokens (default 40, 0 = all)\n"
           "  --top-p X            nucleus sampling mass in (0,1] (default 0.95)\n"
@@ -117,64 +82,73 @@ static void usage(FILE *out) {
           "  --hash-logits        FNV-1a64 of every raw logit, reported in the stats\n"
           "  --token-ids FILE     prompt and generated token IDs, one per line\n"
           "  --perplexity         score the prompt (teacher-forced NLL, perplexity); no generation\n"
-          "  --tokenize-only      encode and render the prompt; no model needed\n"
+          "  --tokenize-only      encode and render the prompt; no weights needed\n"
           "  --version, --help\n", out);
+}
+
+static void parse_value(Options *o, const char *opt, const char *value) {
+    if (!strcmp(opt, "--model")) o->model = value;
+    else if (!strcmp(opt, "--config")) o->config = value;
+    else if (!strcmp(opt, "--tokenizer")) o->tokenizer = value;
+    else if (!strcmp(opt, "--prompt")) o->prompt = value;
+    else if (!strcmp(opt, "--prompt-file")) o->prompt_file = value;
+    else if (!strcmp(opt, "--system")) o->system = value;
+    else if (!strcmp(opt, "--stats")) o->stats = value;
+    else if (!strcmp(opt, "--trace")) o->trace = value;
+    else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
+    else if (!strcmp(opt, "--tokens")) {
+        o->tokens = parse_u32(value, MAX_CONTEXT, "tokens");
+        o->tokens_given = 1;
+    } else if (!strcmp(opt, "--context")) o->context = parse_u32(value, MAX_CONTEXT, "context");
+    else if (!strcmp(opt, "--memory-mib")) o->memory_mib = parse_u32(value, 1048576, "memory-mib");
+    else if (!strcmp(opt, "--seed")) o->seed = parse_u32(value, UINT32_MAX, "seed");
+    else if (!strcmp(opt, "--threads")) o->threads = parse_u32(value, MAX_THREADS, "threads");
+    else if (!strcmp(opt, "--batch")) o->batch = parse_u32(value, MAX_BATCH, "batch");
+    else if (!strcmp(opt, "--top-k")) o->top_k = parse_u32(value, UINT32_MAX, "top-k");
+    else if (!strcmp(opt, "--top-p")) {
+        double p = parse_real(value, "top-p");
+        if (!(p > 0 && p <= 1)) die("top-p must be in (0, 1]");
+        o->top_p = (float)p;
+    } else if (!strcmp(opt, "--temperature")) {
+        double t = parse_real(value, "temperature");
+        if (t < 0 || t > 100 || (t > 0 && t < 1e-6)) die("temperature must be 0 or in [1e-6, 100]");
+        o->temperature = (float)t;
+    } else {
+        die("unknown option: %s", opt);
+    }
 }
 
 static void parse_args(int argc, char **argv, Options *o) {
     int a;
     memset(o, 0, sizeof(*o));
     o->system = DEFAULT_SYSTEM;
-    o->tokens = 64;
+    o->tokens = DEFAULT_TOKENS;
     o->memory_mib = 512;
     o->seed = 1;
     o->batch = DEFAULT_BATCH;
     o->top_k = 40;
     o->top_p = 0.95f;
     for (a = 1; a < argc; ++a) {
-        const char *opt = argv[a], *value;
+        const char *opt = argv[a];
         if (!strcmp(opt, "--help") || !strcmp(opt, "-h")) { usage(stdout); exit(0); }
         if (!strcmp(opt, "--version")) { puts("smolmoe " SMOLMOE_VERSION); exit(0); }
         if (!strcmp(opt, "--scalar")) { o->scalar = 1; continue; }
         if (!strcmp(opt, "--chat")) { o->chat = 1; continue; }
+        if (!strcmp(opt, "--interactive") || !strcmp(opt, "-i")) { o->interactive = 1; continue; }
         if (!strcmp(opt, "--hash-logits")) { o->hash_logits = 1; continue; }
         if (!strcmp(opt, "--tokenize-only")) { o->tokenize_only = 1; continue; }
         if (!strcmp(opt, "--perplexity")) { o->perplexity = 1; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
-        value = argv[++a];
-        if (!strcmp(opt, "--model")) o->model = value;
-        else if (!strcmp(opt, "--config")) o->config = value;
-        else if (!strcmp(opt, "--tokenizer")) o->tokenizer = value;
-        else if (!strcmp(opt, "--prompt")) o->prompt = value;
-        else if (!strcmp(opt, "--prompt-file")) o->prompt_file = value;
-        else if (!strcmp(opt, "--system")) o->system = value;
-        else if (!strcmp(opt, "--stats")) o->stats = value;
-        else if (!strcmp(opt, "--trace")) o->trace = value;
-        else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
-        else if (!strcmp(opt, "--tokens")) o->tokens = parse_u32(value, MAX_CONTEXT, "tokens");
-        else if (!strcmp(opt, "--context")) o->context = parse_u32(value, MAX_CONTEXT, "context");
-        else if (!strcmp(opt, "--memory-mib")) o->memory_mib = parse_u32(value, 1048576, "memory-mib");
-        else if (!strcmp(opt, "--seed")) o->seed = parse_u32(value, UINT32_MAX, "seed");
-        else if (!strcmp(opt, "--threads")) o->threads = parse_u32(value, MAX_THREADS, "threads");
-        else if (!strcmp(opt, "--batch")) o->batch = parse_u32(value, MAX_BATCH, "batch");
-        else if (!strcmp(opt, "--top-k")) o->top_k = parse_u32(value, UINT32_MAX, "top-k");
-        else if (!strcmp(opt, "--top-p")) {
-            double p = parse_real(value, "top-p");
-            if (!(p > 0 && p <= 1)) die("top-p must be in (0, 1]");
-            o->top_p = (float)p;
-        } else if (!strcmp(opt, "--temperature")) {
-            double t = parse_real(value, "temperature");
-            if (t < 0 || t > 100 || (t > 0 && t < 1e-6)) die("temperature must be 0 or in [1e-6, 100]");
-            o->temperature = (float)t;
-        } else {
-            die("unknown option: %s", opt);
-        }
+        parse_value(o, opt, argv[++a]);
     }
-    if (!o->config || !o->tokenizer || (!o->model && !o->tokenize_only) || (!o->prompt && !o->prompt_file) ||
-        (o->prompt && o->prompt_file)) {
-        usage(stderr);
-        exit(1);
+    if (o->prompt && o->prompt_file) { usage(stderr); exit(1); }
+    if (!o->prompt && !o->prompt_file) {
+        if (o->tokenize_only || o->perplexity) die("--tokenize-only and --perplexity need --prompt or --prompt-file");
+        o->interactive = 1;
     }
+    if (o->interactive && (o->prompt || o->prompt_file || o->trace || o->hash_logits || o->token_ids))
+        die("interactive chat cannot be combined with a prompt or with --trace/--hash-logits/--token-ids");
+    if (o->interactive && !o->tokens_given) o->tokens = DEFAULT_CHAT_TOKENS;
     if (!o->seed || !o->memory_mib || !o->batch) die("seed, memory budget and batch must be nonzero");
     if (o->perplexity) o->tokens = 0;
 }
@@ -293,31 +267,162 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
     if (ferror(f)) die("statistics write failed");
 }
 
-/* ---- main -------------------------------------------------------------- */
+/* ---- model source ------------------------------------------------------ */
+
+/* --model wins; otherwise look for a container appended to this executable. */
+static void open_source(const Options *o, Source *s, Memory *mem) {
+    const char *self;
+    uint64_t offset, length;
+    memset(s, 0, sizeof(*s));
+    if (o->model) {
+        map_file(o->model, &s->file);
+        modelfile_parse(&s->mf, s->file.data, s->file.size, mem);
+        s->present = 1;
+        return;
+    }
+    self = self_executable_path();
+    if (!self) return;
+    map_file(self, &s->file);
+    if (!bundle_find(s->file.data, s->file.size, &offset, &length)) {
+        unmap_file(&s->file);
+        return;
+    }
+    modelfile_parse(&s->mf, s->file.data + offset, length, mem);
+    s->present = 1;
+}
+
+static const Tensor *embedded(const Source *s, const char *name) {
+    return s->present ? modelfile_blob(&s->mf, name) : NULL;
+}
+
+static Config load_config(const Options *o, const Source *s) {
+    const Tensor *blob;
+    if (o->config) return config_read(o->config);
+    blob = embedded(s, BLOB_CONFIG);
+    if (!blob) die("no config: pass --config, or embed it with smolmoe-bundle");
+    return config_parse(blob->data, (size_t)blob->bytes);
+}
+
+static Tokenizer *load_tokenizer(const Options *o, const Source *s, uint32_t vocab, Memory *mem) {
+    const Tensor *blob;
+    if (o->tokenizer) return tokenizer_load(o->tokenizer, vocab, mem);
+    blob = embedded(s, BLOB_TOKENIZER);
+    if (!blob) die("no tokenizer: pass --tokenizer, or embed it with smolmoe-bundle");
+    return tokenizer_parse(blob->data, (size_t)blob->bytes, vocab, mem);
+}
+
+/* ---- generation -------------------------------------------------------- */
+
+typedef struct Run {
+    const Options *o;
+    Model *model;
+    Tokenizer *tok;
+    Sampler *sampler;
+    uint32_t *ids;
+    unsigned char *prompt, *piece;
+    uint32_t prompt_cap, np;
+    FILE *trace, *ids_out;
+    Output *out;
+    Stats *st;
+} Run;
 
 static uint32_t default_threads(void) {
     uint32_t n = cpu_physical_cores();
     return n > MAX_THREADS ? MAX_THREADS : n;
 }
 
+/* Batched prefill; every logit is kept when traced, hashed or scored. */
+static uint32_t prefill_prompt(const Run *r) {
+    const uint32_t vocab = r->model->c.vocab;
+    const int every_logit = r->trace || r->o->hash_logits || r->o->perplexity;
+    uint32_t pos = 0;
+    while (pos < r->np) {
+        uint32_t n = r->np - pos < r->model->batch ? r->np - pos : r->model->batch;
+        int last = pos + n == r->np;
+        LogitsMode mode = every_logit ? LOGITS_ALL : last ? LOGITS_LAST : LOGITS_NONE;
+        model_forward(r->model, r->ids + pos, n, pos, mode);
+        if (mode == LOGITS_ALL) record_logits(r->o, r->trace, r->st, r->model->logits, n, pos, vocab, r->ids, r->np);
+        if (mode == LOGITS_ALL && last)
+            memmove(r->model->logits, r->model->logits + (size_t)(n - 1) * vocab, vocab * sizeof(float));
+        pos += n;
+    }
+    return pos;
+}
+
+/* Single prompt: prefill, then sample until EOS or --tokens. */
+static void run_prompt(const Run *r) {
+    const uint32_t vocab = r->model->c.vocab;
+    const int every_logit = r->trace || r->o->hash_logits || r->o->perplexity;
+    Stats *st = r->st;
+    uint32_t pos, i;
+    st->loaded = now_seconds();
+    pos = prefill_prompt(r);
+    st->processed = st->prompt_tokens = r->np;
+    st->prefill_end = now_seconds();
+    for (i = 0; i < r->o->tokens; ++i) {
+        uint32_t token = sampler_next(r->sampler, r->model->logits), len;
+        if (r->ids_out) fprintf(r->ids_out, "%u\n", token);
+        if (token == EOS_ID) break;
+        len = tokenizer_decode(r->tok, token, r->piece);
+        output_bytes(r->out, r->piece, len);
+        if (fflush(stdout)) die("output flush failed");
+        ++st->generated;
+        if (st->first == 0) st->first = now_seconds();
+        if (i + 1 < r->o->tokens) {
+            LogitsMode mode = every_logit ? LOGITS_ALL : LOGITS_LAST;
+            model_forward(r->model, &token, 1, pos, mode);
+            if (mode == LOGITS_ALL) record_logits(r->o, r->trace, st, r->model->logits, 1, pos, vocab, r->ids, r->np);
+            ++pos;
+            ++st->processed;
+        }
+    }
+    output_finish(r->out);
+    st->ended = now_seconds();
+}
+
+static void run_chat(const Run *r) {
+    ChatContext cc;
+    ChatStats cs;
+    Stats *st = r->st;
+    cc.model = r->model;
+    cc.tok = r->tok;
+    cc.sampler = r->sampler;
+    cc.out = r->out;
+    cc.ids = r->ids;
+    cc.line = (char *)r->prompt;
+    cc.line_cap = r->prompt_cap;
+    cc.piece = r->piece;
+    cc.system = r->o->system;
+    cc.max_reply = r->o->tokens;
+    st->loaded = now_seconds();
+    chat_run(&cc, &cs);
+    /* Stats count time spent computing, not time spent waiting for the user. */
+    st->prompt_tokens = cs.prompt_tokens;
+    st->generated = cs.generated;
+    st->processed = cs.prompt_tokens + cs.generated;
+    st->prefill_end = st->loaded + cs.prefill_seconds;
+    st->ended = st->prefill_end + cs.decode_seconds;
+    st->first = cs.generated ? st->loaded + cs.first_token_seconds : 0;
+}
+
 int main(int argc, char **argv) {
     Options o;
     Stats st;
     Memory mem;
+    Source src;
     Config c;
-    Tokenizer *tok;
-    MappedFile mapped;
-    ModelFile mf;
     Model model;
     Sampler sampler;
     Pool *pool;
     Output out;
-    FILE *trace, *ids_out = NULL, *stats_out;
-    unsigned char *prompt, *piece, *banned;
-    uint32_t *ids, prompt_cap, id_cap, np, pos, i, context;
+    Run run;
+    FILE *stats_out;
+    unsigned char *banned;
+    uint32_t id_cap, i, context;
     const char *backend;
 
     memset(&st, 0, sizeof(st));
+    memset(&run, 0, sizeof(run));
     st.start = now_seconds();
     st.logits_hash = UINT64_C(14695981039346656037);
     platform_init(&argc, &argv);
@@ -327,94 +432,76 @@ int main(int argc, char **argv) {
 
     memset(&mem, 0, sizeof(mem));
     mem.limit = mul_size(o.memory_mib, 1048576);
-    c = config_read(o.config);
+    open_source(&o, &src, &mem);
+    if (!src.present && !o.tokenize_only) {
+        usage(stderr);
+        return 1;
+    }
+    c = load_config(&o, &src);
     context = o.context ? o.context : (c.max_context < DEFAULT_CONTEXT ? c.max_context : DEFAULT_CONTEXT);
     if (context > c.max_context) die("--context exceeds the model's max_context (%u)", c.max_context);
 
-    tok = tokenizer_load(o.tokenizer, c.vocab, &mem);
-    if (o.chat && !tokenizer_supports_chat(tok)) die("--chat requires a Qwen tokenizer");
-    prompt_cap = (uint32_t)(context < MAX_CONTEXT / PROMPT_BYTES_PER_TOKEN ? context * PROMPT_BYTES_PER_TOKEN : MAX_CONTEXT);
-    id_cap = tokenizer_prepare(tok, prompt_cap, &mem);
-    prompt = (unsigned char *)mem_alloc(&mem, prompt_cap ? prompt_cap : 1, 1);
-    ids = (uint32_t *)mem_alloc(&mem, id_cap, sizeof(uint32_t));
-    piece = (unsigned char *)mem_alloc(&mem, tokenizer_max_piece(tok), 1);
-    np = tokenizer_encode(tok, prompt, read_prompt(&o, prompt, prompt_cap), ids, o.chat, o.system);
-    if (np > context) die("encoded prompt (%u tokens) exceeds --context (%u)", np, context);
-    out.f = stdout;
-    out.n = 0;
+    run.o = &o;
+    run.st = &st;
+    run.out = &out;
+    run.tok = load_tokenizer(&o, &src, c.vocab, &mem);
+    if ((o.chat || o.interactive) && !tokenizer_supports_chat(run.tok))
+        die("chat needs a chat model (Qwen tokenizer); pass --prompt for plain text continuation");
+    run.prompt_cap = (uint32_t)(context < MAX_CONTEXT / PROMPT_BYTES_PER_TOKEN ? context * PROMPT_BYTES_PER_TOKEN
+                                                                               : MAX_CONTEXT);
+    id_cap = tokenizer_prepare(run.tok, run.prompt_cap, &mem);
+    run.prompt = (unsigned char *)mem_alloc(&mem, (size_t)run.prompt_cap + 1, 1);
+    run.ids = (uint32_t *)mem_alloc(&mem, id_cap, sizeof(uint32_t));
+    run.piece = (unsigned char *)mem_alloc(&mem, tokenizer_max_piece(run.tok), 1);
+    out = output_to(stdout);
+    if (!o.interactive) {
+        run.np = tokenizer_encode(run.tok, run.prompt, read_prompt(&o, run.prompt, run.prompt_cap), run.ids, o.chat,
+                                  o.system);
+        if (run.np > context) die("encoded prompt (%u tokens) exceeds --context (%u)", run.np, context);
+    }
 
-    ids_out = open_output(o.token_ids);
-    if (ids_out)
-        for (i = 0; i < np; ++i) fprintf(ids_out, "%u\n", ids[i]);
+    run.ids_out = open_output(o.token_ids);
+    if (run.ids_out)
+        for (i = 0; i < run.np; ++i) fprintf(run.ids_out, "%u\n", run.ids[i]);
     if (o.tokenize_only) {
-        tokenizer_render_prompt(tok, ids, np, piece, output_bytes, &out);
+        tokenizer_render_prompt(run.tok, run.ids, run.np, run.piece, output_bytes, &out);
         output_finish(&out);
-        close_output(ids_out, "token ID output");
+        close_output(run.ids_out, "token ID output");
+        if (src.present) unmap_file(&src.file);
         mem_release(&mem);
         return 0;
     }
-    if (o.tokens > context - np) die("prompt + --tokens exceeds --context; increase context or reduce tokens");
+    if (!o.interactive && o.tokens > context - run.np)
+        die("prompt + --tokens exceeds --context; increase context or reduce tokens");
 
     backend = kernels_select(o.scalar);
     pool = pool_create(o.threads ? o.threads : default_threads(), &mem);
-    map_file(o.model, &mapped);
-    modelfile_parse(&mf, mapped.data, mapped.size, &mem);
-    modelfile_verify_payload(&mf, pool);
+    modelfile_verify_payload(&src.mf, pool);
     {
         uint32_t batch = o.batch < context ? o.batch : context;
         int every_logit = o.trace || o.hash_logits || o.perplexity;
-        model_init(&model, &c, &mf, context, batch, every_logit ? batch : 1, pool, &mem);
+        model_init(&model, &c, &src.mf, context, batch, every_logit ? batch : 1, pool, &mem);
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
-    for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(tok, i);
+    for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(run.tok, i);
     sampler_init(&sampler, c.vocab, banned, o.temperature, o.top_k, o.top_p, o.seed, &mem);
-    trace = open_output(o.trace);
-    st.loaded = now_seconds();
+    run.model = &model;
+    run.sampler = &sampler;
+    run.trace = open_output(o.trace);
 
-    /* Prefill in batches; logits are only needed for the final prompt token
-     * unless every logit is being traced or hashed. */
-    for (pos = 0; pos < np;) {
-        uint32_t n = np - pos < model.batch ? np - pos : model.batch;
-        int last = pos + n == np;
-        LogitsMode mode = (trace || o.hash_logits || o.perplexity) ? LOGITS_ALL : last ? LOGITS_LAST : LOGITS_NONE;
-        model_forward(&model, ids + pos, n, pos, mode);
-        if (mode == LOGITS_ALL) record_logits(&o, trace, &st, model.logits, n, pos, c.vocab, ids, np);
-        if (mode == LOGITS_ALL && last) memmove(model.logits, model.logits + (size_t)(n - 1) * c.vocab, c.vocab * sizeof(float));
-        pos += n;
-    }
-    st.processed = st.prompt_tokens = np;
-    st.prefill_end = now_seconds();
+    if (o.interactive) run_chat(&run);
+    else run_prompt(&run);
 
-    for (i = 0; i < o.tokens; ++i) {
-        uint32_t token = sampler_next(&sampler, model.logits), len;
-        if (ids_out) fprintf(ids_out, "%u\n", token);
-        if (token == c.eos) break;
-        len = tokenizer_decode(tok, token, piece);
-        output_bytes(&out, piece, len);
-        if (fflush(stdout)) die("output flush failed");
-        ++st.generated;
-        if (st.first == 0) st.first = now_seconds();
-        if (i + 1 < o.tokens) {
-            LogitsMode mode = (trace || o.hash_logits) ? LOGITS_ALL : LOGITS_LAST;
-            model_forward(&model, &token, 1, pos, mode);
-            if (mode == LOGITS_ALL) record_logits(&o, trace, &st, model.logits, 1, pos, c.vocab, ids, np);
-            ++pos;
-            ++st.processed;
-        }
-    }
-    output_finish(&out);
-    st.ended = now_seconds();
-
-    close_output(trace, "trace");
-    close_output(ids_out, "token ID output");
-    print_stats(stderr, backend, &o, &model, &mem, mapped.size, &st);
+    close_output(run.trace, "trace");
+    close_output(run.ids_out, "token ID output");
+    print_stats(stderr, backend, &o, &model, &mem, src.mf.size, &st);
     stats_out = open_output(o.stats);
     if (stats_out) {
-        print_stats(stats_out, backend, &o, &model, &mem, mapped.size, &st);
+        print_stats(stats_out, backend, &o, &model, &mem, src.mf.size, &st);
         close_output(stats_out, "stats");
     }
     pool_destroy(pool);
-    unmap_file(&mapped);
+    unmap_file(&src.file);
     mem_release(&mem);
     return 0;
 }

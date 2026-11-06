@@ -150,7 +150,7 @@ describe("command line", () => {
 
   test("missing files fail cleanly", () => {
     expectError(cli({ ...base, model: join(work.path, "nope.smoe") }), /cannot open/);
-    expectError(cli({ ...base, tokenizer: join(work.path, "nope.bpe") }), /cannot open tokenizer/);
+    expectError(cli({ ...base, tokenizer: join(work.path, "nope.bpe") }), /cannot open .*nope.bpe/);
   });
 });
 

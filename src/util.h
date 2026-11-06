@@ -48,6 +48,34 @@ static inline float rd_f32(const unsigned char *p) {
     return f;
 }
 
+/* Sequential reader over an in-memory buffer (mapped file or embedded blob). */
+typedef struct ByteReader {
+    const unsigned char *data;
+    size_t size, pos;
+} ByteReader;
+
+static inline ByteReader byte_reader(const unsigned char *data, size_t size) {
+    ByteReader r;
+    r.data = data;
+    r.size = size;
+    r.pos = 0;
+    return r;
+}
+
+/* Copies n bytes; 0 if fewer remain. */
+static inline int br_read(ByteReader *r, void *out, size_t n) {
+    if (n > r->size - r->pos) return 0;
+    memcpy(out, r->data + r->pos, n);
+    r->pos += n;
+    return 1;
+}
+
+static inline int br_at_end(const ByteReader *r) { return r->pos == r->size; }
+
+/* Reads one line (with its newline) as a C string. Returns 1, 0 at end of
+ * input, and dies on a line longer than cap-1 bytes or an embedded NUL. */
+int br_line(ByteReader *r, char *line, size_t cap, const char *what);
+
 uint64_t mix64(uint64_t x);
 uint32_t parse_u32(const char *s, uint32_t max, const char *what);
 double parse_real(const char *s, const char *what);

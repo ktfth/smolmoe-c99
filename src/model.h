@@ -59,6 +59,10 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
  * token's logits to m->logits; LOGITS_ALL writes n rows of vocab_size. */
 void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode);
 
+/* Runs n tokens in batch-sized chunks; with last_logits, m->logits holds the
+ * last token's logits afterwards. */
+void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits);
+
 size_t model_kv_bytes(const Model *m);
 
 #endif

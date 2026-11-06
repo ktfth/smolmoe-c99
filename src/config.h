@@ -16,6 +16,10 @@ typedef struct Config {
     float eps, theta;
 } Config;
 
+#include <stddef.h>
+
+/* Parses config text (from a file or an embedded `__config__` blob). */
+Config config_parse(const unsigned char *text, size_t size);
 Config config_read(const char *path);
 
 #endif

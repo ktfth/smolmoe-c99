@@ -3,6 +3,7 @@
 #   make test            kernel unit tests + bun integration suite
 #   make sanitize        ASan/UBSan build and tests (Linux/macOS)
 #   make release         stripped, statically linked where supported
+#   make qwen-pt         dist/qwen-pt[.exe]: runtime + Qwen weights in one file
 
 CC      ?= cc
 OPT     ?= -O3
@@ -13,7 +14,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform threadpool kernels config tokenizer tokenizer_qwen modelfile model sampler main
+SOURCES := util platform threadpool kernels config tokenizer tokenizer_qwen modelfile container bundle model sampler output chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -35,6 +36,7 @@ BIN        := $(BUILD)/smolmoe$(EXE)
 BIN_SCALAR := $(BUILD)/smolmoe-scalar$(EXE)
 TEST_KERN  := $(BUILD)/test-kernels$(EXE)
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
+BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
 
 OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
@@ -43,7 +45,7 @@ OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release clean bench
 
-all: $(BIN) $(QUANTIZE)
+all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
 tools: $(Q8PACK)
 
@@ -66,6 +68,9 @@ $(BIN_SCALAR): $(OBJ_SCALAR)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(QUANTIZE): $(BUILD)/obj/quantize_main.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BUNDLE): $(BUILD)/obj/bundle_main.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 $(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
@@ -92,10 +97,17 @@ sanitize:
 release:
 	$(MAKE) BUILD=build/release OPT="-O3" LDFLAGS="-s $(STATIC)" all
 
+# Self-contained Portuguese chat executable (needs models/qwen2.5-0.5b-instruct).
+QWEN := models/qwen2.5-0.5b-instruct
+qwen-pt: release
+	@mkdir -p dist
+	build/release/smolmoe-bundle$(EXE) --model $(QWEN)/model.smoe --config $(QWEN)/config.ini \
+		--tokenizer $(QWEN)/tokenizer.qbp --exe build/release/smolmoe$(EXE) --out dist/qwen-pt$(EXE)
+
 bench: $(BIN)
 	bun scripts/bench.ts
 
 clean:
-	rm -rf build tools/q8pack tools/q8pack.exe
+	rm -rf build dist tools/q8pack tools/q8pack.exe
 
--include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/obj/quantize_main.d
+-include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d

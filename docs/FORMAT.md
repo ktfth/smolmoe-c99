@@ -222,3 +222,24 @@ role/end markers separately and encodes user content as plain text; it does not
 interpret special marker strings inside the user's text as conversation control.
 Special/unused outputs are masked except EOS. The supported chat template is
 single-turn system/user/assistant with a generation prefix, not a tools protocol.
+
+## Version 3: single-file models
+
+Version 3 adds dtype 3 (**blob**): opaque bytes with `rows = cols = 1`, `alias = 0` and a name starting with `__`.
+`smolmoe-bundle` stores the config text as `__config__` and the tokenizer file as `__tokenizer__`; the runtime uses
+them when `--config` / `--tokenizer` are omitted. Blobs are excluded from the tensor count check, and v1/v2 readers
+reject v3 files at the header. The tied-embedding alias is located by name, so blobs may sort before `embed`.
+
+## Self-contained executables
+
+```text
+[runtime executable][zero padding to a 64 KiB boundary][SMOEQ8 v3 container][trailer]
+trailer, 32 bytes: "SMOEBDL1" | u64 container offset | u64 container length | "SMOEBDL1"
+```
+
+Without `--model`, the runtime maps its own executable (`/proc/self/exe`, `_NSGetExecutablePath`,
+`GetModuleFileNameW`), validates the trailer (both magics, 64 KiB-aligned offset, offset + length + 32 = file size)
+and parses the container in place. A trailer with both magics but inconsistent fields is a hard error, not a
+fallback. Container offsets are relative to the container start, so the same container works as a file or appended.
+Windows refuses to run executables above 4 GiB, so larger models must stay in a separate `.smoe` file. Code signing
+must happen after bundling (Authenticode covers the whole file).

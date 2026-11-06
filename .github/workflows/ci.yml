@@ -52,7 +52,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: smolmoe-windows-x64
-          path: build/release/smolmoe.exe
+          path: |
+            build/release/smolmoe.exe
+            build/release/smolmoe-bundle.exe
+            build/release/smolmoe-quantize.exe
 
   macos:
     runs-on: macos-14

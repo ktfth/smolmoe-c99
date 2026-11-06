@@ -90,3 +90,17 @@ char *trim(char *s) {
     *end = 0;
     return s;
 }
+
+int br_line(ByteReader *r, char *line, size_t cap, const char *what) {
+    size_t n = 0;
+    if (br_at_end(r)) return 0;
+    while (r->pos < r->size) {
+        char c = (char)r->data[r->pos++];
+        if (!c) die("%s contains a NUL byte", what);
+        if (n + 1 >= cap) die("%s line too long", what);
+        line[n++] = c;
+        if (c == '\n') break;
+    }
+    line[n] = 0;
+    return 1;
+}

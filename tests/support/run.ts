@@ -10,6 +10,8 @@ const EXE = process.platform === "win32" ? ".exe" : "";
 export const BINARY = join(BUILD, `smolmoe${EXE}`);
 export const SCALAR_BINARY = join(BUILD, `smolmoe-scalar${EXE}`);
 export const QUANTIZE_BINARY = join(BUILD, `smolmoe-quantize${EXE}`);
+export const BUNDLE_BINARY = join(BUILD, `smolmoe-bundle${EXE}`);
+export const EXE_SUFFIX = EXE;
 
 export interface Stats {
   readonly version: string;
@@ -43,6 +45,16 @@ export function run(args: readonly (string | number)[], binary: string = BINARY)
     stdout: Buffer.from(proc.stdout),
     stderr: proc.stderr.toString(),
   };
+}
+
+/** Runs with bytes piped to stdin (interactive chat). */
+export function runWithInput(args: readonly (string | number)[], input: string, binary: string = BINARY): RunResult {
+  const proc = Bun.spawnSync([binary, ...args.map(String)], {
+    stdin: new TextEncoder().encode(input),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: proc.exitCode ?? -1, stdout: Buffer.from(proc.stdout), stderr: proc.stderr.toString() };
 }
 
 /** Runs and requires success; returns the parsed stats line. */

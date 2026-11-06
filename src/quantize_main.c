@@ -2,29 +2,22 @@
  *
  * The source is an existing Q8 checkpoint, so this is a second lossy step
  * (Q8 -> float -> Q5). Its quality cost is measured, not assumed:
- * see docs/DECISIONS.md. */
+ * see docs/DECISIONS.md. Embedded blobs (config, tokenizer) are copied. */
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "container.h"
 #include "kernels.h"
 #include "modelfile.h"
 #include "platform.h"
 #include "threadpool.h"
 #include "util.h"
 
-#define HEADER_BYTES 16u
-#define RECORD_BYTES 72u
-#define PAYLOAD_ALIGN 64u
 #define MAX_KEEP 32
-
-typedef struct Plan {
-    uint32_t dtype;
-    int simulate;
-    uint64_t offset, bytes;
-} Plan;
+#define MAX_COLS 65536u
 
 typedef struct Options {
     const char *in, *out;
@@ -32,6 +25,15 @@ typedef struct Options {
     int nkeep;
     int simulate_bits; /* 0: real Q5. 3..7: keep Q8 storage, restrict values to an N-bit grid */
 } Options;
+
+/* Per-tensor conversion job handed to the payload writer. */
+typedef struct Convert {
+    const Tensor *t;
+    int simulate_bits;
+} Convert;
+
+static float row_buffer[MAX_COLS];
+static unsigned char packed_buffer[(MAX_COLS / 32) * 36];
 
 static void usage(void) {
     fputs("usage: smolmoe-quantize --in Q8.smoe --out Q5.smoe [--keep NAME ...] [--simulate-bits N]\n"
@@ -52,8 +54,7 @@ static void parse(int argc, char **argv, Options *o) {
         else if (!strcmp(argv[a], "--simulate-bits")) {
             o->simulate_bits = (int)parse_u32(argv[++a], 7, "simulate-bits");
             if (o->simulate_bits < 3) die("--simulate-bits must be in 3..7");
-        }
-        else if (!strcmp(argv[a], "--keep")) {
+        } else if (!strcmp(argv[a], "--keep")) {
             if (o->nkeep == MAX_KEEP) die("too many --keep patterns");
             o->keep[o->nkeep++] = argv[++a];
         } else usage();
@@ -70,74 +71,6 @@ static int keep_q8(const Options *o, const char *name) {
     return 0;
 }
 
-static uint64_t align_up(uint64_t x) {
-    return (x + PAYLOAD_ALIGN - 1) / PAYLOAD_ALIGN * PAYLOAD_ALIGN;
-}
-
-static void put_u32(unsigned char *p, uint32_t v) {
-    p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); p[2] = (unsigned char)(v >> 16); p[3] = (unsigned char)(v >> 24);
-}
-
-static void put_u64(unsigned char *p, uint64_t v) {
-    put_u32(p, (uint32_t)v);
-    put_u32(p + 4, (uint32_t)(v >> 32));
-}
-
-static void write_bytes(FILE *f, const void *p, size_t n) {
-    if (n && fwrite(p, 1, n, f) != n) die("write failed: %s", strerror(errno));
-}
-
-static void write_zeros(FILE *f, uint64_t n) {
-    static const unsigned char zeros[PAYLOAD_ALIGN];
-    while (n) {
-        size_t chunk = n > PAYLOAD_ALIGN ? PAYLOAD_ALIGN : (size_t)n;
-        write_bytes(f, zeros, chunk);
-        n -= chunk;
-    }
-}
-
-static void plan_layout(const ModelFile *mf, const Options *o, Plan *plan) {
-    uint64_t offset = align_up(HEADER_BYTES + (uint64_t)mf->count * RECORD_BYTES);
-    uint32_t i;
-    for (i = 0; i < mf->count; ++i) {
-        const Tensor *t = &mf->tensors[i];
-        uint64_t nb = (t->cols + QK - 1) / QK;
-        if (t->alias) continue; /* resolved below, after its target */
-        int convert = t->dtype == DTYPE_Q8 && !keep_q8(o, t->name);
-        plan[i].dtype = convert && !o->simulate_bits ? DTYPE_Q5 : t->dtype;
-        plan[i].simulate = convert && o->simulate_bits;
-        plan[i].bytes = plan[i].dtype == DTYPE_Q5 ? t->rows * nb * Q5_BLOCK_BYTES : t->bytes;
-        plan[i].offset = offset;
-        offset = align_up(offset + plan[i].bytes);
-    }
-    for (i = 0; i < mf->count; ++i)
-        if (mf->tensors[i].alias) plan[i] = plan[0]; /* lm_head aliases embed (index 0) */
-}
-
-static void write_directory(FILE *f, const ModelFile *mf, const Plan *plan) {
-    unsigned char header[HEADER_BYTES], rec[RECORD_BYTES];
-    uint32_t i;
-    memset(header, 0, sizeof(header));
-    memcpy(header, "SMOEQ8\0", 7);
-    header[7] = (unsigned char)mf->version;
-    put_u32(header + 8, mf->count);
-    write_bytes(f, header, sizeof(header));
-    for (i = 0; i < mf->count; ++i) {
-        const Tensor *t = &mf->tensors[i];
-        memset(rec, 0, sizeof(rec));
-        memcpy(rec, t->name, TENSOR_NAME_SIZE);
-        put_u32(rec + 40, t->rows);
-        put_u32(rec + 44, t->cols);
-        put_u32(rec + 48, plan[i].dtype);
-        put_u32(rec + 52, t->alias);
-        put_u64(rec + 56, plan[i].offset);
-        put_u64(rec + 64, plan[i].bytes);
-        write_bytes(f, rec, sizeof(rec));
-    }
-}
-
-/* Q8 block (f32 scale, int8) whose values lie on a signed N-bit grid; the
- * scale search mirrors quantize_q5_row(). */
 static void quantize_grid_row(const float *x, uint32_t cols, int bits, unsigned char *out) {
     const int lo = -(1 << (bits - 1)), hi = (1 << (bits - 1)) - 1;
     uint32_t nb = (cols + QK - 1) / QK, b, j, k;
@@ -170,25 +103,30 @@ static void quantize_grid_row(const float *x, uint32_t cols, int bits, unsigned 
     }
 }
 
-static void write_tensor(FILE *f, const Tensor *t, const Plan *p, int bits, float *row, unsigned char *packed) {
+static void write_converted(FILE *f, const void *ctx) {
+    const Convert *c = (const Convert *)ctx;
+    const Tensor *t = c->t;
     uint32_t r, nb = (t->cols + QK - 1) / QK;
-    if (p->simulate) {
-        for (r = 0; r < t->rows; ++r) {
-            dequantize_q8_row(t->data + (size_t)r * nb * Q8_BLOCK_BYTES, t->cols, row);
-            quantize_grid_row(row, t->cols, bits, packed);
-            write_bytes(f, packed, (size_t)nb * Q8_BLOCK_BYTES);
-        }
-        return;
-    }
-    if (p->dtype == t->dtype) {
-        write_bytes(f, t->data, (size_t)t->bytes);
-        return;
-    }
     for (r = 0; r < t->rows; ++r) {
-        dequantize_q8_row(t->data + (size_t)r * nb * Q8_BLOCK_BYTES, t->cols, row);
-        quantize_q5_row(row, t->cols, packed);
-        write_bytes(f, packed, (size_t)nb * Q5_BLOCK_BYTES);
+        dequantize_q8_row(t->data + (size_t)r * nb * Q8_BLOCK_BYTES, t->cols, row_buffer);
+        if (c->simulate_bits) {
+            quantize_grid_row(row_buffer, t->cols, c->simulate_bits, packed_buffer);
+            write_bytes(f, packed_buffer, (size_t)nb * Q8_BLOCK_BYTES);
+        } else {
+            quantize_q5_row(row_buffer, t->cols, packed_buffer);
+            write_bytes(f, packed_buffer, (size_t)nb * Q5_BLOCK_BYTES);
+        }
     }
+}
+
+/* Re-reads the written file through the runtime parser and validator. */
+static void verify_output(const char *path, Pool *pool, Memory *mem) {
+    MappedFile mapped;
+    ModelFile mf;
+    map_file(path, &mapped);
+    modelfile_parse(&mf, mapped.data, mapped.size, mem);
+    modelfile_verify_payload(&mf, pool);
+    unmap_file(&mapped);
 }
 
 int main(int argc, char **argv) {
@@ -197,12 +135,11 @@ int main(int argc, char **argv) {
     MappedFile mapped;
     ModelFile mf;
     Pool *pool;
-    Plan *plan;
+    OutRecord *records;
+    Convert *jobs;
     FILE *f;
     char *tmp;
-    float *row;
-    unsigned char *packed;
-    uint64_t position, before = 0, after = 0;
+    uint64_t before = 0, after = 0;
     uint32_t i;
 
     platform_init(&argc, &argv);
@@ -213,27 +150,46 @@ int main(int argc, char **argv) {
     map_file(o.in, &mapped);
     modelfile_parse(&mf, mapped.data, mapped.size, &mem);
     modelfile_verify_payload(&mf, pool);
-    plan = (Plan *)mem_alloc(&mem, mf.count, sizeof(Plan));
-    plan_layout(&mf, &o, plan);
+
+    records = (OutRecord *)mem_alloc(&mem, mf.count, sizeof(OutRecord));
+    jobs = (Convert *)mem_alloc(&mem, mf.count, sizeof(Convert));
+    for (i = 0; i < mf.count; ++i) {
+        const Tensor *t = &mf.tensors[i];
+        uint32_t nb = (t->cols + QK - 1) / QK;
+        records[i] = record_from_tensor(t);
+        if (t->dtype == DTYPE_Q8 && !keep_q8(&o, t->name) && !t->alias) {
+            jobs[i].t = t;
+            jobs[i].simulate_bits = o.simulate_bits;
+            records[i].write = write_converted;
+            records[i].ctx = &jobs[i];
+            if (!o.simulate_bits) {
+                records[i].dtype = DTYPE_Q5;
+                records[i].bytes = (uint64_t)t->rows * nb * Q5_BLOCK_BYTES;
+            }
+        }
+        if (!t->alias) {
+            before += t->bytes;
+            after += records[i].bytes;
+        }
+    }
+    /* A tied lm_head follows its embed's new type and size. */
+    for (i = 0; i < mf.count; ++i) {
+        uint32_t j;
+        if (!mf.tensors[i].alias) continue;
+        for (j = 0; j < mf.count; ++j)
+            if (!strcmp(records[j].name, "embed")) {
+                records[i].dtype = records[j].dtype;
+                records[i].bytes = records[j].bytes;
+            }
+    }
 
     tmp = (char *)mem_alloc(&mem, strlen(o.out) + 5, 1);
     snprintf(tmp, strlen(o.out) + 5, "%s.tmp", o.out);
     f = open_file(tmp, "wb");
     if (!f) die("cannot create %s: %s", tmp, strerror(errno));
-    row = (float *)mem_alloc(&mem, 65536, sizeof(float));
-    packed = (unsigned char *)mem_alloc(&mem, (65536 / QK) * Q8_BLOCK_BYTES, 1);
-    write_directory(f, &mf, plan);
-    position = HEADER_BYTES + (uint64_t)mf.count * RECORD_BYTES;
-    for (i = 0; i < mf.count; ++i) {
-        const Tensor *t = &mf.tensors[i];
-        if (t->alias) continue;
-        write_zeros(f, plan[i].offset - position);
-        write_tensor(f, t, &plan[i], o.simulate_bits, row, packed);
-        position = plan[i].offset + plan[i].bytes;
-        before += t->bytes;
-        after += plan[i].bytes;
-    }
+    container_write(f, mf.version, records, mf.count);
     if (fclose(f)) die("cannot finish %s: %s", tmp, strerror(errno));
+    verify_output(tmp, pool, &mem);
     remove(o.out);
     if (rename(tmp, o.out)) die("cannot rename %s to %s: %s", tmp, o.out, strerror(errno));
     fprintf(stderr, "{\"tensors\":%u,\"payload_bytes_before\":%llu,\"payload_bytes_after\":%llu,\"ratio\":%.4f}\n",

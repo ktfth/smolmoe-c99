@@ -88,7 +88,7 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     m->nb_hidden = (c->hidden + QK - 1) / QK;
     half = m->head_dim / 2;
     expected = 3 + (uint64_t)c->layers * (7 + 3 * c->qkv_bias + 3 * (uint64_t)(c->experts + c->shared));
-    if (expected != f->count) die("tensor count does not match config");
+    if (expected != f->count - f->blobs) die("tensor count does not match config");
 
     m->embed = qmat(f, "embed", c->vocab, c->dim);
     m->head = qmat(f, "lm_head", c->vocab, c->dim);
@@ -460,4 +460,14 @@ void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, 
         ffn_block(m, l, n);
     }
     if (mode != LOGITS_NONE) output_logits(m, n, mode);
+}
+
+void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits) {
+    uint32_t done = 0;
+    while (done < n) {
+        uint32_t chunk = n - done < m->batch ? n - done : m->batch;
+        LogitsMode mode = last_logits && done + chunk == n ? LOGITS_LAST : LOGITS_NONE;
+        model_forward(m, tokens + done, chunk, pos0 + done, mode);
+        done += chunk;
+    }
 }

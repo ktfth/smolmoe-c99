@@ -36,6 +36,17 @@
 
 #define PATH_CAPACITY 4096
 
+/* Removes a trailing "\n" or "\r\n"; returns the new length. */
+static int strip_line_end(char *buf, size_t n) {
+    while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = 0;
+    return (int)n;
+}
+
+static int read_stream_line(char *buf, size_t cap) {
+    if (!fgets(buf, (int)cap, stdin)) return -1;
+    return strip_line_end(buf, strlen(buf));
+}
+
 #if defined(_WIN32)
 
 static wchar_t *widen(const char *s) {
@@ -58,11 +69,17 @@ static char *narrow(const wchar_t *w) {
     return s;
 }
 
+/* System message in UTF-8 (the ANSI variant would use the local code page). */
 static const char *win_error(void) {
-    static char buf[256];
-    DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL,
-                             GetLastError(), 0, buf, sizeof(buf), NULL);
+    static char buf[512];
+    wchar_t wide[256];
+    int len;
+    DWORD n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(), 0,
+                             wide, (DWORD)(sizeof(wide) / sizeof(*wide)), NULL);
     if (!n) return "unknown Windows error";
+    len = WideCharToMultiByte(CP_UTF8, 0, wide, (int)n, buf, (int)sizeof(buf) - 1, NULL, NULL);
+    if (len <= 0) return "unknown Windows error";
+    buf[len] = 0;
     return trim(buf);
 }
 
@@ -136,6 +153,10 @@ const char *self_executable_path(void) {
     return path;
 }
 
+void make_executable(const char *path) {
+    (void)path;
+}
+
 double now_seconds(void) {
     static LARGE_INTEGER frequency;
     LARGE_INTEGER counter;
@@ -174,6 +195,29 @@ uint32_t cpu_physical_cores(void) {
     }
     free(buffer);
     return cores ? cores : cpu_logical_count();
+}
+
+
+int read_line_utf8(char *buf, size_t cap) {
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode, got = 0;
+    wchar_t wide[2048];
+    size_t used = 0;
+    if (cap < 8) die("internal error: line buffer too small");
+    if (!GetConsoleMode(in, &mode)) return read_stream_line(buf, cap);
+    /* Console: read UTF-16 until the line ends (long lines arrive in pieces). */
+    for (;;) {
+        int n;
+        if (!ReadConsoleW(in, wide, (DWORD)(sizeof(wide) / sizeof(*wide)), &got, NULL) || !got)
+            return used ? strip_line_end(buf, used) : -1;
+        if (!used && wide[0] == 0x1a) return -1; /* Ctrl+Z */
+        n = WideCharToMultiByte(CP_UTF8, 0, wide, (int)got, buf + used, (int)(cap - 1 - used), NULL, NULL);
+        if (n <= 0) die("input line too long");
+        used += (size_t)n;
+        buf[used] = 0;
+        if (buf[used - 1] == '\n') return strip_line_end(buf, used);
+        if (used + 4 >= cap) return strip_line_end(buf, used);
+    }
 }
 
 static UINT original_output_cp;
@@ -252,6 +296,10 @@ const char *self_executable_path(void) {
 #endif
 }
 
+void make_executable(const char *path) {
+    if (chmod(path, 0755)) die("cannot make %s executable: %s", path, strerror(errno));
+}
+
 double now_seconds(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts)) die("clock_gettime failed");
@@ -294,6 +342,11 @@ uint32_t cpu_physical_cores(void) {
     }
     return cores ? cores : logical;
 #endif
+}
+
+
+int read_line_utf8(char *buf, size_t cap) {
+    return read_stream_line(buf, cap);
 }
 
 void platform_init(int *argc, char ***argv) {

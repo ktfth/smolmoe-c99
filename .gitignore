@@ -17,3 +17,6 @@ node_modules/
 /bin/
 /examples/demo/
 /examples/numerical/
+
+# Bundled models and executables (hundreds of MB)
+/dist/
