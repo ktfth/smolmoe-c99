@@ -37,7 +37,10 @@ All runtime activations and weight scales are F32. For each token:
 1. `x = embed[token]`.
 2. For each layer, `n = RMSNorm(x, attn_norm, rms_eps)`.
 3. `q = Wq n`, `k = Wk n`, `v = Wv n`. Apply adjacent-pair RoPE to q and k.
-   For head coordinate j = 0,2,…, `angle = position / rope_theta^(j/head_dim)`.
+   Only the first R = `rotary_dim` coordinates of each head rotate (default R = head_dim);
+   the rest pass through. For pair j = 0,2,…,R−2, `angle = position / rope_theta^(j/R)`,
+   and the pair is rotated by `f·cos(angle)` and `f·sin(angle)` with f = `rope_attention_factor`
+   (default 1; Phi-3 "longrope" uses it). The tables are computed in double and rounded to F32.
    This adjacent-pair convention matters when exporting trained checkpoints.
 4. Append k and v to the layer's unquantized KV cache. Query head h maps to
    KV head `floor(h / (heads / kv_heads))`.
@@ -161,6 +164,10 @@ missing, invalid, or out-of-range fields are errors. Model context is at most
 16. A divides D, K divides A, and D/A is positive and even. All tensors and
 activations, the KV cache and tokenizer tables must fit `--memory-mib`; mapped
 weights are not counted.
+
+Two keys are optional: `rotary_dim` (even, 2 to D/A; default D/A) and
+`rope_attention_factor` (in (0, 1000]; default 1). Omitting them gives results
+bit-identical to writing their defaults.
 
 ## Tokenizer
 

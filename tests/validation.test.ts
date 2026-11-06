@@ -95,6 +95,21 @@ describe("config and tokenizer", () => {
     expectError(cli({ ...base, config: write("dup.ini", text + "dim=32\n") }), /duplicate config key/);
   });
 
+  test("rotary_dim must be even and within the head; rope_attention_factor positive and finite", () => {
+    /* base: dim 32, 4 heads -> head_dim 8 */
+    const bad = (name: string, line: string) => {
+      const p = join(work.path, name);
+      writeFileSync(p, configText(base.settings) + line + "\n");
+      return cli({ ...base, config: p });
+    };
+    for (const [name, line] of [["rot-odd", "rotary_dim=3"], ["rot-zero", "rotary_dim=0"], ["rot-big", "rotary_dim=10"]])
+      expectError(bad(name, line), /invalid rotary_dim/);
+    for (const [name, line] of [["f-zero", "rope_attention_factor=0"], ["f-neg", "rope_attention_factor=-1"],
+      ["f-inf", "rope_attention_factor=inf"], ["f-nan", "rope_attention_factor=nan"]])
+      expectError(bad(name, line), /invalid rope_attention_factor|rope_attention_factor must be a number/);
+    expect(runOk(bad("rot-ok", "rotary_dim=4\nrope_attention_factor=1.25")).stats.prompt_tokens).toBeGreaterThan(0);
+  });
+
   test("malformed BPE merges are rejected", () => {
     const tok = join(work.path, "bad.bpe");
     writeFileSync(tok, "SMBPE1\n72 105\n72 105\n");

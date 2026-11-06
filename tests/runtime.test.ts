@@ -3,10 +3,10 @@
  * batch sizes and kernels, routing accounting, sampling and stats.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { type Fixture, writeFixture } from "./support/fixture";
+import { type Fixture, type ModelConfig, configText, writeFixture } from "./support/fixture";
 import { BINARY, SCALAR_BINARY, runOk, tempDir } from "./support/run";
 
 const work = tempDir("runtime");
@@ -50,6 +50,32 @@ describe("determinism", () => {
     expect(a.logits_hash).toMatch(/^[0-9a-f]{16}$/);
     expect(a.logits_hash).not.toBe("0000000000000000");
     expect(b.logits_hash).toBe(a.logits_hash);
+  });
+});
+
+describe("partial RoPE (rotary_dim, rope_attention_factor)", () => {
+  /* medium: dim 64, 4 heads -> head_dim 16 */
+  const withRope = (name: string, extra: Partial<ModelConfig>, run: readonly (string | number)[] = []) => {
+    const config = join(work.path, `${name}.ini`);
+    writeFileSync(config, configText({ ...medium.settings, ...extra }));
+    return runOk([...args({ ...medium, config }, run), "--hash-logits"]).stats.logits_hash;
+  };
+
+  test("explicit defaults (all dims, factor 1) are bit-identical to omitting the keys", () => {
+    expect(withRope("rope-default", { rotary_dim: 16, rope_attention_factor: 1 })).toBe(withRope("rope-none", {}));
+  });
+
+  test("rotating part of each head, or scaling cos/sin, changes the logits", () => {
+    const base = withRope("rope-base", {});
+    expect(withRope("rope-half", { rotary_dim: 8 })).not.toBe(base);
+    expect(withRope("rope-factor", { rope_attention_factor: 1.1902380714238083 })).not.toBe(base);
+  });
+
+  test("partial RoPE stays bit-identical across threads, batch sizes and kernels", () => {
+    const partial = { rotary_dim: 12, rope_attention_factor: 1.19 };
+    const a = withRope("rope-a", partial, ["--threads", 1, "--batch", 1]);
+    expect(withRope("rope-b", partial, ["--threads", 3, "--batch", 5])).toBe(a);
+    expect(withRope("rope-c", partial, ["--threads", 2, "--batch", 32, "--scalar"])).toBe(a);
   });
 });
 

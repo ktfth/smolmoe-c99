@@ -5,14 +5,30 @@
 #include <math.h>
 #include <string.h>
 
-#define KEY_COUNT 15u
-#define ALL_KEYS ((1u << KEY_COUNT) - 1u)
+#define REQUIRED_KEYS 15u
+#define KEY_COUNT 17u /* the required ones, then rotary_dim and rope_attention_factor */
+#define ALL_REQUIRED ((1u << REQUIRED_KEYS) - 1u)
+#define KEY_ROTARY_DIM 15u
+#define KEY_ROPE_FACTOR 16u
+#define MAX_ROPE_FACTOR 1000.0
 #define LINE_CAPACITY 512u
+
+/* Optional RoPE keys: defaults keep the full-head, unscaled rotation. */
+static void rope_defaults(Config *c, unsigned seen) {
+    uint32_t head_dim = c->dim / c->heads;
+    if (!(seen & (1u << KEY_ROTARY_DIM))) c->rotary_dim = head_dim;
+    if (!(seen & (1u << KEY_ROPE_FACTOR))) c->rope_factor = 1.0;
+    if (!c->rotary_dim || c->rotary_dim % 2 || c->rotary_dim > head_dim)
+        die("invalid rotary_dim %u: must be even and at most the head size %u", c->rotary_dim, head_dim);
+    if (!(c->rope_factor > 0 && c->rope_factor <= MAX_ROPE_FACTOR))
+        die("invalid rope_attention_factor: must be in (0, %g]", MAX_ROPE_FACTOR);
+}
 
 Config config_parse(const unsigned char *text, size_t size) {
     static const char *keys[KEY_COUNT] = {
         "architecture", "dim", "hidden_dim", "layers", "heads", "kv_heads", "experts", "top_k",
-        "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id", "rms_eps", "rope_theta"};
+        "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id", "rms_eps", "rope_theta",
+        "rotary_dim", "rope_attention_factor"};
     Config c;
     uint32_t *fields[12];
     char line[LINE_CAPACITY];
@@ -45,11 +61,15 @@ Config config_parse(const unsigned char *text, size_t size) {
             *fields[k - 1] = parse_u32(value, MAX_CONTEXT, s);
         } else if (k == 13) {
             c.eps = (float)parse_real(value, s);
-        } else {
+        } else if (k == 14) {
             c.theta = (float)parse_real(value, s);
+        } else if (k == KEY_ROTARY_DIM) {
+            c.rotary_dim = parse_u32(value, MAX_DIM, s);
+        } else {
+            c.rope_factor = parse_real(value, s);
         }
     }
-    if (seen != ALL_KEYS) die("config is missing required fields");
+    if ((seen & ALL_REQUIRED) != ALL_REQUIRED) die("config is missing required fields");
     if (!c.dim || c.dim > MAX_DIM || !c.hidden || c.hidden > MAX_DIM || !c.layers || c.layers > 1024 ||
         !c.heads || c.heads > c.dim || c.dim % c.heads || (c.dim / c.heads) % 2 ||
         !c.kv_heads || c.heads % c.kv_heads || !c.experts || c.experts > 4096 ||
@@ -57,6 +77,7 @@ Config config_parse(const unsigned char *text, size_t size) {
         !c.max_context || c.max_context > MAX_CONTEXT || c.bos != BOS_ID || c.eos != EOS_ID ||
         !(c.eps > 0 && c.eps < 1) || !(c.theta > 1) || !isfinite(c.theta))
         die("invalid config dimensions or special token IDs");
+    rope_defaults(&c, seen);
     return c;
 }
 

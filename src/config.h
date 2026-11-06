@@ -13,7 +13,9 @@
 typedef struct Config {
     uint32_t dim, hidden, layers, heads, kv_heads, experts, top_k, vocab;
     uint32_t max_context, shared, bos, eos, qkv_bias;
+    uint32_t rotary_dim; /* leading coordinates of each head that RoPE rotates (default: all) */
     float eps, theta;
+    double rope_factor; /* rope_attention_factor: scales RoPE cos/sin (default 1) */
 } Config;
 
 #include <stddef.h>

@@ -22,6 +22,10 @@ export interface ModelConfig {
   readonly eos_id: number;
   readonly rms_eps: number;
   readonly rope_theta: number;
+  /* Optional: rotate only the first rotary_dim coordinates of each head (default: all). */
+  readonly rotary_dim?: number;
+  /* Optional: scale applied to RoPE cos/sin (default 1). */
+  readonly rope_attention_factor?: number;
 }
 
 export const BASE_CONFIG: ModelConfig = {

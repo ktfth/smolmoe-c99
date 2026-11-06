@@ -88,7 +88,7 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     m->kv_dim = c->kv_heads * m->head_dim;
     m->nb_dim = (c->dim + QK - 1) / QK;
     m->nb_hidden = (c->hidden + QK - 1) / QK;
-    half = m->head_dim / 2;
+    half = c->rotary_dim / 2;
     expected = 3 + (uint64_t)c->layers * (7 + 3 * c->qkv_bias + 3 * (uint64_t)(c->experts + c->shared));
     if (expected != f->count - f->blobs) die("tensor count does not match config");
 
@@ -122,7 +122,7 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     }
     m->logits = (float *)buffer(mem, logit_rows, c->vocab, sizeof(float));
     m->inv_freq = (double *)mem_alloc(mem, half, sizeof(double));
-    for (i = 0; i < half; ++i) m->inv_freq[i] = pow((double)c->theta, -(double)(2 * i) / (double)m->head_dim);
+    for (i = 0; i < half; ++i) m->inv_freq[i] = pow((double)c->theta, -(double)(2 * i) / (double)c->rotary_dim);
     m->rope_cos = (float *)buffer(mem, batch, half, sizeof(float));
     m->rope_sin = (float *)buffer(mem, batch, half, sizeof(float));
     m->keys = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
@@ -314,20 +314,22 @@ static void silu_quantize(Model *m, uint32_t n) {
 }
 
 static void rope_tables(Model *m, uint32_t n, uint32_t pos0) {
-    uint32_t t, i, half = m->head_dim / 2;
+    uint32_t t, i, half = m->c.rotary_dim / 2;
     for (t = 0; t < n; ++t)
         for (i = 0; i < half; ++i) {
             double angle = (double)(pos0 + t) * m->inv_freq[i];
-            m->rope_cos[t * half + i] = (float)cos(angle);
-            m->rope_sin[t * half + i] = (float)sin(angle);
+            m->rope_cos[t * half + i] = (float)(m->c.rope_factor * cos(angle));
+            m->rope_sin[t * half + i] = (float)(m->c.rope_factor * sin(angle));
         }
 }
 
-/* Adjacent-pair rotation (the importer permutes split-half checkpoints). */
-static void rope(float *x, uint32_t heads, uint32_t hd, const float *cs, const float *sn) {
+/* Adjacent-pair rotation of the first 2*pairs coordinates of each head; the
+ * rest pass through (partial rotary). The importer permutes split-half
+ * checkpoints into this order. */
+static void rope(float *x, uint32_t heads, uint32_t hd, uint32_t pairs, const float *cs, const float *sn) {
     uint32_t h, i;
     for (h = 0; h < heads; ++h, x += hd)
-        for (i = 0; i < hd / 2; ++i) {
+        for (i = 0; i < pairs; ++i) {
             float a = x[2 * i], b = x[2 * i + 1];
             x[2 * i] = a * cs[i] - b * sn[i];
             x[2 * i + 1] = a * sn[i] + b * cs[i];
@@ -385,7 +387,7 @@ static void attention_task(void *ctx, uint32_t index, uint32_t count) {
 static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     const Config *c = &m->c;
     Layer *L = &m->layers[l];
-    uint32_t t, half = m->head_dim / 2;
+    uint32_t t, half = c->rotary_dim / 2;
     MatItem qkv[3];
     AttnTask task;
     double clock = clock_start(m);
@@ -398,8 +400,8 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     lap(m, PHASE_QKV, &clock);
     for (t = 0; t < n; ++t) {
         size_t slot = ((size_t)l * m->context + pos0 + t) * m->kv_dim;
-        rope(m->q + (size_t)t * c->dim, c->heads, m->head_dim, m->rope_cos + t * half, m->rope_sin + t * half);
-        rope(m->k + (size_t)t * m->kv_dim, c->kv_heads, m->head_dim, m->rope_cos + t * half, m->rope_sin + t * half);
+        rope(m->q + (size_t)t * c->dim, c->heads, m->head_dim, half, m->rope_cos + t * half, m->rope_sin + t * half);
+        rope(m->k + (size_t)t * m->kv_dim, c->kv_heads, m->head_dim, half, m->rope_cos + t * half, m->rope_sin + t * half);
         memcpy(m->keys + slot, m->k + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
         memcpy(m->values + slot, m->v + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
     }
