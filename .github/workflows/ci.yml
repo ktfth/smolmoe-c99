@@ -23,6 +23,12 @@ jobs:
           bun-version: 1.2.15
       - name: build
         run: make -j4 CC=${{ matrix.cc }} all scalar
+      # One job runs the real-model tests (Qwen goldens, chat memory); the rest skip them.
+      - name: models
+        if: matrix.cc == 'gcc'
+        run: bun scripts/fetch-models.ts
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: test
         run: make CC=${{ matrix.cc }} test
       - name: sanitize

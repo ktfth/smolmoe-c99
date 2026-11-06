@@ -1,0 +1,29 @@
+{
+  "tag": "models-v1",
+  "files": [
+    {
+      "asset": "qwen2.5-0.5b-instruct.model.smoe",
+      "path": "qwen2.5-0.5b-instruct/model.smoe",
+      "bytes": 556039464,
+      "sha256": "9f6de8916fcfe841245a0ae7593ba66b5d2cac98c4f8d13fa4ad696889055260"
+    },
+    {
+      "asset": "qwen2.5-0.5b-instruct.tokenizer.qbp",
+      "path": "qwen2.5-0.5b-instruct/tokenizer.qbp",
+      "bytes": 4012484,
+      "sha256": "12512c1c37f89ca0e9341a19ee8cba3c23b81c33678fcdff9b8aa0720bc4edac"
+    },
+    {
+      "asset": "tinystories-15m.model.smoe",
+      "path": "tinystories-15m/model.smoe",
+      "bytes": 27475936,
+      "sha256": "df99487f97b88103ca7e44703870ee5909fef71b663a3c2af25390d1d065a9dc"
+    },
+    {
+      "asset": "tinystories-15m.tokenizer.spb",
+      "path": "tinystories-15m/tokenizer.spb",
+      "bytes": 433885,
+      "sha256": "9f439ef87c7bef9c873a70a89cb8f4386f4cec246b69d488b8f45cadca8988f2"
+    }
+  ]
+}

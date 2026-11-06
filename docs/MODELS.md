@@ -1,6 +1,7 @@
 # Modelos
 
-Os pesos não ficam no repositório (somam 560 MB). Cada modelo mora em `models/<nome>/`, com quatro arquivos: os
+Os pesos não ficam no git (somam 560 MB; o GitHub recusa arquivos acima de 100 MB). Eles ficam no Release
+`models-v1`. Cada modelo mora em `models/<nome>/`, com quatro arquivos: os
 pesos (`model.smoe`), o tokenizer, a `config.ini` e a `provenance.json`. Os dois últimos são versionados.
 
 | Diretório | Modelo | Uso | Tamanho |
@@ -8,9 +9,21 @@ pesos (`model.smoe`), o tokenizer, a `config.ini` e a `provenance.json`. Os dois
 | `models/qwen2.5-0.5b-instruct` | Qwen2.5-0.5B-Instruct, Q8 | Chat em português (`--chat`) | 531 MiB |
 | `models/tinystories-15m` | TinyStories 15M (llama2.c), Q8 | Histórias curtas em inglês; testes rápidos | 26 MiB |
 
-## Opção 1: copiar os pesos já convertidos
+## Opção 1: baixar os pesos já convertidos
 
-Copie `model.smoe` e o tokenizer para o diretório do modelo e confira os hashes:
+```sh
+bun scripts/fetch-models.ts                 # todos os modelos (ou: make models)
+bun scripts/fetch-models.ts tinystories-15m # só um
+```
+
+O script baixa os arquivos listados em `models/manifest.json` do Release `models-v1` do repositório e confere tamanho
+e SHA-256 antes de colocar cada um no lugar. Um download corrompido ou interrompido nunca fica em `models/`. Arquivos
+já presentes e verificados são pulados. O repositório é privado, então o script precisa de credencial: usa `GH_TOKEN`
+ou `GITHUB_TOKEN` e, sem eles, o login do `gh` (`gh auth login`). Em um fork, aponte para o Release certo com
+`SMOLMOE_MODELS_REPO=dono/nome`.
+
+Para copiar à mão (de outra máquina, por exemplo), coloque `model.smoe` e o tokenizer no diretório do modelo e
+confira os hashes:
 
 | Arquivo | SHA-256 |
 |---|---|

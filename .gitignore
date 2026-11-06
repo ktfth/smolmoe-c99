@@ -9,6 +9,7 @@
 __pycache__/
 node_modules/
 *.tmp
+*.download
 
 # Model weights and derived tokenizers are distributed separately (see docs/MODELS.md)
 *.smoe

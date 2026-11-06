@@ -43,7 +43,7 @@ OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
 OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
-.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench
+.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -100,9 +100,14 @@ sanitize:
 release:
 	$(MAKE) BUILD=build/release OPT="-O3" LDFLAGS="-s $(STATIC)" all
 
-# Self-contained Portuguese chat executable (needs models/qwen2.5-0.5b-instruct).
+# Converted weights from the GitHub release, SHA-256 verified (docs/MODELS.md).
+models:
+	bun scripts/fetch-models.ts
+
+# Self-contained Portuguese chat executable; downloads the Qwen weights if missing.
 QWEN := models/qwen2.5-0.5b-instruct
 qwen-pt: release
+	bun scripts/fetch-models.ts $(notdir $(QWEN))
 	@mkdir -p dist
 	build/release/smolmoe-bundle$(EXE) --model $(QWEN)/model.smoe --config $(QWEN)/config.ini \
 		--tokenizer $(QWEN)/tokenizer.qbp --exe build/release/smolmoe$(EXE) --out dist/qwen-pt$(EXE)

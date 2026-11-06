@@ -50,7 +50,8 @@ build/smolmoe --model models/qwen2.5-0.5b-instruct/model.smoe \
   --chat --prompt "Escreva uma saudação curta para quem está aprendendo programação."
 ```
 
-Os pesos não ficam no git. Veja [docs/MODELS.md](docs/MODELS.md) para obtê-los ou convertê-los.
+Os pesos não ficam no git: baixe com `bun scripts/fetch-models.ts` (ou `make models`), que confere o SHA-256 de cada
+arquivo. Detalhes e conversão a partir dos originais em [docs/MODELS.md](docs/MODELS.md).
 
 O texto gerado vai para o stdout, em streaming. As estatísticas saem no stderr como uma linha JSON.
 Saída real, sem edição:
