@@ -19,7 +19,7 @@ Os números, o método e o que foi descartado no caminho estão em [docs/DECISIO
 ```sh
 make qwen-pt                      # gera dist/qwen-pt.exe (Windows) ou dist/qwen-pt: runtime + Qwen, 560 MB
 dist/qwen-pt.exe                  # duplo clique ou terminal: abre o chat em português
-dist/qwen-pt.exe --prompt "..."   # uma resposta e sai (scripts, pipes)
+dist/qwen-pt.exe --chat --prompt "..."   # uma resposta e sai (scripts, pipes)
 ```
 
 Como o llamafile, o binário carrega os próprios pesos: não precisa de instalação, DLL extra, Python nem arquivo ao
