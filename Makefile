@@ -84,8 +84,11 @@ $(Q8PACK): tools/q8pack.c
 test-unit: $(TEST_KERN)
 	$(TEST_KERN)
 
+# Per-test limit; bun ignores a timeout set in bunfig.toml.
+TEST_TIMEOUT_MS ?= 30000
+
 test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE)
-	SMOLMOE_BUILD=$(BUILD) bun test
+	SMOLMOE_BUILD=$(BUILD) bun test --timeout $(TEST_TIMEOUT_MS)
 
 test: test-unit test-integration
 

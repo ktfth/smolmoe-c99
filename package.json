@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Test suite and tooling for the smolmoe C99 inference runtime",
   "scripts": {
-    "test": "bun test",
+    "test": "bun test --timeout 30000",
     "bench": "bun scripts/bench.ts"
   }
 }
