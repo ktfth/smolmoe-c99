@@ -36,6 +36,7 @@ BIN        := $(BUILD)/smolmoe$(EXE)
 BIN_SCALAR := $(BUILD)/smolmoe-scalar$(EXE)
 TEST_KERN  := $(BUILD)/test-kernels$(EXE)
 TEST_TOOLS := $(BUILD)/test-tools$(EXE)
+TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
@@ -80,14 +81,18 @@ $(TEST_TOOLS): $(BUILD)/tests/test_tools.o $(OBJ_LIB)
 $(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_TOK): $(BUILD)/tests/test_tokenizer.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 # Row converter used by tools/import_qwen2.py (POSIX only: Linux, macOS, WSL).
 $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
+	$(TEST_TOK)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
@@ -124,4 +129,5 @@ bench: $(BIN)
 clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
--include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d
+-include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d \
+	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d

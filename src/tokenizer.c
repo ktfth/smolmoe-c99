@@ -13,7 +13,7 @@
 #define MAX_PIECE 65536u
 #define MAX_PAYLOAD 67108864u
 
-enum { TOK_BPE, TOK_SCORE, TOK_QWEN };
+enum { TOK_BPE, TOK_SCORE, TOK_BBPE };
 
 typedef struct { uint32_t a, b, bytes; } Merge;
 
@@ -28,7 +28,7 @@ struct Tokenizer {
     unsigned char **pieces, *scratch;
     uint32_t *lengths;
     float *scores;
-    /* SMQBP1 */
+    /* SMQBP1 byte-level BPE (Qwen2.5, Phi-4-mini) */
     QwenTokenizer *qwen;
 };
 
@@ -212,8 +212,8 @@ Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t voca
     Tokenizer *t = (Tokenizer *)mem_alloc(mem, 1, sizeof(*t));
     ByteReader r = byte_reader(data, size);
     t->vocab = vocab;
-    if (size >= 8 && !memcmp(data, "SMQBP1\0\1", 8)) {
-        t->kind = TOK_QWEN;
+    if (size >= 8 && !memcmp(data, "SMQBP1\0", 7)) { /* qwen_load checks the version byte */
+        t->kind = TOK_BBPE;
         t->qwen = qwen_load(&r, vocab, mem);
         t->max_piece = qwen_max_piece(t->qwen);
     } else if (size >= 8 && !memcmp(data, "SMSPB1\0\1", 8)) {
@@ -235,20 +235,20 @@ Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem) {
 }
 
 uint32_t tokenizer_prepare(Tokenizer *t, uint32_t max_bytes, Memory *mem) {
-    if (t->kind == TOK_QWEN) return qwen_prepare(t->qwen, max_bytes, mem);
+    if (t->kind == TOK_BBPE) return qwen_prepare(t->qwen, max_bytes, mem);
     return max_bytes + 2;
 }
 
 uint32_t tokenizer_encode(Tokenizer *t, const unsigned char *s, uint32_t n, uint32_t *ids,
                           int chat, const char *system) {
-    if (t->kind == TOK_QWEN) return qwen_encode(t->qwen, s, n, ids, chat, system);
-    if (chat) die("--chat requires a Qwen tokenizer");
+    if (t->kind == TOK_BBPE) return qwen_encode(t->qwen, s, n, ids, chat, system);
+    if (chat) die("--chat requires a tokenizer with a chat template");
     return t->kind == TOK_SCORE ? score_encode(t, s, n, ids) : bpe_encode(t, s, n, ids);
 }
 
 uint32_t tokenizer_decode(Tokenizer *t, uint32_t id, unsigned char *buf) {
     switch (t->kind) {
-    case TOK_QWEN:
+    case TOK_BBPE:
         return qwen_decode(t->qwen, id, buf);
     case TOK_SCORE:
         if (id >= t->vocab) die("invalid score-BPE token ID %u", id);
@@ -265,7 +265,7 @@ uint32_t tokenizer_max_piece(const Tokenizer *t) { return t->max_piece; }
 
 void tokenizer_render_prompt(Tokenizer *t, const uint32_t *ids, uint32_t n, unsigned char *buf,
                              ByteSink sink, void *ctx) {
-    uint32_t i = t->kind == TOK_QWEN ? 0 : 1; /* BOS is implicit for the other formats */
+    uint32_t i = t->kind == TOK_BBPE ? 0 : 1; /* BOS is implicit for the other formats */
     for (; i < n; ++i) {
         uint32_t len = tokenizer_decode(t, ids[i], buf);
         /* The score-BPE dummy prefix is not part of the user's text. */
@@ -274,25 +274,25 @@ void tokenizer_render_prompt(Tokenizer *t, const uint32_t *ids, uint32_t n, unsi
     }
 }
 
-int tokenizer_supports_chat(const Tokenizer *t) { return t->kind == TOK_QWEN; }
+int tokenizer_supports_chat(const Tokenizer *t) { return t->kind == TOK_BBPE && qwen_supports_chat(t->qwen); }
 
 int tokenizer_tool_markers(const Tokenizer *t, uint32_t *open, uint32_t *close) {
-    return t->kind == TOK_QWEN && qwen_tool_markers(t->qwen, open, close);
+    return t->kind == TOK_BBPE && qwen_tool_markers(t->qwen, open, close);
 }
 
 int tokenizer_is_control(const Tokenizer *t, uint32_t id) {
     if (id == BOS_ID) return 1;
     if (id == EOS_ID) return 0;
-    return t->kind == TOK_QWEN && qwen_is_special(t->qwen, id);
+    return t->kind == TOK_BBPE && qwen_is_special(t->qwen, id);
 }
 
 uint32_t tokenizer_chat_turn(Tokenizer *t, const char *role, const unsigned char *text, uint32_t n,
                              int open_assistant, uint32_t *ids) {
-    if (t->kind != TOK_QWEN) die("chat requires a Qwen tokenizer");
+    if (t->kind != TOK_BBPE) die("chat requires a tokenizer with a chat template");
     return qwen_chat_turn(t->qwen, role, text, n, open_assistant, ids);
 }
 
 uint32_t tokenizer_chat_close(Tokenizer *t, uint32_t *ids) {
-    if (t->kind != TOK_QWEN) die("chat requires a Qwen tokenizer");
+    if (t->kind != TOK_BBPE) die("chat requires a tokenizer with a chat template");
     return qwen_chat_close(t->qwen, ids);
 }

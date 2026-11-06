@@ -1,7 +1,9 @@
 /* Tokenizers. Three on-disk formats are supported:
  *   SMBPE1  text, byte fallback + ranked merges (synthetic fixtures)
  *   SMSPB1  binary score-BPE (llama2.c / TinyStories)
- *   SMQBP1  binary Qwen2 byte-level BPE with NFC and pre-tokenization
+ *   SMQBP1  binary byte-level BPE: v1 Qwen2 (NFC, Qwen2 pre-tokenizer, ChatML);
+ *           v2 names its normalizer, pre-tokenizer (Qwen2, o200k) and chat
+ *           template (none, ChatML, Phi)
  * IDs 0..255 are bytes, 256 is BOS and 257 is EOS in every format. */
 #ifndef SMOLMOE_TOKENIZER_H
 #define SMOLMOE_TOKENIZER_H
@@ -22,8 +24,8 @@ Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem);
  * returns the token-ID capacity that tokenizer_encode() may write. */
 uint32_t tokenizer_prepare(Tokenizer *t, uint32_t max_bytes, Memory *mem);
 
-/* Encodes raw bytes. `chat` wraps the prompt in a single-turn ChatML template
- * (Qwen only). Returns the number of IDs written. */
+/* Encodes raw bytes. `chat` wraps the prompt in a single-turn chat in the
+ * tokenizer's template (SMQBP1 only). Returns the number of IDs written. */
 uint32_t tokenizer_encode(Tokenizer *t, const unsigned char *s, uint32_t n, uint32_t *ids,
                           int chat, const char *system);
 
@@ -35,8 +37,9 @@ uint32_t tokenizer_max_piece(const Tokenizer *t);
 void tokenizer_render_prompt(Tokenizer *t, const uint32_t *ids, uint32_t n, unsigned char *buf,
                              ByteSink sink, void *ctx);
 
-/* Multi-turn ChatML (Qwen only): one message, optionally opening the assistant
- * reply, and the tokens that close a generated reply. */
+/* Multi-turn chat in the tokenizer's template (ChatML or Phi): one message,
+ * optionally opening the assistant reply, and the tokens that close a generated
+ * reply. EOS (257) ends a turn in both templates. */
 uint32_t tokenizer_chat_turn(Tokenizer *t, const char *role, const unsigned char *text, uint32_t n,
                              int open_assistant, uint32_t *ids);
 uint32_t tokenizer_chat_close(Tokenizer *t, uint32_t *ids);
@@ -45,7 +48,8 @@ int tokenizer_supports_chat(const Tokenizer *t);
 /* Control tokens that must never be sampled (EOS excepted). */
 int tokenizer_is_control(const Tokenizer *t, uint32_t id);
 /* The <tool_call> and </tool_call> tokens (control tokens unless the chat
- * enables tools). Returns 0 when the vocabulary has none. */
+ * enables tools). Returns 0 when the vocabulary has none or the template has
+ * no tool-call protocol (Phi), so the chat runs without tools. */
 int tokenizer_tool_markers(const Tokenizer *t, uint32_t *open, uint32_t *close);
 
 #endif
