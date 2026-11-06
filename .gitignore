@@ -20,3 +20,6 @@ node_modules/
 
 # Bundled models and executables (hundreds of MB)
 /dist/
+
+# Local Claude Code state
+/.claude/
