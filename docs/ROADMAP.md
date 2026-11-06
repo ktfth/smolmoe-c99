@@ -3,23 +3,32 @@
 Ordem definida por impacto no objetivo (eficiência em produção) dividido pelo risco. Cada item só fecha com medição
 antes/depois registrada em [DECISIONS.md](DECISIONS.md).
 
-## Próximo: eficiência
+## Próximo: eficiência (prioridade principal)
 
-0. **Esconder o custo das ferramentas na abertura do chat.** As declarações custam cerca de 5 s de prefill a cada
-   abertura (DECISIONS, iteração 4). Há dois caminhos:
+Cada item é medido com `bun scripts/bench.ts --ab` contra o binário anterior. A ordem vem do perfil por fase
+(DECISIONS, iteração 5): o prefill agora é 70% produto de matrizes e 13% atenção.
+
+0. **Kernel de matrizes do prefill.** Ele usa cerca de metade do que o processador permite por bloco e só ganha 2,4×
+   com 4 threads. Caminhos a medir:
+   - blocos de registradores (várias linhas × vários tokens);
+   - FMA com `fmaf` no escalar, o que mantém a identidade bit a bit;
+   - threads lógicas no prefill (8 threads deram +13%) e físicas na escrita.
+1. **Atenção vetorizada** (13% do prefill): produto escalar e soma ponderada em AVX2, e softmax com a exponencial
+   própria em 8 lanes.
+2. **Esconder o custo das ferramentas na abertura do chat.** As declarações custam cerca de 5 s de prefill a cada
+   abertura (DECISIONS, iteração 4); os itens 0 e 1 já reduzem isso. Há dois caminhos:
    - Fazer o prefill do prompt de sistema numa thread enquanto o usuário digita a primeira mensagem. No uso
      interativo, o custo some.
    - Gravar o cache KV desse prefixo fixo junto com o executável (cerca de 7 MB) e mapeá-lo na partida.
-1. **Matemática determinística própria** (`expf`, `sin`/`cos`). Hoje os hashes de logits diferem entre Windows e Linux
-   só por causa da libm. Polinômios próprios em float puro (sem FMA) dão bit-identidade entre sistemas operacionais,
-   o que permite fixar hashes-ouro na suíte. Também permite vetorizar SiLU e softmax.
-2. **Kernel Q5 mais barato.** O Q5 já existe e economiza 39% de memória por +1,7% de perplexidade, mas custa 2,6× o Q8
+3. **`sin`/`cos` próprios nas tabelas de RoPE.** É o último uso da libm no caminho do modelo (o `expf` saiu na
+   iteração 5). Sem ele, os hashes ficam idênticos entre sistemas operacionais e a suíte pode fixar hashes-ouro.
+4. **Kernel Q5 mais barato.** O Q5 já existe e economiza 39% de memória por +1,7% de perplexidade, mas custa 2,6× o Q8
    por bloco e não acelera neste notebook (ver DECISIONS, iteração 2). Opções: dois blocos por iteração
    compartilhando a expansão dos bits altos, ou um layout com os bits altos já intercalados para SIMD.
-3. **Q4 com escalas por sub-bloco (estilo K-quant)**, só junto com modelos de 1,5B+. O Q4 simples custou +21% de
+5. **Q4 com escalas por sub-bloco (estilo K-quant)**, só junto com modelos de 1,5B+. O Q4 simples custou +21% de
    perplexidade no 0,5B e foi removido.
-4. **Kernels NEON (ARM64).** Mesma ordem de lanes. Abre Apple Silicon, Raspberry Pi e servidores Graviton.
-5. **Cache KV em F16.** Metade da memória e da banda em contextos longos.
+6. **Kernels NEON (ARM64).** Mesma ordem de lanes. Abre Apple Silicon, Raspberry Pi e servidores Graviton.
+7. **Cache KV em F16.** Metade da memória e da banda em contextos longos.
 
 ## Funções no chat: o que a medição deixou aberto
 

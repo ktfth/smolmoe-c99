@@ -55,9 +55,15 @@ void dot_q5_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
                     uint32_t stride, float out[4]);
 #endif
 
-/* Quantizes n floats into ceil(n/32) blocks; padding is zero.
- * Returns 0, or -1 if the input is not finite. */
-int quantize_q8(const float *x, uint32_t n, float *d, int8_t *q);
+/* Quantizes n floats into ceil(n/32) blocks; padding is zero. A block whose
+ * scale would be subnormal quantizes to zeros. Returns 0, or -1 if the input
+ * is not finite. Both versions are bit-identical. */
+typedef int (*QuantizeQ8)(const float *x, uint32_t n, float *d, int8_t *q);
+extern QuantizeQ8 quantize_q8;
+int quantize_q8_scalar(const float *x, uint32_t n, float *d, int8_t *q);
+#if defined(SM_HAVE_AVX2)
+int quantize_q8_avx2(const float *x, uint32_t n, float *d, int8_t *q);
+#endif
 
 /* Expands one Q8 row of `cols` values. */
 void dequantize_q8_row(const unsigned char *w, uint32_t cols, float *out);

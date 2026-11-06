@@ -131,8 +131,8 @@ computação do que a banda economizada. Use-o quando a memória for o limite.
   por acesso.
 
 **Contrato de determinismo:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`,
-`--batch` e kernel (AVX2/escalar). A suíte de testes garante isso. Entre sistemas operacionais ainda não há essa
-garantia, porque `expf`/`cos`/`sin` vêm da libm local (ver o roadmap).
+`--batch` e kernel (AVX2/escalar). A suíte de testes garante isso. A exponencial é própria e idêntica em todo sistema
+operacional; entre sistemas ainda não há garantia formal só porque as tabelas de RoPE usam `cos`/`sin` da libm local.
 
 ## Desenvolvimento
 
@@ -140,8 +140,14 @@ garantia, porque `expf`/`cos`/`sin` vêm da libm local (ver o roadmap).
 make test        # testes unitários em C + suíte de integração (bun test)
 make sanitize    # ASan/UBSan (Linux/macOS)
 make release     # binário otimizado e enxuto (estático no Windows)
-bun scripts/bench.ts --model-dir models/qwen2.5-0.5b-instruct   # mediana de prefill/decode
+bun scripts/bench.ts                                    # medianas de leitura/escrita e tempo por fase
+bun scripts/bench.ts --ab build/smolmoe-base.exe        # A/B alternado contra um binário anterior
 ```
+
+Para julgar uma otimização: copie o binário atual (por exemplo, para `build/smolmoe-base.exe`), faça a mudança,
+recompile e rode o modo `--ab`. Os dois binários rodam alternados na mesma sessão, e o calor do processador afeta os
+dois por igual. O script sai com erro se alguma métrica piorar além do limiar (`--threshold`, padrão 5%).
+`--profile` no runtime mostra para onde vai o tempo de cada passada.
 
 Requisitos: compilador C99 (GCC ou Clang), `make` e [Bun](https://bun.sh) para os testes e scripts.
 O runtime não tem dependências além da libc e da libm (e `pthread` em POSIX).

@@ -8,6 +8,7 @@
 #include "kernels.h"
 #include "threadpool.h"
 #include "util.h"
+#include "vecmath.h"
 
 #define MAX_BLOCKS 64u
 
@@ -203,6 +204,104 @@ static void test_backends_bit_identical(void) {
 #endif
 }
 
+static int same_bits(const void *a, const void *b, size_t n) { return memcmp(a, b, n) == 0; }
+
+/* Distance in units in the last place between two finite floats of any sign. */
+static long ulp_distance(float a, float b) {
+    int32_t ia, ib;
+    long d;
+    memcpy(&ia, &a, sizeof(ia));
+    memcpy(&ib, &b, sizeof(ib));
+    d = (long)(ia < 0 ? INT32_MIN - ia : ia) - (long)(ib < 0 ? INT32_MIN - ib : ib);
+    return d < 0 ? -d : d;
+}
+
+static void test_exp_det(void) {
+    const uint32_t samples = 1000000;
+    uint32_t i, off = 0, far = 0;
+    float x;
+    /* Whole range, including the gradual underflow below -87.3. */
+    for (i = 0; i <= samples; ++i) {
+        float want, got;
+        long d;
+        x = -103.5f + 192.2f * (float)i / (float)samples;
+        want = (float)exp((double)x); /* binary64 exp, rounded once: the correctly rounded value */
+        got = exp_det(x);
+        d = ulp_distance(got, want);
+        off += d != 0;
+        far += d > 1;
+    }
+    CHECK(far == 0, "exp_det: %u results more than 1 ulp off", far);
+    CHECK(off <= samples / 10000, "exp_det: %u of %u results not correctly rounded", off, samples);
+    CHECK(exp_det(0.0f) == 1.0f, "exp_det(0) = %a", (double)exp_det(0.0f));
+    CHECK(exp_det(89.0f) == INFINITY && exp_det(INFINITY) == INFINITY, "exp_det overflow");
+    CHECK(exp_det(-110.0f) == 0.0f && exp_det(-INFINITY) == 0.0f, "exp_det underflow");
+    CHECK(exp_det(-100.0f) > 0.0f, "exp_det keeps subnormal results");
+    x = exp_det(NAN);
+    CHECK(x != x, "exp_det(NaN)");
+}
+
+/* Inputs that cover the polynomial, both clamps, infinities and NaN. */
+static float special_or_uniform(uint32_t i, float lo, float hi) {
+    /* silu evaluates e^-gate: negative gates reach the overflow side, positive ones the underflow side. */
+    static const float special[] = {0.0f, -0.0f, 88.7f, 88.8f, -88.7f, -88.72f, -88.8f, -89.0f, 103.0f, 120.0f,
+                                    1e-30f, -1e-30f, 200.0f, -200.0f, INFINITY, -INFINITY, NAN};
+    return i % 9 == 0 ? special[(i / 9) % (sizeof(special) / sizeof(special[0]))] : uniform(lo, hi);
+}
+
+static void test_silu_backends(void) {
+    static float gate[1003], up_scalar[1003], up_simd[1003];
+    uint32_t n, i;
+    for (i = 0; i < 1003; ++i) {
+        gate[i] = special_or_uniform(i, -30.0f, 30.0f);
+        up_scalar[i] = up_simd[i] = uniform(-4.0f, 4.0f);
+    }
+    silu_mul_scalar(up_scalar, gate, 1003);
+    for (i = 0; i < 1003; ++i) {
+        float want = up_simd[i] * (gate[i] / (1.0f + (float)exp(-(double)gate[i]))), got = up_scalar[i];
+        int ok = isnan(want) ? isnan(got) : isinf(want) ? got == want : fabsf(got - want) <= 1e-6f * fabsf(want) + 1e-30f;
+        CHECK(ok, "silu %u (gate %a): %a vs %a", i, (double)gate[i], (double)got, (double)want);
+    }
+#if defined(SM_HAVE_AVX2)
+    if (strcmp(kernels_select(0), "avx2")) return;
+    for (n = 0; n <= 19; ++n) { /* every tail length */
+        for (i = 0; i < n; ++i) up_scalar[i] = up_simd[i] = uniform(-4.0f, 4.0f);
+        silu_mul_scalar(up_scalar, gate, n);
+        silu_mul_avx2(up_simd, gate, n);
+        CHECK(same_bits(up_scalar, up_simd, n * sizeof(float)), "silu avx2 differs at n=%u", n);
+    }
+    for (i = 0; i < 1003; ++i) up_scalar[i] = up_simd[i] = uniform(-4.0f, 4.0f);
+    silu_mul_scalar(up_scalar, gate, 1003);
+    silu_mul_avx2(up_simd, gate, 1003);
+    CHECK(same_bits(up_scalar, up_simd, sizeof(up_simd)), "silu avx2 differs");
+#else
+    (void)n;
+#endif
+}
+
+static void test_quantize_backends(void) {
+#if defined(SM_HAVE_AVX2)
+    static float x[MAX_BLOCKS * QK + 7];
+    static int8_t qa[MAX_BLOCKS * QK + QK], qb[MAX_BLOCKS * QK + QK];
+    float da[MAX_BLOCKS + 1], db[MAX_BLOCKS + 1];
+    uint32_t trial, i;
+    if (strcmp(kernels_select(0), "avx2")) return;
+    for (trial = 0; trial < 300; ++trial) {
+        uint32_t n = 1 + next() % (MAX_BLOCKS * QK + 7), nb = (n + QK - 1) / QK;
+        float spread = trial % 4 == 0 ? 1e-30f : trial % 4 == 1 ? 1e30f : 50.0f;
+        for (i = 0; i < n; ++i) x[i] = trial % 5 == 0 && i % 33 == 0 ? 0.0f : uniform(-spread, spread);
+        CHECK(quantize_q8_scalar(x, n, da, qa) == 0 && quantize_q8_avx2(x, n, db, qb) == 0, "quantize trial %u", trial);
+        CHECK(same_bits(da, db, nb * sizeof(float)) && same_bits(qa, qb, (size_t)nb * QK),
+              "quantize avx2 differs: trial %u n=%u", trial, n);
+    }
+    for (i = 0; i < 64; ++i) x[i] = 1.0f;
+    x[40] = INFINITY;
+    CHECK(quantize_q8_avx2(x, 64, db, qb) == -1, "avx2 quantize accepted inf");
+    x[40] = NAN;
+    CHECK(quantize_q8_avx2(x, 64, db, qb) == -1, "avx2 quantize accepted NaN");
+#endif
+}
+
 static void test_dot_f32(void) {
     float a[19], b[19];
     uint32_t i;
@@ -284,6 +383,9 @@ int main(void) {
     test_x4(dot_q8_scalar_x4, "scalar");
     test_x4_q5(dot_q5_scalar_x4, "scalar");
     test_backends_bit_identical();
+    test_exp_det();
+    test_silu_backends();
+    test_quantize_backends();
     test_dot_f32();
     test_split_range();
     test_pool();

@@ -1,5 +1,7 @@
 #include "model.h"
 #include "kernels.h"
+#include "platform.h"
+#include "vecmath.h"
 
 #include <float.h>
 #include <math.h>
@@ -214,32 +216,101 @@ static void matmul(Model *m, const MatItem *items, uint32_t n, const float *xd, 
     if (t.fault) die("non-finite activation; the checkpoint is outside the supported numeric range");
 }
 
+/* ---- profiling (--profile) --------------------------------------------- */
+
+static const char *const PHASE_NAMES[MODEL_PHASES] = {"embed", "norm", "qkv", "rope", "attention", "attn_out",
+    "ffn_up", "activation", "attn_quant", "ffn_down", "routing", "residual", "logits"};
+
+const char *model_phase_name(ModelPhase p) { return (unsigned)p < MODEL_PHASES ? PHASE_NAMES[p] : "?"; }
+
+static double clock_start(const Model *m) { return m->profiling ? now_seconds() : 0; }
+
+/* Charges the time since *t to phase p and restarts the clock. */
+static void lap(Model *m, ModelPhase p, double *t) {
+    double now;
+    if (!m->profiling) return;
+    now = now_seconds();
+    m->phase_seconds[p] += now - *t;
+    *t = now;
+}
+
 /* ---- elementwise pieces ------------------------------------------------ */
 
-static void rmsnorm(const float *x, const float *w, float *y, uint32_t n, float eps) {
+/* Returns 0, or -1 for a non-finite input; a non-finite output is caught by
+ * the quantization that always follows. */
+static int rmsnorm(const float *x, const float *w, float *y, uint32_t n, float eps) {
     float sq = 0, inv;
     uint32_t i;
     for (i = 0; i < n; ++i) sq += x[i] * x[i];
-    if (!isfinite(sq)) die("non-finite RMSNorm input");
     inv = 1.0f / sqrtf(sq / (float)n + eps);
-    if (!isfinite(inv)) die("non-finite RMSNorm");
-    for (i = 0; i < n; ++i) {
-        y[i] = x[i] * inv * w[i];
-        if (!isfinite(y[i])) die("non-finite RMSNorm output");
-    }
+    if (!isfinite(sq) || !isfinite(inv)) return -1;
+    for (i = 0; i < n; ++i) y[i] = x[i] * inv * w[i];
+    return 0;
 }
 
-static void quantize_rows(const float *x, uint32_t rows, uint32_t cols, uint32_t nb, float *d, int8_t *q) {
-    uint32_t r;
-    for (r = 0; r < rows; ++r)
-        if (quantize_q8(x + (size_t)r * cols, cols, d + (size_t)r * nb, q + (size_t)r * nb * QK))
-            die("non-finite activation before quantization");
+/* Per-token work that ends in a quantized row: optional RMSNorm (src -> rows)
+ * or SwiGLU (rows *= silu(gate)), then Q8. One token's row never spans two
+ * threads, so the split cannot change any value. */
+typedef struct RowTask {
+    const float *src, *norm, *gate;
+    float *rows, *d, eps;
+    int8_t *q;
+    uint32_t n, cols, nb, fault;
+} RowTask;
+
+static int row_work(const RowTask *t, uint32_t r) {
+    float *row = t->rows + (size_t)r * t->cols;
+    if (t->norm && rmsnorm(t->src + (size_t)r * t->cols, t->norm, row, t->cols, t->eps)) return 0;
+    if (t->gate) silu_mul(row, t->gate + (size_t)r * t->cols, t->cols);
+    return quantize_q8(row, t->cols, t->d + (size_t)r * t->nb, t->q + (size_t)r * t->nb * QK) == 0;
 }
 
-static void norm_quantize(Model *m, const float *weight, uint32_t n) {
-    uint32_t t, dim = m->c.dim;
-    for (t = 0; t < n; ++t) rmsnorm(m->x + (size_t)t * dim, weight, m->xn + (size_t)t * dim, dim, m->c.eps);
-    quantize_rows(m->xn, n, dim, m->nb_dim, m->xd, m->xq);
+static void row_task(void *ctx, uint32_t index, uint32_t count) {
+    RowTask *t = (RowTask *)ctx;
+    uint32_t begin, end, r;
+    split_range(t->n, index, count, &begin, &end);
+    for (r = begin; r < end; ++r)
+        if (!row_work(t, r)) __atomic_store_n(&t->fault, 1, __ATOMIC_RELAXED);
+}
+
+static RowTask rows_of(float *rows, uint32_t n, uint32_t cols, uint32_t nb, float *d, int8_t *q) {
+    RowTask t;
+    memset(&t, 0, sizeof(t));
+    t.rows = rows;
+    t.n = n;
+    t.cols = cols;
+    t.nb = nb;
+    t.d = d;
+    t.q = q;
+    return t;
+}
+
+/* A single token (decode) runs inline: waking the pool would cost more. */
+static void run_rows(Model *m, RowTask *t) {
+    if (t->n == 1) row_task(t, 0, 1);
+    else pool_run(m->pool, row_task, t);
+    if (t->fault) die("non-finite activation; the checkpoint is outside the supported numeric range");
+}
+
+/* RMSNorm of n rows of src into m->xn, quantized into m->xd/m->xq. */
+static void norm_quantize(Model *m, const float *src, const float *weight, uint32_t n) {
+    RowTask t = rows_of(m->xn, n, m->c.dim, m->nb_dim, m->xd, m->xq);
+    t.src = src;
+    t.norm = weight;
+    t.eps = m->c.eps;
+    run_rows(m, &t);
+}
+
+static void quantize_attention(Model *m, uint32_t n) {
+    RowTask t = rows_of(m->att, n, m->c.dim, m->nb_dim, m->xd, m->xq);
+    run_rows(m, &t);
+}
+
+/* m->up *= silu(m->gate), quantized into m->hd/m->hq. */
+static void silu_quantize(Model *m, uint32_t n) {
+    RowTask t = rows_of(m->up, n, m->c.hidden, m->nb_hidden, m->hd, m->hq);
+    t.gate = m->gate;
+    run_rows(m, &t);
 }
 
 static void rope_tables(Model *m, uint32_t n, uint32_t pos0) {
@@ -289,7 +360,7 @@ static void attend(Model *m, size_t layer_base, uint32_t t, uint32_t h, uint32_t
         if (s > high) high = s;
     }
     for (p = 0; p <= pos; ++p) {
-        scores[p] = expf(scores[p] - high);
+        scores[p] = exp_det(scores[p] - high);
         total += scores[p];
     }
     inv = 1.0f / total;
@@ -317,11 +388,14 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     uint32_t t, half = m->head_dim / 2;
     MatItem qkv[3];
     AttnTask task;
-    norm_quantize(m, L->attn_norm, n);
+    double clock = clock_start(m);
+    norm_quantize(m, m->x, L->attn_norm, n);
+    lap(m, PHASE_NORM, &clock);
     qkv[0] = item(&L->q, L->q_bias, m->q);
     qkv[1] = item(&L->k, L->k_bias, m->k);
     qkv[2] = item(&L->v, L->v_bias, m->v);
     matmul(m, qkv, 3, m->xd, m->xq, n);
+    lap(m, PHASE_QKV, &clock);
     for (t = 0; t < n; ++t) {
         size_t slot = ((size_t)l * m->context + pos0 + t) * m->kv_dim;
         rope(m->q + (size_t)t * c->dim, c->heads, m->head_dim, m->rope_cos + t * half, m->rope_sin + t * half);
@@ -329,31 +403,37 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
         memcpy(m->keys + slot, m->k + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
         memcpy(m->values + slot, m->v + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
     }
+    lap(m, PHASE_ROPE, &clock);
     task.m = m;
     task.layer = l;
     task.ntok = n;
     task.pos0 = pos0;
     pool_run(m->pool, attention_task, &task);
-    quantize_rows(m->att, n, c->dim, m->nb_dim, m->xd, m->xq);
+    lap(m, PHASE_ATTENTION, &clock);
+    quantize_attention(m, n);
+    lap(m, PHASE_ATTN_QUANT, &clock);
     qkv[0] = item(&L->o, NULL, m->out);
     matmul(m, qkv, 1, m->xd, m->xq, n);
+    lap(m, PHASE_ATTN_OUT, &clock);
     add_rows(m->x, m->out, (size_t)n * c->dim);
+    lap(m, PHASE_RESIDUAL, &clock);
 }
 
 /* ---- feed-forward and routing ------------------------------------------ */
 
 /* out[t] = down(SiLU(gate x_t) * up x_t) for ntok quantized inputs. */
 static void expert_mlp(Model *m, const Expert *e, const float *xd, const int8_t *xq, uint32_t ntok) {
-    uint32_t hidden = m->c.hidden;
-    size_t i, total = (size_t)ntok * hidden;
     MatItem items[2];
+    double clock = clock_start(m);
     items[0] = item(&e->gate, NULL, m->gate);
     items[1] = item(&e->up, NULL, m->up);
     matmul(m, items, 2, xd, xq, ntok);
-    for (i = 0; i < total; ++i) m->up[i] *= m->gate[i] / (1.0f + expf(-m->gate[i]));
-    quantize_rows(m->up, ntok, hidden, m->nb_hidden, m->hd, m->hq);
+    lap(m, PHASE_FFN_UP, &clock);
+    silu_quantize(m, ntok);
+    lap(m, PHASE_ACTIVATION, &clock);
     items[0] = item(&e->down, NULL, m->out);
     matmul(m, items, 1, m->hd, m->hq, ntok);
+    lap(m, PHASE_FFN_DOWN, &clock);
     m->expert_calls += ntok;
 }
 
@@ -374,7 +454,7 @@ static void route_tokens(Model *m, uint32_t n) {
                 if (!taken && (best == UINT32_MAX || r[e] > r[best])) best = e;
             }
             sel[k] = best;
-            w[k] = 1.0f / (1.0f + expf(-r[best]));
+            w[k] = 1.0f / (1.0f + exp_det(-r[best]));
             total += w[k];
         }
         if (!(total > 0) || !isfinite(total)) die("router underflow/overflow");
@@ -386,6 +466,7 @@ static void routed_experts(Model *m, const Layer *L, uint32_t n) {
     const Config *c = &m->c;
     uint32_t e, t, k, j, dim = c->dim, nbd = m->nb_dim;
     MatItem router = item(&L->router, NULL, m->route);
+    double clock = clock_start(m);
     matmul(m, &router, 1, m->xd, m->xq, n);
     route_tokens(m, n);
     for (e = 0; e < c->experts; ++e) {
@@ -398,10 +479,13 @@ static void routed_experts(Model *m, const Layer *L, uint32_t n) {
             memcpy(m->gxd + (size_t)j * nbd, m->xd + (size_t)tok * nbd, nbd * sizeof(float));
             memcpy(m->gxq + (size_t)j * nbd * QK, m->xq + (size_t)tok * nbd * QK, (size_t)nbd * QK);
         }
-        expert_mlp(m, &L->experts[e], m->gxd, m->gxq, g);
+        lap(m, PHASE_ROUTING, &clock);
+        expert_mlp(m, &L->experts[e], m->gxd, m->gxq, g); /* times its own phases */
+        clock = clock_start(m);
         for (j = 0; j < g; ++j)
             memcpy(m->expert_out + (size_t)m->members[j] * dim, m->out + (size_t)j * dim, dim * sizeof(float));
     }
+    lap(m, PHASE_ROUTING, &clock);
     /* Accumulate in selection order so batching never changes the sum. */
     for (t = 0; t < n; ++t)
         for (k = 0; k < c->top_k; ++k) {
@@ -410,23 +494,30 @@ static void routed_experts(Model *m, const Layer *L, uint32_t n) {
             float *x = m->x + (size_t)t * dim;
             for (j = 0; j < dim; ++j) x[j] += w * y[j];
         }
+    lap(m, PHASE_RESIDUAL, &clock);
 }
 
 static void ffn_block(Model *m, uint32_t l, uint32_t n) {
     const Config *c = &m->c;
     const Layer *L = &m->layers[l];
     uint32_t s;
-    norm_quantize(m, L->ffn_norm, n);
+    double clock = clock_start(m);
+    norm_quantize(m, m->x, L->ffn_norm, n);
+    lap(m, PHASE_NORM, &clock);
     if (c->experts == 1) {
         /* A single expert's normalized router weight is exactly 1. */
         expert_mlp(m, &L->experts[0], m->xd, m->xq, n);
+        clock = clock_start(m);
         add_rows(m->x, m->out, (size_t)n * c->dim);
+        lap(m, PHASE_RESIDUAL, &clock);
     } else {
         routed_experts(m, L, n);
     }
     for (s = 0; s < c->shared; ++s) {
         expert_mlp(m, &L->shared[s], m->xd, m->xq, n);
+        clock = clock_start(m);
         add_rows(m->x, m->out, (size_t)n * c->dim);
+        lap(m, PHASE_RESIDUAL, &clock);
     }
 }
 
@@ -434,18 +525,17 @@ static void ffn_block(Model *m, uint32_t l, uint32_t n) {
 
 static void output_logits(Model *m, uint32_t n, LogitsMode mode) {
     const Config *c = &m->c;
-    uint32_t first = mode == LOGITS_ALL ? 0 : n - 1, rows = n - first, t;
+    uint32_t first = mode == LOGITS_ALL ? 0 : n - 1, rows = n - first;
     MatItem head = item(&m->head, NULL, m->logits);
     if (rows > m->logit_rows) die("internal error: logits buffer too small");
-    for (t = 0; t < rows; ++t)
-        rmsnorm(m->x + (size_t)(first + t) * c->dim, m->final_norm, m->xn + (size_t)t * c->dim, c->dim, c->eps);
-    quantize_rows(m->xn, rows, c->dim, m->nb_dim, m->xd, m->xq);
+    norm_quantize(m, m->x + (size_t)first * c->dim, m->final_norm, rows);
     matmul(m, &head, 1, m->xd, m->xq, rows);
 }
 
 void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode) {
     const Config *c = &m->c;
     uint32_t t, l;
+    double clock = clock_start(m);
     if (!n || n > m->batch || pos0 > m->context || n > m->context - pos0) die("token batch exceeds context");
     for (t = 0; t < n; ++t) {
         if (tokens[t] >= c->vocab) die("token %u out of vocabulary", tokens[t]);
@@ -454,12 +544,16 @@ void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, 
         if (m->embed.dtype == DTYPE_Q5) dequantize_q5_row(row, c->dim, x);
         else dequantize_q8_row(row, c->dim, x);
     }
+    lap(m, PHASE_EMBED, &clock);
     rope_tables(m, n, pos0);
+    lap(m, PHASE_ROPE, &clock);
     for (l = 0; l < c->layers; ++l) {
-        attention_block(m, l, n, pos0);
+        attention_block(m, l, n, pos0); /* blocks time their own phases */
         ffn_block(m, l, n);
     }
+    clock = clock_start(m);
     if (mode != LOGITS_NONE) output_logits(m, n, mode);
+    lap(m, PHASE_LOGITS, &clock);
 }
 
 void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits) {

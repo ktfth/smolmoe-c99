@@ -110,7 +110,9 @@ describe.skipIf(!stories)("TinyStories 15M", () => {
 
 describe.skipIf(!qwen)("interactive chat", () => {
   test("keeps conversation history across turns and forgets it after /limpar", () => {
-    const input = "Meu nome é Ana e eu moro em Recife.\nQual é o meu nome?\n/limpar\nQual é o meu nome?\n/sair\n";
+    /* The first message must not sit on a near-tie: "Meu nome é Ana e eu moro em Recife." had a 0.02 logit
+     * margin, and a 1-ulp change in exp flipped the reply (docs/DECISIONS.md, iteration 5). */
+    const input = "Meu nome é Ana.\nQual é o meu nome?\n/limpar\nQual é o meu nome?\n/sair\n";
     const r = runWithInput([...modelArgs(qwen!), "--tokens", 48, "--context", 512], input);
     expect(r.code).toBe(0);
     const replies = r.stdout.toString().trim().split("\n");

@@ -14,7 +14,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform threadpool kernels config tokenizer tokenizer_qwen modelfile container bundle model sampler output calendar tools chat main
+SOURCES := util platform threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output calendar tools chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)

@@ -17,8 +17,19 @@
   - Há três conjuntos: o de desenvolvimento e dois de perguntas novas.
   - `--session` mede a conversa longa.
 - `scripts/fetch-models.ts` (`make models`): baixa os pesos do Release `models-v1` e confere o SHA-256.
+- `--profile`: tempo de cada passada dividido por fase, nas estatísticas.
+- `scripts/bench.ts` refeito como esteira de desempenho:
+  - cenários fixos, medianas e tempo por fase;
+  - `--save` e `--compare` contra uma base, e `--ab` para comparar dois binários alternados na mesma sessão;
+  - sai com erro se alguma métrica piorar.
 
 ### Alterado
+- **Leitura do prompt de 21% a 39% mais rápida**, e primeiro token de 17% a 26% mais cedo, em duas medições A/B.
+  Quantização, ativação e normalização passaram a usar AVX2 e todas as threads; antes eram 23% do tempo numa thread só.
+  Detalhes em [DECISIONS.md](docs/DECISIONS.md), iteração 5.
+- Exponencial própria (corretamente arredondada em mais de 99,99% das entradas), idêntica no escalar e no AVX2 e em
+  qualquer sistema operacional. Os números mudam no último bit em casos raros. A perplexidade foi de 11,3885 para
+  11,3681.
 - Com as ferramentas ligadas, o chat leva cerca de 5 s a mais para abrir (o prompt de sistema vai de 31 para 279
   tokens). `--no-tools` volta ao comportamento anterior.
 

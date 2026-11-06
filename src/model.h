@@ -30,6 +30,15 @@ typedef struct Layer {
 
 typedef enum { LOGITS_NONE, LOGITS_LAST, LOGITS_ALL } LogitsMode;
 
+/* Wall time of the forward pass split by phase (--profile). "norm" includes
+ * quantizing its output, "activation" is SwiGLU plus quantization, and
+ * "attn_quant" quantizes the attention output; "logits" includes the final
+ * norm. */
+typedef enum ModelPhase {
+    PHASE_EMBED, PHASE_NORM, PHASE_QKV, PHASE_ROPE, PHASE_ATTENTION, PHASE_ATTN_OUT, PHASE_FFN_UP,
+    PHASE_ACTIVATION, PHASE_ATTN_QUANT, PHASE_FFN_DOWN, PHASE_ROUTING, PHASE_RESIDUAL, PHASE_LOGITS, MODEL_PHASES
+} ModelPhase;
+
 typedef struct Model {
     Config c;
     uint32_t context, batch, head_dim, kv_dim, logit_rows, nb_dim, nb_hidden;
@@ -48,7 +57,11 @@ typedef struct Model {
     float *rope_cos, *rope_sin;
     float *keys, *values, *scores;
     uint64_t expert_calls;
+    int profiling;
+    double phase_seconds[MODEL_PHASES];
 } Model;
+
+const char *model_phase_name(ModelPhase p);
 
 /* logit_rows: 1 for normal generation, or the batch size when every prompt
  * token's logits are needed (--trace, --hash-logits). */

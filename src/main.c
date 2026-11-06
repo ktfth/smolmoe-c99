@@ -35,7 +35,7 @@ typedef struct Options {
     const char *stats, *trace, *token_ids;
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
-    int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock;
+    int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock, profile;
     ToolClock clock; /* --now */
 } Options;
 
@@ -85,6 +85,7 @@ static void usage(FILE *out) {
           "  --stats FILE         JSON statistics (always printed to stderr)\n"
           "  --trace FILE         exact hexadecimal logits of every processed token\n"
           "  --hash-logits        FNV-1a64 of every raw logit, reported in the stats\n"
+          "  --profile            forward-pass time split by phase, reported in the stats\n"
           "  --token-ids FILE     prompt and generated token IDs, one per line\n"
           "  --perplexity         score the prompt (teacher-forced NLL, perplexity); no generation\n"
           "  --tokenize-only      encode and render the prompt; no weights needed\n"
@@ -148,6 +149,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--tokenize-only")) { o->tokenize_only = 1; continue; }
         if (!strcmp(opt, "--perplexity")) { o->perplexity = 1; continue; }
         if (!strcmp(opt, "--no-tools")) { o->no_tools = 1; continue; }
+        if (!strcmp(opt, "--profile")) { o->profile = 1; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         parse_value(o, opt, argv[++a]);
     }
@@ -274,6 +276,13 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
         fprintf(f, ",\"perplexity_tokens\":%u,\"nll\":%.6f,\"perplexity\":%.6f", st->nll_tokens, mean, exp(mean));
     }
     if (o->interactive) fprintf(f, ",\"tool_calls\":%u", st->tool_calls);
+    if (o->profile) {
+        uint32_t p;
+        fputs(",\"profile\":{", f);
+        for (p = 0; p < MODEL_PHASES; ++p)
+            fprintf(f, "%s\"%s\":%.6f", p ? "," : "", model_phase_name((ModelPhase)p), m->phase_seconds[p]);
+        fputc('}', f);
+    }
     fputs("}\n", f);
     if (ferror(f)) die("statistics write failed");
 }
@@ -529,6 +538,7 @@ int main(int argc, char **argv) {
         uint32_t batch = o.batch < context ? o.batch : context;
         int every_logit = o.trace || o.hash_logits || o.perplexity;
         model_init(&model, &c, &src.mf, context, batch, every_logit ? batch : 1, pool, &mem);
+        model.profiling = o.profile;
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
     for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(run.tok, i);

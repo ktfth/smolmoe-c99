@@ -1,6 +1,7 @@
 #include "kernels.h"
 #include "f16.h"
 #include "util.h"
+#include "vecmath.h"
 
 #include <math.h>
 
@@ -10,6 +11,7 @@
 
 DotQ8 dot_q8 = dot_q8_scalar, dot_q5 = dot_q5_scalar;
 DotQ8x4 dot_q8_x4 = dot_q8_scalar_x4, dot_q5_x4 = dot_q5_scalar_x4;
+QuantizeQ8 quantize_q8 = quantize_q8_scalar;
 
 static uint16_t rd_u16(const unsigned char *p) {
     return (uint16_t)(p[0] | p[1] << 8);
@@ -229,6 +231,8 @@ const char *kernels_select(int force_scalar) {
     dot_q8_x4 = dot_q8_scalar_x4;
     dot_q5 = dot_q5_scalar;
     dot_q5_x4 = dot_q5_scalar_x4;
+    quantize_q8 = quantize_q8_scalar;
+    vecmath_select(0);
 #if defined(SM_HAVE_AVX2)
     /* F16C converts Q5 block scales exactly, matching f16_to_f32(). */
     if (!force_scalar && __builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
@@ -236,6 +240,8 @@ const char *kernels_select(int force_scalar) {
         dot_q8_x4 = dot_q8_avx2_x4;
         dot_q5 = dot_q5_avx2;
         dot_q5_x4 = dot_q5_avx2_x4;
+        quantize_q8 = quantize_q8_avx2;
+        vecmath_select(1);
         return "avx2";
     }
 #else
@@ -244,7 +250,11 @@ const char *kernels_select(int force_scalar) {
     return "scalar";
 }
 
-int quantize_q8(const float *x, uint32_t n, float *d, int8_t *q) {
+/* 1/scale stays finite, so x * inv never leaves [-127, 127] (and both
+ * versions round the same values). */
+static float inverse_scale(float scale) { return scale >= FLT_MIN ? 1.0f / scale : 0.0f; }
+
+int quantize_q8_scalar(const float *x, uint32_t n, float *d, int8_t *q) {
     uint32_t nb = (n + QK - 1) / QK, b, j;
     for (b = 0; b < nb; ++b, x += QK, q += QK) {
         uint32_t count = n - b * QK < QK ? n - b * QK : QK;
@@ -255,7 +265,7 @@ int quantize_q8(const float *x, uint32_t n, float *d, int8_t *q) {
             if (a > amax) amax = a;
         }
         scale = amax / 127.0f;
-        inv = scale > 0 ? 1.0f / scale : 0.0f;
+        inv = inverse_scale(scale);
         d[b] = scale;
         for (j = 0; j < QK; ++j) {
             long v = j < count ? lrintf(x[j] * inv) : 0;
@@ -266,6 +276,44 @@ int quantize_q8(const float *x, uint32_t n, float *d, int8_t *q) {
     }
     return 0;
 }
+
+#if defined(SM_HAVE_AVX2)
+__attribute__((target("avx2,f16c")))
+static float max_avx2(__m256 v) {
+    __m128 m = _mm_max_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps(v, 1));
+    m = _mm_max_ps(m, _mm_movehl_ps(m, m));
+    return _mm_cvtss_f32(_mm_max_ss(m, _mm_shuffle_ps(m, m, 1)));
+}
+
+#define TO_INT(v, inv) _mm256_cvtps_epi32(_mm256_mul_ps((v), (inv))) /* rounds to nearest even, as lrintf */
+#define FINITE(a, big) _mm256_cmp_ps((a), (big), _CMP_LE_OQ)        /* false for inf and NaN */
+
+/* quantize_q8_scalar() 32 values at a time; a partial last block goes to it. */
+__attribute__((target("avx2,f16c")))
+int quantize_q8_avx2(const float *x, uint32_t n, float *d, int8_t *q) {
+    const __m256 sign = _mm256_set1_ps(-0.0f), big = _mm256_set1_ps(FLT_MAX);
+    const __m256i order = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7); /* undoes the lane interleave of packs */
+    uint32_t b, full = n / QK;
+    for (b = 0; b < full; ++b, x += QK, q += QK) {
+        __m256 v0 = _mm256_loadu_ps(x), v1 = _mm256_loadu_ps(x + 8);
+        __m256 v2 = _mm256_loadu_ps(x + 16), v3 = _mm256_loadu_ps(x + 24);
+        __m256 a0 = _mm256_andnot_ps(sign, v0), a1 = _mm256_andnot_ps(sign, v1);
+        __m256 a2 = _mm256_andnot_ps(sign, v2), a3 = _mm256_andnot_ps(sign, v3), inv;
+        __m256i i01, i23;
+        float scale;
+        if (_mm256_movemask_ps(_mm256_and_ps(_mm256_and_ps(FINITE(a0, big), FINITE(a1, big)),
+                                             _mm256_and_ps(FINITE(a2, big), FINITE(a3, big)))) != 0xFF)
+            return -1;
+        scale = max_avx2(_mm256_max_ps(_mm256_max_ps(a0, a1), _mm256_max_ps(a2, a3))) / 127.0f;
+        d[b] = scale;
+        inv = _mm256_set1_ps(inverse_scale(scale));
+        i01 = _mm256_packs_epi32(TO_INT(v0, inv), TO_INT(v1, inv));
+        i23 = _mm256_packs_epi32(TO_INT(v2, inv), TO_INT(v3, inv));
+        _mm256_storeu_si256((__m256i *)(void *)q, _mm256_permutevar8x32_epi32(_mm256_packs_epi16(i01, i23), order));
+    }
+    return full * QK < n ? quantize_q8_scalar(x, n - full * QK, d + full, q) : 0;
+}
+#endif
 
 void dequantize_q8_row(const unsigned char *w, uint32_t cols, float *out) {
     uint32_t b, j, nb = (cols + QK - 1) / QK;

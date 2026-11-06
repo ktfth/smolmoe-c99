@@ -296,6 +296,100 @@ está no roadmap.
 - Ferramentas definidas pelo usuário e o modo `--chat --prompt` com ferramentas ficam para o servidor compatível com
   OpenAI, que tem o campo `tools` e o contrato certo para isso.
 
+## Iteração 5: esteira de desempenho e o trabalho fora das matrizes
+
+Desempenho virou a prioridade. Antes de otimizar, o projeto ganhou como medir.
+
+### A esteira
+
+- `--profile`: o tempo de cada passada dividido por fase (normalização, QKV, atenção, FFN, ativação etc.), nas
+  estatísticas JSON. Não muda nenhum bit do resultado (testado).
+- `scripts/bench.ts`: cenários fixos ("leitura", com 301 tokens de entrada, e "chat", com 88 de entrada e 64 gerados),
+  medianas, tempo por fase e comparação com uma base. Sai com erro se uma métrica piorar além do limiar.
+- **Duas armadilhas de medição encontradas e corrigidas:**
+  - O `--hash-logits` calcula as 151 mil pontuações do vocabulário para todo token do prompt (18,6% do tempo). O chat
+    nunca faz isso, então ele saiu do benchmark. A igualdade entre rodadas é conferida pelo texto gerado.
+  - O calor do notebook mudou a escrita de 21,5 para 15,5 tok/s com o mesmo código. Comparar com uma base medida em
+    outro momento não é confiável aqui. O modo `--ab BINARIO_ANTIGO` roda os dois binários alternados na mesma sessão.
+
+### O diagnóstico
+
+Prefill de 388 tokens, 4 threads, antes da mudança:
+
+| Fase | 1 thread | 4 threads |
+|---|---|---|
+| FFN (gate/up/down) | 66,7% | 56,1% |
+| Atenção | 14,2% | 13,5% |
+| Quantização + ativação + normalização | 9,2% | **21,3%** |
+| QKV + saída da atenção | 9,7% | 8,8% |
+
+A quantização, a ativação (SiLU com `expf`) e a normalização rodavam numa thread só e **não encolheram com 4 threads**.
+Com 1, 2, 4 e 8 threads, o prefill ia a 30,8, 47,3, 54,8 e 62,4 tok/s.
+
+### A mudança
+
+- **Exponencial própria**, idêntica bit a bit no caminho escalar e no AVX2. Usa uma tabela de 32 valores de 2^(j/32)
+  (gerada com aritmética inteira exata em `scripts/gen-exp-table.ts`) e um polinômio de grau 4, tudo em double, com um
+  único arredondamento para float.
+- **SiLU e quantização em AVX2**, idênticas bit a bit às versões escalares, inclusive em infinitos, NaN e todos os
+  tamanhos de cauda.
+- **Trabalho por token dividido entre as threads**, com a linha de cada token inteira numa thread só. Por isso o
+  resultado não depende do número de threads.
+
+### Ideias derrubadas
+
+- **Exponencial em float (polinômio do Cephes):** errava 1 ulp em 10% das entradas, contra 0,01% do `expf` do sistema.
+  Isso já bastou para mudar uma resposta do modelo (abaixo). A versão em double acerta o arredondamento em mais de
+  99,99% e ficou.
+- **"A mudança de exponencial é a única mudança numérica":** isso era uma hipótese até ser testada. O código novo
+  compilado com o `expf` do sistema dá logits **idênticos bit a bit** aos do binário antigo em todas as 63 posições do
+  teste. Vetorizar e paralelizar a quantização, a ativação e a normalização não mudou nenhum bit.
+
+### Um efeito que a medição revelou
+
+O teste de histórico do chat passou a falhar: "Meu nome é Ana e eu moro em Recife." virou "Meu nome é Renato…" na
+resposta do modelo. O rastreamento dos logits mostrou o mecanismo:
+
+- As posições 0 a 33 continuaram idênticas bit a bit.
+- Nas posições 34 a 38 houve diferenças de 10⁻⁵ (uma exponencial 1 ulp diferente).
+- Na posição 39, a diferença saltou para 0,39. Um valor que caía na fronteira de arredondamento de 8 bits mudou de
+  degrau, e isso se propagou pelas 24 camadas.
+- Na posição 55, a versão antiga escolhia entre dois tokens com margem de **0,02**, e a escolha virou.
+
+O teste verifica o histórico do runtime, não a sorte do modelo. A mensagem passou a ser "Meu nome é Ana.", que as duas
+versões respondem igual e com folga. **Lição:** um modelo que quantiza as ativações amplifica diferenças mínimas, e a
+saída gulosa em empates próximos não é estável sob nenhuma mudança numérica.
+
+### Resultado
+
+| | Antes | Depois | Variação |
+|---|---|---|---|
+| Leitura (301 tokens), tok/s | 45,1 / 44,4 | 57,6 / 53,9 | **+27,6% / +21,5%** |
+| Leitura do chat (88 tokens), tok/s | 47,9 / 51,0 | 66,7 / 67,5 | **+39,3% / +32,2%** |
+| Tempo até o 1º token no chat | 2,08 / 1,96 s | 1,54 / 1,51 s | **−26% / −23%** |
+| Escrita, tok/s | 19,1 / 16,8 | 21,4 / 16,5 | +11,7% / −2,1% (não confirmado) |
+| Perplexidade (1038 tokens) | 11,3885 | 11,3681 | −0,18% (ruído) |
+| Datas: desenvolvimento / perguntas novas | 16/17 · 12/15 | 16/17 · 13/15 | igual (1 resposta virou) |
+
+Duas sessões A/B, 5 rodadas cada. A fase "fora das matrizes" caiu de 23% para cerca de 3% do prefill. Agora o prefill
+é 70% produto de matrizes e 13% atenção: são os próximos alvos.
+
+**Ganho colateral:** sem `expf` da libm no caminho do modelo, Windows e Linux passam a produzir os mesmos números,
+exceto pelas tabelas de RoPE, que ainda usam `cos`/`sin` em double.
+
+### Determinismo bit a bit: continua
+
+Com desempenho como prioridade, revimos a regra que exige resultado idêntico com qualquer número de threads, lote e
+kernel. Ela continua:
+
+- Tudo o que o diagnóstico apontou foi resolvido sem quebrá-la.
+- Até a instrução de multiplicar e somar (FMA) cabe nela, porque o `fmaf` do C dá o mesmo resultado.
+- É ela que torna a esteira barata: se o hash dos logits não mudou, a otimização não mudou nenhum número e a qualidade
+  não precisa ser medida de novo.
+
+**Critério de exceção:** se uma medição mostrar que a regra bloqueia um ganho acima de 15%, a regra cai de propósito e
+o efeito na qualidade é medido (perplexidade e conjuntos de perguntas) antes de aceitar.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.
@@ -310,7 +404,10 @@ está no roadmap.
 
 Ver [ROADMAP.md](ROADMAP.md). As suspeitas atuais, ainda sem medição:
 
-- `expf`/`cos`/`sin` da libm impedem hashes idênticos entre Windows e Linux.
+- `cos`/`sin` da libm (tabelas de RoPE) ainda podem impedir hashes idênticos entre Windows e Linux. O `expf` já saiu
+  (iteração 5).
+- O kernel Q8 de prefill usa cerca de metade do que o processador permite por bloco (estimativa: ~6 ciclos contra ~3) e
+  só ganha 2,4× com 4 threads.
 - O kernel Q5 custa 2,6× o Q8 por bloco; uma variante com desempacotamento por tabela ou 2 blocos por iteração pode
   torná-lo vantajoso também em velocidade.
 - Os conversores ainda estão em Python e o `q8pack.c` é só POSIX.

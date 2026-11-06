@@ -104,6 +104,20 @@ describe("statistics", () => {
     expect(r.stats.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
+  test("--profile splits forward time into phases without changing the logits", () => {
+    const plain = runOk(args(medium, ["--hash-logits"])).stats;
+    const { stats } = runOk(args(medium, ["--hash-logits", "--profile"]));
+    expect(stats.logits_hash).toBe(plain.logits_hash);
+    expect(plain.profile).toBeUndefined();
+    expect(Object.keys(stats.profile)).toEqual(["embed", "norm", "qkv", "rope", "attention", "attn_out", "ffn_up",
+      "activation", "attn_quant", "ffn_down", "routing", "residual", "logits"]);
+    const seconds = Object.values(stats.profile) as number[];
+    seconds.forEach((s) => expect(s).toBeGreaterThanOrEqual(0));
+    const total = seconds.reduce((a, b) => a + b, 0);
+    expect(total).toBeGreaterThan(0);
+    expect(total).toBeLessThanOrEqual(stats.prefill_seconds + stats.decode_seconds + 0.05);
+  });
+
   test("token-id file holds BOS, prompt and generated IDs", () => {
     const ids = join(work.path, "ids.txt");
     runOk(["--model", small.model, "--config", small.config, "--tokenizer", small.tokenizer,
