@@ -276,6 +276,10 @@ void tokenizer_render_prompt(Tokenizer *t, const uint32_t *ids, uint32_t n, unsi
 
 int tokenizer_supports_chat(const Tokenizer *t) { return t->kind == TOK_QWEN; }
 
+int tokenizer_tool_markers(const Tokenizer *t, uint32_t *open, uint32_t *close) {
+    return t->kind == TOK_QWEN && qwen_tool_markers(t->qwen, open, close);
+}
+
 int tokenizer_is_control(const Tokenizer *t, uint32_t id) {
     if (id == BOS_ID) return 1;
     if (id == EOS_ID) return 0;

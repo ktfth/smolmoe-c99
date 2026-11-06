@@ -57,6 +57,17 @@ describe.skipIf(!qwen)("Qwen2.5-0.5B-Instruct", () => {
     }
   });
 
+  test("tool-call markers are tokens in the system prompt but stay plain text from the user", async () => {
+    const TOOL_OPEN = 151657, TOOL_CLOSE = 151658;
+    const r = tokenize(new TextEncoder().encode("<tool_call>{\"name\": \"x\"}</tool_call>"),
+      ["--chat", "--system", "Use <tool_call> and </tool_call>."]);
+    expect(r.code).toBe(0);
+    const ids = (await r.ids).trim().split("\n").map(Number);
+    expect(ids.filter((id) => id === TOOL_OPEN)).toHaveLength(1);
+    expect(ids.filter((id) => id === TOOL_CLOSE)).toHaveLength(1);
+    expect(ids.lastIndexOf(TOOL_CLOSE)).toBeLessThan(ids.indexOf(257)); /* both inside the system message */
+  });
+
   test("invalid UTF-8 is rejected", () => {
     for (const bytes of [[0xc0, 0x80], [0xed, 0xa0, 0x80], [0xf4, 0x90, 0x80, 0x80], [0xe2, 0x82], [0x80]]) {
       expect(tokenize(Uint8Array.from(bytes)).code).not.toBe(0);
@@ -108,6 +119,47 @@ describe.skipIf(!qwen)("interactive chat", () => {
     expect(replies[2]).not.toContain("Ana");
     expect(r.stderr).toContain("(conversa reiniciada)");
   }, SLOW);
+});
+
+describe.skipIf(!qwen)("chat tools", () => {
+  const NOW = ["--now", "2026-11-06T10:30"]; /* a Friday, 49 days before Christmas */
+  const chat = (input: string, extra: readonly (string | number)[] = []) =>
+    runWithInput([...modelArgs(qwen!), ...NOW, "--tokens", 96, ...extra], `${input}\n/sair\n`);
+
+  test("counts the days to Christmas with dias_ate and answers with the exact number", () => {
+    const r = chat("Quanto tempo falta para o natal?");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("[ferramenta] dias_ate");
+    expect(r.stdout.toString()).toContain("49");
+    expect(r.stdout.toString()).not.toMatch(/tool_call|"name"|tool_response/);
+  }, SLOW);
+
+  test("tells today's date from data_atual", () => {
+    const r = chat("Que dia é hoje?");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("[ferramenta] data_atual");
+    expect(r.stdout.toString()).toContain("6 de novembro");
+  }, SLOW);
+
+  test("--no-tools keeps the plain chat", () => {
+    const r = chat("Quanto tempo falta para o natal?", ["--no-tools"]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).not.toContain("[ferramenta]");
+  }, SLOW);
+
+  test("a context too small for the tool declarations turns them off instead of failing", () => {
+    const r = chat("Oi", ["--context", 256, "--tokens", 8]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("ferramentas desativadas");
+  }, SLOW);
+
+  test("--now must be a valid local date and time", () => {
+    for (const bad of ["2026-02-30T10:00", "amanhã", "2026-11-06"]) {
+      const r = run([...modelArgs(qwen!), "--now", bad]);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain("--now must be a local date and time as YYYY-MM-DDTHH:MM");
+    }
+  });
 });
 
 describe.skipIf(!qwen)("interactive chat input limits", () => {

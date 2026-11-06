@@ -1,5 +1,27 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+- **Chamada de funções no chat** (template do Qwen2.5). Há duas ferramentas embutidas: `data_atual` e `dias_ate`, que
+  aceita data em texto e feriados brasileiros, inclusive os móveis. O modelo escolhe a ferramenta, e as datas são
+  calculadas em C.
+  - As ferramentas só são oferecidas quando a mensagem fala de data ou de tempo.
+  - A data escrita pelo usuário vale mais que o argumento do modelo.
+  - Uma chamada que não combina com a mensagem é descartada.
+  - Medição: 12 de 15 certas em perguntas novas, que não foram usadas no desenho. Os limites conhecidos estão em
+    [DECISIONS.md](docs/DECISIONS.md), iteração 4.
+- `--no-tools` desliga as ferramentas. `--now AAAA-MM-DDTHH:MM` fixa o relógio, para execuções reproduzíveis.
+- Campo `tool_calls` nas estatísticas do chat.
+- `scripts/eval-tools.ts`: mede a escolha de ferramenta e a resposta.
+  - Há três conjuntos: o de desenvolvimento e dois de perguntas novas.
+  - `--session` mede a conversa longa.
+- `scripts/fetch-models.ts` (`make models`): baixa os pesos do Release `models-v1` e confere o SHA-256.
+
+### Alterado
+- Com as ferramentas ligadas, o chat leva cerca de 5 s a mais para abrir (o prompt de sistema vai de 31 para 279
+  tokens). `--no-tools` volta ao comportamento anterior.
+
 ## 0.2.0 — 2026-11-06
 
 Reescrita do runtime para eficiência e para uso em produção. Números e justificativas em

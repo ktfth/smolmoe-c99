@@ -12,8 +12,12 @@
 
 typedef struct { uint32_t a, b, out; } QwenMerge;
 
+#define TOOL_OPEN_TEXT "<tool_call>"
+#define TOOL_CLOSE_TEXT "</tool_call>"
+
 struct QwenTokenizer {
     uint32_t vocab, nmerge, im_start, hash_size, capacity, max_piece;
+    uint32_t tool_open, tool_close; /* special tokens, or UINT32_MAX when the vocabulary lacks them */
     unsigned char **piece, *special, *normalized;
     uint32_t *length, *hash, *cp, *offset, *symbols;
     QwenMerge *merge;
@@ -42,6 +46,13 @@ static void validate_merge(const QwenTokenizer *q, const QwenMerge *m) {
         memcmp(q->piece[m->out], q->piece[m->a], q->length[m->a]) ||
         memcmp(q->piece[m->out] + q->length[m->a], q->piece[m->b], q->length[m->b]))
         die("invalid Qwen merge");
+}
+
+static uint32_t find_special(const QwenTokenizer *q, const char *text) {
+    uint32_t i, n = (uint32_t)strlen(text);
+    for (i = 256; i < q->vocab; ++i)
+        if (q->special[i] && q->length[i] == n && !memcmp(q->piece[i], text, n)) return i;
+    return UINT32_MAX;
 }
 
 QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
@@ -79,6 +90,8 @@ QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
         if (i < 256 && (n != 1 || q->piece[i][0] != i || flag)) die("invalid Qwen byte-token permutation");
     }
     if (used != total) die("Qwen piece byte count mismatch");
+    q->tool_open = find_special(q, TOOL_OPEN_TEXT);
+    q->tool_close = find_special(q, TOOL_CLOSE_TEXT);
     for (i = 0; i < q->nmerge; ++i) {
         QwenMerge *m = &q->merge[i];
         read_exact(f, rec, 12, "merges");
@@ -202,16 +215,48 @@ static void encode_literal(QwenTokenizer *q, const char *s, uint32_t *ids, uint3
     encode_text(q, (const unsigned char *)s, (uint32_t)strlen(s), ids, n);
 }
 
-/* ChatML: <|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n{prompt}
- * <|im_end|>\n<|im_start|>assistant\n — <|im_end|> is EOS (257). */
+/* Position of the first tool marker at or after `from`, its length and token. */
+static const unsigned char *next_marker(const QwenTokenizer *q, const unsigned char *s, const unsigned char *end,
+                                        uint32_t *len, uint32_t *id) {
+    static const char *const text[2] = {TOOL_OPEN_TEXT, TOOL_CLOSE_TEXT};
+    const uint32_t token[2] = {q->tool_open, q->tool_close};
+    for (; s < end; ++s) {
+        int k;
+        for (k = 0; k < 2; ++k) {
+            uint32_t n = (uint32_t)strlen(text[k]);
+            if (token[k] != UINT32_MAX && (size_t)(end - s) >= n && !memcmp(s, text[k], n)) {
+                *len = n;
+                *id = token[k];
+                return s;
+            }
+        }
+    }
+    return end;
+}
+
+/* System text is the operator's: the tool-call markers in it become their
+ * tokens, as in the template Qwen2.5 was trained on. User text never does. */
+static void encode_trusted(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, uint32_t *ids, uint32_t *n) {
+    const unsigned char *end = s + bytes;
+    while (s < end) {
+        uint32_t len = 0, id = 0;
+        const unsigned char *at = next_marker(q, s, end, &len, &id);
+        if (at > s) encode_text(q, s, (uint32_t)(at - s), ids, n);
+        if (at == end) break;
+        push_id(ids, n, q->capacity, id);
+        s = at + len;
+    }
+}
+
 /* One ChatML message: <|im_start|>{role}\n{text}<|im_end|>\n, followed by the
- * assistant generation prefix when open_assistant is set. <|im_end|> is EOS. */
+ * assistant generation prefix when open_assistant is set. <|im_end|> is EOS (257). */
 static void chat_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
                          int open_assistant, uint32_t *ids, uint32_t *n) {
     push_id(ids, n, q->capacity, q->im_start);
     encode_literal(q, role, ids, n);
     encode_literal(q, "\n", ids, n);
-    encode_text(q, text, bytes, ids, n);
+    if (!strcmp(role, "system")) encode_trusted(q, text, bytes, ids, n);
+    else encode_text(q, text, bytes, ids, n);
     push_id(ids, n, q->capacity, EOS_ID);
     encode_literal(q, "\n", ids, n);
     if (open_assistant) {
@@ -257,3 +302,10 @@ uint32_t qwen_decode(const QwenTokenizer *q, uint32_t id, unsigned char *buf) {
 uint32_t qwen_max_piece(const QwenTokenizer *q) { return q->max_piece; }
 
 int qwen_is_special(const QwenTokenizer *q, uint32_t id) { return id < q->vocab && q->special[id]; }
+
+int qwen_tool_markers(const QwenTokenizer *q, uint32_t *open, uint32_t *close) {
+    if (q->tool_open == UINT32_MAX || q->tool_close == UINT32_MAX) return 0;
+    *open = q->tool_open;
+    *close = q->tool_close;
+    return 1;
+}

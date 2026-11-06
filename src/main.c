@@ -17,6 +17,7 @@
 #include "sampler.h"
 #include "threadpool.h"
 #include "tokenizer.h"
+#include "tools.h"
 #include "util.h"
 
 #define DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
@@ -27,18 +28,20 @@
 #define MAX_BATCH 512u
 #define MAX_THREADS 256u
 #define PROMPT_BYTES_PER_TOKEN 4u
+#define TOOLS_PROMPT_BYTES 4096u /* the "# Tools" section the chat appends to --system */
 
 typedef struct Options {
     const char *model, *config, *tokenizer, *prompt, *prompt_file, *system;
     const char *stats, *trace, *token_ids;
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
-    int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given;
+    int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock;
+    ToolClock clock; /* --now */
 } Options;
 
 typedef struct Stats {
     double start, loaded, prefill_end, ended, first;
-    uint32_t prompt_tokens, generated, processed;
+    uint32_t prompt_tokens, generated, processed, tool_calls;
     uint64_t logits_hash;
     double nll;
     uint32_t nll_tokens;
@@ -64,6 +67,8 @@ static void usage(FILE *out) {
           "  --chat               wrap the prompt in a Qwen2 ChatML single-turn template\n"
           "  --interactive, -i    multi-turn chat on stdin/stdout (default without a prompt)\n"
           "  --system TEXT        ChatML system message (default: Brazilian Portuguese)\n"
+          "  --no-tools           chat without the built-in tools (date, days until a date)\n"
+          "  --now YYYY-MM-DDTHH:MM  fixed local time for the tools (default: the clock)\n"
           "generation\n"
           "  --tokens N           max new tokens (default 64; 512 per reply in chat)\n"
           "  --temperature X      0 = greedy (default), positive = sample\n"
@@ -96,6 +101,10 @@ static void parse_value(Options *o, const char *opt, const char *value) {
     else if (!strcmp(opt, "--stats")) o->stats = value;
     else if (!strcmp(opt, "--trace")) o->trace = value;
     else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
+    else if (!strcmp(opt, "--now")) {
+        if (!tool_clock_parse(value, &o->clock)) die("--now must be a local date and time as YYYY-MM-DDTHH:MM");
+        o->fixed_clock = 1;
+    }
     else if (!strcmp(opt, "--tokens")) {
         o->tokens = parse_u32(value, MAX_CONTEXT, "tokens");
         o->tokens_given = 1;
@@ -138,6 +147,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--hash-logits")) { o->hash_logits = 1; continue; }
         if (!strcmp(opt, "--tokenize-only")) { o->tokenize_only = 1; continue; }
         if (!strcmp(opt, "--perplexity")) { o->perplexity = 1; continue; }
+        if (!strcmp(opt, "--no-tools")) { o->no_tools = 1; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         parse_value(o, opt, argv[++a]);
     }
@@ -263,6 +273,7 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
         double mean = st->nll_tokens ? st->nll / st->nll_tokens : 0;
         fprintf(f, ",\"perplexity_tokens\":%u,\"nll\":%.6f,\"perplexity\":%.6f", st->nll_tokens, mean, exp(mean));
     }
+    if (o->interactive) fprintf(f, ",\"tool_calls\":%u", st->tool_calls);
     fputs("}\n", f);
     if (ferror(f)) die("statistics write failed");
 }
@@ -325,6 +336,10 @@ typedef struct Run {
     FILE *trace, *ids_out;
     Output *out;
     Stats *st;
+    const char *system; /* chat: --system, plus the tool declarations when tools are on */
+    int tools;
+    uint32_t tool_open, tool_close;
+    unsigned char *banned; /* the sampler's; the chat allows the tool markers per message */
 } Run;
 
 static uint32_t default_threads(void) {
@@ -393,7 +408,12 @@ static void run_chat(const Run *r) {
     cc.line = (char *)r->prompt;
     cc.line_cap = r->prompt_cap;
     cc.piece = r->piece;
-    cc.system = r->o->system;
+    cc.system = r->system;
+    cc.tools = r->tools;
+    cc.tool_open = r->tool_open;
+    cc.tool_close = r->tool_close;
+    cc.fixed_clock = r->o->fixed_clock ? &r->o->clock : NULL;
+    cc.banned = r->banned;
     cc.max_reply = r->o->tokens;
     st->loaded = now_seconds();
     chat_run(&cc, &cs);
@@ -404,6 +424,27 @@ static void run_chat(const Run *r) {
     st->prefill_end = st->loaded + cs.prefill_seconds;
     st->ended = st->prefill_end + cs.decode_seconds;
     st->first = cs.generated ? st->loaded + cs.first_token_seconds : 0;
+    st->tool_calls = cs.tool_calls;
+}
+
+/* Chat tools are on when the vocabulary has the call markers, --no-tools is
+ * absent and the declarations fit in half the context. Otherwise the chat runs
+ * with the plain system prompt and the markers stay banned. */
+static void enable_tools(Run *r, uint32_t context, Memory *mem) {
+    size_t cap = strlen(r->o->system) + TOOLS_PROMPT_BYTES;
+    char *text;
+    uint32_t n;
+    r->system = r->o->system;
+    if (r->o->no_tools || !tokenizer_tool_markers(r->tok, &r->tool_open, &r->tool_close)) return;
+    text = (char *)mem_alloc(mem, cap, 1);
+    if (!tools_system_prompt(r->o->system, text, cap)) die("internal error: tool declarations do not fit");
+    n = tokenizer_chat_turn(r->tok, "system", (const unsigned char *)text, (uint32_t)strlen(text), 0, r->ids);
+    if (n > context / 2) {
+        fprintf(stderr, "(ferramentas desativadas: o contexto é pequeno; use --context %u ou mais)\n", 2 * n);
+        return;
+    }
+    r->system = text;
+    r->tools = 1;
 }
 
 int main(int argc, char **argv) {
@@ -450,7 +491,13 @@ int main(int argc, char **argv) {
         die("chat needs a chat model (Qwen tokenizer); pass --prompt for plain text continuation");
     run.prompt_cap = (uint32_t)(context < MAX_CONTEXT / PROMPT_BYTES_PER_TOKEN ? context * PROMPT_BYTES_PER_TOKEN
                                                                                : MAX_CONTEXT);
-    id_cap = tokenizer_prepare(run.tok, run.prompt_cap, &mem);
+    {
+        /* The chat's system message (with tool declarations) can exceed a small context's prompt cap. */
+        size_t system_bytes = o.interactive ? strlen(o.system) + TOOLS_PROMPT_BYTES : 0;
+        uint32_t encode_cap = system_bytes > run.prompt_cap ? (uint32_t)system_bytes : run.prompt_cap;
+        if (system_bytes > MAX_CONTEXT * PROMPT_BYTES_PER_TOKEN) die("--system is too long");
+        id_cap = tokenizer_prepare(run.tok, encode_cap, &mem);
+    }
     run.prompt = (unsigned char *)mem_alloc(&mem, (size_t)run.prompt_cap + 1, 1);
     run.ids = (uint32_t *)mem_alloc(&mem, id_cap, sizeof(uint32_t));
     run.piece = (unsigned char *)mem_alloc(&mem, tokenizer_max_piece(run.tok), 1);
@@ -485,6 +532,8 @@ int main(int argc, char **argv) {
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
     for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(run.tok, i);
+    run.banned = banned;
+    if (o.interactive) enable_tools(&run, context, &mem);
     sampler_init(&sampler, c.vocab, banned, o.temperature, o.top_k, o.top_p, o.seed, &mem);
     run.model = &model;
     run.sampler = &sampler;

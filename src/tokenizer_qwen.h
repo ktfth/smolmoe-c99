@@ -20,5 +20,6 @@ uint32_t qwen_chat_close(QwenTokenizer *q, uint32_t *ids);
 uint32_t qwen_decode(const QwenTokenizer *q, uint32_t id, unsigned char *buf);
 uint32_t qwen_max_piece(const QwenTokenizer *q);
 int qwen_is_special(const QwenTokenizer *q, uint32_t id);
+int qwen_tool_markers(const QwenTokenizer *q, uint32_t *open, uint32_t *close);
 
 #endif

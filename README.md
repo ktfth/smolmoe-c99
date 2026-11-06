@@ -67,6 +67,8 @@ Saída real, sem edição:
 |---|---|---|
 | (sem `--prompt`) / `-i` | — | Chat multi-turno no terminal (modelos de chat) |
 | `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno com `--prompt` |
+| `--no-tools` | ferramentas ligadas no chat | Chat sem as funções de data (abre cerca de 5 s mais rápido) |
+| `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa a hora que as ferramentas usam (execuções reproduzíveis) |
 | `--tokens N` | 64 (512 no chat) | Máximo de tokens novos; para no EOS |
 | `--temperature X` | 0 (guloso) | Amostragem quando > 0 |
 | `--top-k N` / `--top-p X` | 40 / 0,95 | Truncamento da amostragem |
@@ -79,6 +81,33 @@ Saída real, sem edição:
 | `--stats`, `--trace`, `--hash-logits`, `--token-ids` | — | Diagnóstico e regressão |
 
 A lista completa está em `smolmoe --help`.
+
+### Funções no chat: datas exatas
+
+O modelo não tem relógio e não sabe fazer conta com datas. No chat, ele chama funções do runtime, e o C faz a conta:
+
+```text
+> Quanto tempo falta para o natal?
+[ferramenta] dias_ate: {"name": "dias_ate", "arguments": {"data": "01/12/2023"}} -> {"resumo": "Faltam 49 dias para 25 de dezembro de 2026 (sexta-feira).", ...}
+Para o natal, você tem 49 dias para o dia 25 de dezembro de 2026 (sexta-feira).
+```
+
+Esta é a saída real, com `--now 2026-11-06T10:30`. Nela, o modelo passou uma data errada ("01/12/2023"), e o runtime
+usou a data da própria pergunta ("natal"). Para isso existe o aterramento.
+
+- `data_atual` informa a data, o dia da semana e a hora.
+- `dias_ate` aceita "25 de dezembro", "25/12" ou o nome de um feriado brasileiro, inclusive os móveis (Páscoa,
+  Carnaval, Dia das Mães).
+- As ferramentas só são oferecidas quando a mensagem fala de data ou de tempo. A data escrita pelo usuário vale mais
+  que o argumento do modelo. Uma chamada que não combina com a mensagem é descartada, e o modelo responde sem ela.
+- Em perguntas novas, que não foram usadas no desenho, **12 de 15 saem certas** (`bun scripts/eval-tools.ts --set
+  holdout2`). Quando a ferramenta é chamada, o número de dias sai exato.
+- Os pontos fracos medidos:
+  - Em conversas longas, o modelo deixa de chamar as ferramentas e inventa a hora. Use `/limpar`.
+  - Não entende dia da semana ("até sexta").
+  - Às vezes escreve "atrás" em vez de "faltam".
+
+  Os detalhes estão em [docs/DECISIONS.md](docs/DECISIONS.md), iteração 4.
 
 ### Q5: 39% menos memória
 

@@ -5,6 +5,11 @@ antes/depois registrada em [DECISIONS.md](DECISIONS.md).
 
 ## Próximo: eficiência
 
+0. **Esconder o custo das ferramentas na abertura do chat.** As declarações custam cerca de 5 s de prefill a cada
+   abertura (DECISIONS, iteração 4). Há dois caminhos:
+   - Fazer o prefill do prompt de sistema numa thread enquanto o usuário digita a primeira mensagem. No uso
+     interativo, o custo some.
+   - Gravar o cache KV desse prefixo fixo junto com o executável (cerca de 7 MB) e mapeá-lo na partida.
 1. **Matemática determinística própria** (`expf`, `sin`/`cos`). Hoje os hashes de logits diferem entre Windows e Linux
    só por causa da libm. Polinômios próprios em float puro (sem FMA) dão bit-identidade entre sistemas operacionais,
    o que permite fixar hashes-ouro na suíte. Também permite vetorizar SiLU e softmax.
@@ -15,6 +20,18 @@ antes/depois registrada em [DECISIONS.md](DECISIONS.md).
    perplexidade no 0,5B e foi removido.
 4. **Kernels NEON (ARM64).** Mesma ordem de lanes. Abre Apple Silicon, Raspberry Pi e servidores Graviton.
 5. **Cache KV em F16.** Metade da memória e da banda em contextos longos.
+
+## Funções no chat: o que a medição deixou aberto
+
+Detalhes em DECISIONS, iteração 4. Cada correção só conta com um **conjunto novo de perguntas, escrito antes de
+rodar**: os dois atuais já serviram para decidir.
+
+1. **Conversa longa.** No meio de uma sessão, o modelo deixa de chamar `data_atual` e inventa a hora.
+2. **Chamada descartada que vira texto.** Na segunda tentativa, o modelo às vezes escreve o JSON da chamada para o
+   usuário. Uma alternativa a medir é responder à chamada com um erro de ferramenta, em vez de desfazer a resposta.
+3. **Lacunas do portão e do `dias_ate`.** Falta "ano" na lista de palavras, e falta entender dia da semana
+   ("até sexta").
+4. **Ferramentas do usuário** (`tools` no estilo OpenAI) junto com o servidor local.
 
 ## Rumo ao "llamafile": um executável que já é o modelo
 

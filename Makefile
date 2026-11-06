@@ -14,7 +14,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform threadpool kernels config tokenizer tokenizer_qwen modelfile container bundle model sampler output chat main
+SOURCES := util platform threadpool kernels config tokenizer tokenizer_qwen modelfile container bundle model sampler output calendar tools chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -35,6 +35,7 @@ LDLIBS   = -lm $(SYSLIBS)
 BIN        := $(BUILD)/smolmoe$(EXE)
 BIN_SCALAR := $(BUILD)/smolmoe-scalar$(EXE)
 TEST_KERN  := $(BUILD)/test-kernels$(EXE)
+TEST_TOOLS := $(BUILD)/test-tools$(EXE)
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
@@ -73,6 +74,9 @@ $(QUANTIZE): $(BUILD)/obj/quantize_main.o $(OBJ_LIB)
 $(BUNDLE): $(BUILD)/obj/bundle_main.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_TOOLS): $(BUILD)/tests/test_tools.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 $(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
@@ -81,8 +85,9 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN)
+test-unit: $(TEST_KERN) $(TEST_TOOLS)
 	$(TEST_KERN)
+	$(TEST_TOOLS)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000

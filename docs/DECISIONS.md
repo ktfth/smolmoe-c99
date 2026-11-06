@@ -184,6 +184,118 @@ pergunta. Qualquer pessoa fora do terminal desistiria antes da primeira resposta
   Um teste de regressão novo falha no binário antigo e passa no novo. A leitura via `ReadConsoleW` (console
   interativo do Windows) não é coberta por teste automático, porque um pipe não exercita esse caminho.
 
+## Iteração 4: o modelo chama funções
+
+A pergunta que motivou a iteração: "quanto tempo falta para o Natal?". O modelo não tem relógio e inventava ("10 dias
+antes do Natal"). Com a data no prompt de sistema, errava a conta ("2026 − 2026 = 0 dias"). Um modelo de 0,5B não faz
+aritmética de datas.
+
+### Ideia derrubada: "o Qwen 0,5B não sabe chamar funções"
+
+Ele sabe. Quem impedia era o runtime, de duas formas:
+
+- O conversor marca todo token extra do Qwen como de controle, inclusive `<tool_call>`, e o sampler banía todos.
+- O texto `<tool_call>` no prompt de sistema virava caracteres comuns, e no treino ele é um token só.
+
+Corrigida a codificação, a probabilidade do primeiro token da resposta ser `<tool_call>` subiu da **posição 3183 para
+a posição 1**, com p = 0,93 (pergunta em inglês) e 0,73 (em português). O texto do usuário continua codificado como
+texto puro, então quem digita `<tool_call>` não injeta uma chamada (há teste para isso).
+
+### Ideia derrubada: "basta o modelo extrair os argumentos"
+
+A primeira versão de `dias_ate` recebia mês e dia como inteiros. O modelo escolhia a ferramenta certa, mas convertia
+mal: "Natal" virava 30/11, e "12 de outubro" virava o mês 12. Converter nome de mês em número é raciocínio, e um 0,5B não
+faz isso.
+
+O que entrou foi o princípio de que **o modelo decide e copia, e o C calcula**:
+
+- `dias_ate` recebe a data como texto, do jeito que o usuário escreveu. O `calendar.c` entende "25 de dezembro",
+  "25/12", "2026-12-25" e feriados, inclusive os móveis (Páscoa, Carnaval, Corpus Christi, Dia das Mães e dos Pais).
+- **Aterramento:** se a mensagem do usuário tem uma data, ela vale mais que o argumento do modelo. Um ano passado
+  inventado pelo modelo é descartado, e vale a próxima ocorrência.
+- **Portão por mensagem:** as ferramentas ficam declaradas no prompt de sistema, mas o sampler só pode produzir
+  `<tool_call>` quando a mensagem fala de data ou de tempo ("hoje", "horas", "falta", uma data ou um feriado). Antes do
+  portão, o modelo chamava `dias_ate` para "qual é a capital da França?".
+- O resultado traz uma frase pronta (`resumo`) como **primeiro** campo. O modelo a copia, e para de escrever
+  "49 dias atrás".
+
+### Medição (`bun scripts/eval-tools.ts`)
+
+Cada pergunta roda num chat novo, com o relógio fixo em 2026-11-06 10:30 (uma sexta-feira) e decodificação gulosa,
+portanto o resultado é determinístico. Uma resposta só conta como certa com o número exato e sem "atrás"/"passou"
+para datas futuras.
+
+**Conjunto de desenvolvimento** (`--set dev`): 12 perguntas sobre datas e 5 de controle. Foi com ele que escolhi o
+desenho. Por isso o número dele é otimista:
+
+| Variante | Ferramenta certa | Resposta certa | As duas |
+|---|---|---|---|
+| A. `dias_ate(mes, dia)` inteiros, sem portão | 15/16 | 10/14 | 12/16 |
+| B. data como texto, `calendar.c`, campo `resumo` | 13/16 | 13/14 | 13/16 |
+| C. B sem os exemplos na descrição da ferramenta | 14/17 | 12/15 | 12/17 |
+| D. B com portão por mensagem e aterramento | 17/17 | 13/15 | 15/17 |
+| E. D com o `resumo` como primeiro campo | 17/17 | 14/15 | 16/17 |
+| F. E com "Hoje é ..." no início do `resumo` (derrubada) | — | — | sessão: 4/17, era 10/17 |
+| **G. E com validação da chamada e resposta nunca vazia (atual)** | **17/17** | **14/15** | **16/17** |
+
+As variantes A e B ainda aceitavam "49 dias atrás" como certo, e a pergunta de carnaval só entrou na C. Por isso os
+números de A e B estão otimistas.
+
+**Perguntas novas.** Um revisor apontou o problema certo: medir no mesmo conjunto usado para escolher o desenho é
+estudar com a prova. Fiz então dois conjuntos de perguntas novas, cada um escrito antes de rodar:
+
+| Conjunto | Versão | Ferramenta certa | Resposta certa | As duas |
+|---|---|---|---|---|
+| `holdout`: 17 perguntas, inclusive controles com "hora", "horas" e "feriado" | E | 13/17 | 13/15 | 12/17 |
+| `holdout`, depois de corrigir o que ele mostrou (já não é inédito) | G | 16/17 | 13/15 | 15/17 |
+| **`holdout2`: 15 perguntas, rodado uma única vez** | **G** | **14/15** | **9/12** | **12/15** |
+
+**O número honesto é o do `holdout2`: 12 de 15 (80%).** As perguntas sobre datas acertam bem mais que as outras: o
+número de dias sai exato sempre que a ferramenta é chamada. O que o `holdout` revelou e foi corrigido:
+
+- **Chamadas indevidas.** O portão abre com "horas" ou "feriado", e o modelo chamava `dias_ate` em "Quantas horas tem
+  um dia?" ("Um dia tem 24 horas. Para 1 de janeiro de 2027 ... há 56 dias").
+  - Correção: o runtime **valida a chamada antes de executar**. `dias_ate` só vale se a mensagem nomeia uma data ou um
+    feriado.
+  - Se nenhuma chamada da resposta vale, ela é desfeita (o cache KV é sobrescrito a partir do início da resposta), e o
+    modelo responde de novo com as ferramentas banidas.
+- **Respostas vazias.** Com o `<tool_call>` banido, a segunda escolha do modelo costumava ser o fim do texto. Agora o
+  primeiro token de uma resposta nunca pode ser `<|im_end|>`.
+- **Encadeamento de chamadas.** Agora há uma rodada de ferramenta por mensagem: depois do resultado, o modelo responde
+  sem poder chamar de novo.
+
+O que o `holdout2` mostrou, e fica **sem corrigir** de propósito (corrigir agora exigiria um terceiro conjunto inédito
+para medir):
+
+- "Falta muito para o réveillon?" sai com o número certo, mas como "55 dias atrás".
+- "Estamos em que ano?" não abre o portão, porque "ano" não está na lista de palavras.
+- Em "Quantos dias tem uma semana?", a chamada foi descartada. Na segunda tentativa, sem ferramentas, o modelo
+  escreveu o JSON da chamada como texto, e ele aparece para o usuário.
+- Dia da semana ("Quantos dias até sexta?") não é suportado por `dias_ate`.
+- Perguntas de conhecimento falham com e sem ferramentas: "Dom Casmurro" sai como "José Saramago", e o maior planeta
+  sai como "Mercúrio". O modelo tem 0,5B.
+
+**Conversa longa** (`--session`): todas as perguntas numa conversa só. A resposta da pergunta *i* é o trecho de saída
+que aparece quando a conversa passa de *i−1* para *i* perguntas. O script confere essa propriedade de prefixo, então ela
+também testa o determinismo.
+
+- Nas versões E e G, a escolha de ferramenta foi 11/17 e a resposta, 10/15. A validação não muda a conversa longa.
+- No meio da conversa, o modelo deixa de chamar `data_atual` e inventa a hora ("14h") e o mês ("outubro").
+- Esse continua sendo o ponto mais fraco. `/limpar` volta ao comportamento de chat novo.
+
+### Custo
+
+As declarações levam o prompt de sistema de 31 para 279 tokens. **Abrir o chat passou de 0,6 s para 5,9 s** neste
+notebook (mediana de 3). Elas ficam ligadas por padrão no chat, e `--no-tools` desliga. Num contexto pequeno demais
+(as declarações passariam de metade dele), o chat as desliga sozinho e avisa. O próximo passo para esconder esse custo
+está no roadmap.
+
+### Escopo honesto
+
+- Só há ferramentas embutidas (`data_atual` e `dias_ate`), e só no chat interativo.
+- Ferramentas definidas pelo usuário e o modo `--chat --prompt` com ferramentas ficam para o servidor compatível com
+  OpenAI, que tem o campo `tools` e o contrato certo para isso.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.

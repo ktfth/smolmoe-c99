@@ -44,5 +44,8 @@ uint32_t tokenizer_chat_close(Tokenizer *t, uint32_t *ids);
 int tokenizer_supports_chat(const Tokenizer *t);
 /* Control tokens that must never be sampled (EOS excepted). */
 int tokenizer_is_control(const Tokenizer *t, uint32_t id);
+/* The <tool_call> and </tool_call> tokens (control tokens unless the chat
+ * enables tools). Returns 0 when the vocabulary has none. */
+int tokenizer_tool_markers(const Tokenizer *t, uint32_t *open, uint32_t *close);
 
 #endif
