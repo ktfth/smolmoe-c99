@@ -99,7 +99,7 @@ describe("self-contained executable", () => {
     const bytes = Buffer.from(readFileSync(app));
     bytes.writeBigUInt64LE(BigInt(12345), bytes.length - 24);
     const broken = join(work.path, `broken${EXE_SUFFIX}`);
-    writeFileSync(broken, bytes);
+    writeFileSync(broken, bytes, { mode: 0o755 }); /* POSIX needs the exec bit to spawn it */
     expect(runFails([...PROMPT], broken)).toMatch(/corrupt bundle trailer/);
   });
 
