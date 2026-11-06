@@ -42,9 +42,34 @@ static int strip_line_end(char *buf, size_t n) {
     return (int)n;
 }
 
-static int read_stream_line(char *buf, size_t cap) {
+/* Length of buf[0..n) without a trailing incomplete UTF-8 sequence. */
+static size_t utf8_complete(const char *buf, size_t n) {
+    size_t back;
+    for (back = 1; back <= 3 && back <= n; ++back) {
+        unsigned char c = (unsigned char)buf[n - back];
+        size_t need;
+        if ((c & 0xc0) == 0x80) continue;
+        need = (c & 0xe0) == 0xc0 ? 2 : (c & 0xf0) == 0xe0 ? 3 : (c & 0xf8) == 0xf0 ? 4 : 1;
+        return back < need ? n - back : n;
+    }
+    return n;
+}
+
+/* An overlong line is cut at a character boundary and the rest of it is
+ * discarded, so it never turns into extra messages. */
+static int read_stream_line(char *buf, size_t cap, int *truncated) {
+    size_t n;
+    *truncated = 0;
     if (!fgets(buf, (int)cap, stdin)) return -1;
-    return strip_line_end(buf, strlen(buf));
+    n = strlen(buf);
+    if (n && buf[n - 1] != '\n' && !feof(stdin)) {
+        int ch;
+        *truncated = 1;
+        while ((ch = getchar()) != EOF && ch != '\n') {}
+        n = utf8_complete(buf, n);
+        buf[n] = 0;
+    }
+    return strip_line_end(buf, n);
 }
 
 #if defined(_WIN32)
@@ -83,27 +108,45 @@ static const char *win_error(void) {
     return trim(buf);
 }
 
-void map_file(const char *path, MappedFile *m) {
+int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
     wchar_t *w = widen(path);
     HANDLE file = CreateFileW(w, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL, NULL);
     LARGE_INTEGER size;
-    HANDLE mapping;
-    void *view;
+    HANDLE mapping = NULL;
+    void *view = NULL;
     free(w);
     memset(m, 0, sizeof(*m));
-    if (file == INVALID_HANDLE_VALUE) die("cannot open %s: %s", path, win_error());
-    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0) die("empty or unreadable file: %s", path);
-    if ((uint64_t)size.QuadPart > (uint64_t)SIZE_MAX) die("file too large to map on this platform: %s", path);
-    mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
-    if (!mapping) die("cannot map %s: %s", path, win_error());
-    view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
-    if (!view) die("cannot map view of %s: %s", path, win_error());
+    if (file == INVALID_HANDLE_VALUE) {
+        snprintf(err, errlen, "cannot open %s: %s", path, win_error());
+        return 0;
+    }
+    if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0) snprintf(err, errlen, "empty or unreadable file: %s", path);
+    else if ((uint64_t)size.QuadPart > (uint64_t)SIZE_MAX)
+        snprintf(err, errlen, "file too large to map on this platform: %s", path);
+    else if (!(mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL)))
+        snprintf(err, errlen, "cannot map %s: %s", path, win_error());
+    else if (!(view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0)))
+        snprintf(err, errlen, "cannot map view of %s: %s", path, win_error());
+    if (!view) {
+        if (mapping) CloseHandle(mapping);
+        CloseHandle(file);
+        return 0;
+    }
     m->data = (const unsigned char *)view;
     m->size = (uint64_t)size.QuadPart;
     m->handle[0] = view;
     m->handle[1] = mapping;
     m->handle[2] = file;
+    return 1;
+}
+
+int replace_file(const char *from, const char *to) {
+    wchar_t *wf = widen(from), *wt = widen(to);
+    BOOL ok = MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    free(wf);
+    free(wt);
+    return ok != 0;
 }
 
 void unmap_file(MappedFile *m) {
@@ -198,26 +241,62 @@ uint32_t cpu_physical_cores(void) {
 }
 
 
-int read_line_utf8(char *buf, size_t cap) {
+/* Drops one character (both halves of a surrogate pair) from the end. */
+static size_t drop_last_char(const wchar_t *w, size_t n) {
+    if (n >= 2 && w[n - 1] >= 0xdc00 && w[n - 1] <= 0xdfff && w[n - 2] >= 0xd800 && w[n - 2] <= 0xdbff) return n - 2;
+    return n - 1;
+}
+
+/* Console input is collected as UTF-16 for the whole line and converted once,
+ * so surrogate pairs and CR/LF split across reads stay intact. A line that
+ * does not fit is cut at a character boundary and reported as truncated. */
+int read_line_utf8(char *buf, size_t cap, int *truncated) {
+    static wchar_t *wide;
+    static size_t wide_cap;
     HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD mode, got = 0;
-    wchar_t wide[2048];
-    size_t used = 0;
+    DWORD mode;
+    size_t n = 0;
+    int newline = 0, bytes;
     if (cap < 8) die("internal error: line buffer too small");
-    if (!GetConsoleMode(in, &mode)) return read_stream_line(buf, cap);
-    /* Console: read UTF-16 until the line ends (long lines arrive in pieces). */
-    for (;;) {
-        int n;
-        if (!ReadConsoleW(in, wide, (DWORD)(sizeof(wide) / sizeof(*wide)), &got, NULL) || !got)
-            return used ? strip_line_end(buf, used) : -1;
-        if (!used && wide[0] == 0x1a) return -1; /* Ctrl+Z */
-        n = WideCharToMultiByte(CP_UTF8, 0, wide, (int)got, buf + used, (int)(cap - 1 - used), NULL, NULL);
-        if (n <= 0) die("input line too long");
-        used += (size_t)n;
-        buf[used] = 0;
-        if (buf[used - 1] == '\n') return strip_line_end(buf, used);
-        if (used + 4 >= cap) return strip_line_end(buf, used);
+    if (!GetConsoleMode(in, &mode)) return read_stream_line(buf, cap, truncated);
+    *truncated = 0;
+    if (wide_cap < cap) { /* one UTF-16 unit per output byte is always enough */
+        free(wide);
+        wide = (wchar_t *)malloc(cap * sizeof(*wide));
+        if (!wide) die("allocation failed");
+        wide_cap = cap;
     }
+    while (!newline) {
+        wchar_t chunk[512];
+        DWORD got = 0, k;
+        if (!ReadConsoleW(in, chunk, (DWORD)(sizeof(chunk) / sizeof(*chunk)), &got, NULL) || !got) {
+            if (!n) return -1;
+            break;
+        }
+        if (!n && chunk[0] == 0x1a) return -1; /* Ctrl+Z */
+        for (k = 0; k < got && !newline; ++k) {
+            if (chunk[k] == L'\n') newline = 1;
+            else if (chunk[k] == L'\r') continue;
+            else if (n < wide_cap) wide[n++] = chunk[k];
+            else *truncated = 1;
+        }
+    }
+    if (n && wide[n - 1] >= 0xd800 && wide[n - 1] <= 0xdbff) --n; /* dangling high surrogate */
+    bytes = n ? WideCharToMultiByte(CP_UTF8, 0, wide, (int)n, NULL, 0, NULL, NULL) : 0;
+    if (bytes > (int)cap - 1) { /* shrink proportionally, then character by character */
+        n = (size_t)((uint64_t)n * (cap - 1) / (uint64_t)bytes);
+        if (n && wide[n - 1] >= 0xd800 && wide[n - 1] <= 0xdbff) --n;
+        *truncated = 1;
+    }
+    for (;;) {
+        if (!n) { buf[0] = 0; return 0; }
+        bytes = WideCharToMultiByte(CP_UTF8, 0, wide, (int)n, buf, (int)cap - 1, NULL, NULL);
+        if (bytes > 0) break;
+        n = drop_last_char(wide, n);
+        *truncated = 1;
+    }
+    buf[bytes] = 0;
+    return bytes;
 }
 
 static UINT original_output_cp;
@@ -248,20 +327,30 @@ void platform_init(int *argc, char ***argv) {
 
 #else /* POSIX */
 
-void map_file(const char *path, MappedFile *m) {
+int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
     int fd = open(path, O_RDONLY);
     struct stat st;
-    void *p;
+    void *p = MAP_FAILED;
     memset(m, 0, sizeof(*m));
-    if (fd < 0) die("cannot open %s: %s", path, strerror(errno));
+    if (fd < 0) {
+        snprintf(err, errlen, "cannot open %s: %s", path, strerror(errno));
+        return 0;
+    }
     if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0)
-        die("not a readable non-empty regular file: %s", path);
-    if ((uint64_t)st.st_size > (uint64_t)SIZE_MAX) die("file too large to map on this platform: %s", path);
-    p = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, fd, 0);
-    if (p == MAP_FAILED) die("cannot map %s: %s", path, strerror(errno));
+        snprintf(err, errlen, "not a readable non-empty regular file: %s", path);
+    else if ((uint64_t)st.st_size > (uint64_t)SIZE_MAX)
+        snprintf(err, errlen, "file too large to map on this platform: %s", path);
+    else if ((p = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED)
+        snprintf(err, errlen, "cannot map %s: %s", path, strerror(errno));
     close(fd);
+    if (p == MAP_FAILED) return 0;
     m->data = (const unsigned char *)p;
     m->size = (uint64_t)st.st_size;
+    return 1;
+}
+
+int replace_file(const char *from, const char *to) {
+    return rename(from, to) == 0; /* atomic replacement on POSIX */
 }
 
 void unmap_file(MappedFile *m) {
@@ -345,8 +434,8 @@ uint32_t cpu_physical_cores(void) {
 }
 
 
-int read_line_utf8(char *buf, size_t cap) {
-    return read_stream_line(buf, cap);
+int read_line_utf8(char *buf, size_t cap, int *truncated) {
+    return read_stream_line(buf, cap, truncated);
 }
 
 void platform_init(int *argc, char ***argv) {
@@ -355,3 +444,8 @@ void platform_init(int *argc, char ***argv) {
 }
 
 #endif
+
+void map_file(const char *path, MappedFile *m) {
+    char err[PATH_CAPACITY + 256];
+    if (!try_map_file(path, m, err, sizeof(err))) die("%s", err);
+}

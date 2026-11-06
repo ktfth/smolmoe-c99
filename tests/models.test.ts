@@ -108,3 +108,15 @@ describe.skipIf(!qwen)("interactive chat", () => {
     expect(r.stderr).toContain("(conversa reiniciada)");
   }, SLOW);
 });
+
+describe.skipIf(!qwen)("interactive chat input limits", () => {
+  test("an overlong line is cut at a character boundary and stays one message", () => {
+    const long = "ação ".repeat(120); /* ~840 bytes, the cap at --context 64 is 256 */
+    const r = runWithInput([...modelArgs(qwen!), "--tokens", 8, "--context", 64, "--system", "Seja breve."],
+      `${long}\n/sair\n`);
+    expect(r.code).toBe(0);
+    /* Exactly two prompts: the long line and /sair. Before the fix its tail became extra turns. */
+    expect(r.stderr.split("\n> ").length - 1).toBe(2);
+    expect((r.stderr.match(/mensagem cortada em \d+ bytes/g) ?? []).length).toBe(1);
+  }, SLOW);
+});

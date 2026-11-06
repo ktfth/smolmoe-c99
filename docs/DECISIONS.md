@@ -173,6 +173,16 @@ pergunta. Qualquer pessoa fora do terminal desistiria antes da primeira resposta
   a codepage local. Corrigido para `FormatMessageW` com conversão para UTF-8.
 - **Qualidade do modelo, não do runtime:** perguntado sobre a capital do Brasil, o Qwen 0,5B respondeu "São Paulo".
   Um executável fácil de usar torna esses erros mais visíveis, e o README diz para revisar as respostas.
+- **Revisão independente do código da iteração:** nada de segurança de memória, overflow ou posição de contexto. Os
+  5 achados menores foram corrigidos:
+  - Linha longa no console do Windows derrubava o chat; agora é cortada na fronteira de caractere e avisada.
+  - Linhas longas viravam vários turnos.
+  - Pares surrogate (emojis) partidos entre leituras viravam lixo.
+  - Falha ao mapear o próprio executável era fatal.
+  - `remove` + `rename` não era atômico no Windows (agora `MoveFileExW`).
+
+  Um teste de regressão novo falha no binário antigo e passa no novo. A leitura via `ReadConsoleW` (console
+  interativo do Windows) não é coberta por teste automático, porque um pipe não exercita esse caminho.
 
 ## O que sustenta o projeto (o "pó" que ficou)
 

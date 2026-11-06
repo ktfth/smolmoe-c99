@@ -272,6 +272,7 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
 /* --model wins; otherwise look for a container appended to this executable. */
 static void open_source(const Options *o, Source *s, Memory *mem) {
     const char *self;
+    char err[512];
     uint64_t offset, length;
     memset(s, 0, sizeof(*s));
     if (o->model) {
@@ -281,8 +282,8 @@ static void open_source(const Options *o, Source *s, Memory *mem) {
         return;
     }
     self = self_executable_path();
-    if (!self) return;
-    map_file(self, &s->file);
+    /* Not being able to read our own file just means "no bundle". */
+    if (!self || !try_map_file(self, &s->file, err, sizeof(err))) return;
     if (!bundle_find(s->file.data, s->file.size, &offset, &length)) {
         unmap_file(&s->file);
         return;

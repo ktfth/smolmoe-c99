@@ -190,8 +190,10 @@ int main(int argc, char **argv) {
     container_write(f, mf.version, records, mf.count);
     if (fclose(f)) die("cannot finish %s: %s", tmp, strerror(errno));
     verify_output(tmp, pool, &mem);
-    remove(o.out);
-    if (rename(tmp, o.out)) die("cannot rename %s to %s: %s", tmp, o.out, strerror(errno));
+    if (!replace_file(tmp, o.out)) {
+        remove(tmp);
+        die("cannot replace %s (is it in use?)", o.out);
+    }
     fprintf(stderr, "{\"tensors\":%u,\"payload_bytes_before\":%llu,\"payload_bytes_after\":%llu,\"ratio\":%.4f}\n",
             mf.count, (unsigned long long)before, (unsigned long long)after, before ? (double)after / (double)before : 0);
     pool_destroy(pool);

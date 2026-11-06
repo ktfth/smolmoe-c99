@@ -88,6 +88,13 @@ describe("self-contained executable", () => {
     expect(runOk([...PROMPT], again).stats.logits_hash).toBe(threeFiles().stats.logits_hash);
   });
 
+  test("bundling over an existing output replaces it", () => {
+    const target = join(work.path, `replace${EXE_SUFFIX}`);
+    copyFileSync(BINARY, target);
+    expect(run(["--model", single, "--exe", BINARY, "--out", target], BUNDLE_BINARY).code).toBe(0);
+    expect(runOk([...PROMPT], target).stats.logits_hash).toBe(threeFiles().stats.logits_hash);
+  });
+
   test("a corrupt trailer is reported, not ignored", () => {
     const bytes = Buffer.from(readFileSync(app));
     bytes.writeBigUInt64LE(BigInt(12345), bytes.length - 24);

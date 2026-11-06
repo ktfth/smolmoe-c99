@@ -16,7 +16,12 @@ typedef struct MappedFile {
 /* Read-only shared mapping of a whole file. Dies on failure. On Windows the
  * file is opened without write sharing, so it cannot be modified while mapped. */
 void map_file(const char *path, MappedFile *out);
+/* Same, but reports failure (message in err) instead of exiting. */
+int try_map_file(const char *path, MappedFile *out, char *err, size_t errlen);
 void unmap_file(MappedFile *m);
+
+/* Atomically replaces `to` with `from` (rename; MoveFileEx on Windows). Returns 1 on success. */
+int replace_file(const char *from, const char *to);
 
 /* fopen() that accepts UTF-8 paths on every platform. */
 FILE *open_file(const char *path, const char *mode);
@@ -31,8 +36,10 @@ uint32_t cpu_logical_count(void);
 uint32_t cpu_physical_cores(void);
 
 /* Reads one line of user input as UTF-8 (the Windows console is read as UTF-16
- * and converted). Strips the line ending. Returns its length, or -1 at EOF. */
-int read_line_utf8(char *buf, size_t cap);
+ * and converted). Strips the line ending. Returns its length, or -1 at EOF.
+ * A line longer than cap-1 bytes is cut at a character boundary, the rest of
+ * it is discarded and *truncated is set. */
+int read_line_utf8(char *buf, size_t cap, int *truncated);
 
 /* Converts argv to UTF-8 and sets stdout to binary/UTF-8 on Windows. */
 void platform_init(int *argc, char ***argv);

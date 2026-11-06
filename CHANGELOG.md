@@ -20,7 +20,7 @@ Reescrita do runtime para eficiência e para uso em produção. Números e justi
 - Prefill em lote (`--batch`, padrão 32) com kernel AVX2 de 4 tokens por linha de pesos.
 - Amostragem com `--top-k` (padrão 40) e `--top-p` (padrão 0,95).
 - `--version`, e os campos `version`, `threads`, `batch` e `mapped_bytes` nas estatísticas.
-- Suíte de testes: unitários em C (kernels, f16, pool) e integração em TypeScript/Bun (53 testes).
+- Suíte de testes: unitários em C (kernels, f16, pool) e integração em TypeScript/Bun (55 testes).
 - Scripts `bench.ts`, `compare-traces.ts` e `make-fixture.ts`. CI para Linux, Windows e macOS.
 
 ### Alterado (incompatível)

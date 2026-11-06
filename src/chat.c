@@ -54,12 +54,14 @@ void chat_run(const ChatContext *c, ChatStats *st) {
     fprintf(stderr, "smolmoe " SMOLMOE_VERSION " - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.\n");
     for (;;) {
         double t0, t1;
-        int len;
+        int len, truncated;
         fputs("\n> ", stderr);
         fflush(stderr);
-        len = read_line_utf8(c->line, c->line_cap);
+        len = read_line_utf8(c->line, c->line_cap, &truncated);
         if (len < 0 || is_command(c->line, "/sair", "/exit")) break;
         if (is_blank(c->line)) continue;
+        if (truncated)
+            fprintf(stderr, "(mensagem cortada em %d bytes; aumente --context para mensagens maiores)\n", len);
         if (is_command(c->line, "/limpar", "/reset")) {
             pos = system_len;
             fputs("(conversa reiniciada)\n", stderr);

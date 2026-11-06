@@ -183,8 +183,10 @@ int main(int argc, char **argv) {
     if (config_file.data) unmap_file(&config_file);
     if (tok_file.data) unmap_file(&tok_file);
     verify_output(tmp, o.exe != NULL, pool, &mem);
-    remove(o.out);
-    if (rename(tmp, o.out)) die("cannot rename %s to %s: %s", tmp, o.out, strerror(errno));
+    if (!replace_file(tmp, o.out)) {
+        remove(tmp);
+        die("cannot replace %s (is it in use?)", o.out);
+    }
     if (o.exe) make_executable(o.out);
     fprintf(stderr, "{\"container_bytes\":%llu,\"runtime_bytes\":%llu,\"self_contained\":%s}\n",
             (unsigned long long)length, (unsigned long long)base, o.exe ? "true" : "false");
