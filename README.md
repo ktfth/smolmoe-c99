@@ -1,346 +1,113 @@
 # smolmoe
 
-A small, single-threaded sparse language-model inference engine in C99, with
-runtime AVX2 dispatch, Q8 weights, bounded weight streaming, and no ML framework.
-The inference executable depends on the C runtime, POSIX APIs, and `libm` only.
+Runtime de inferência de LLMs em CPU, escrito em C99, sem frameworks. É um executável pequeno que roda modelos
+quantizados em Q8 (formato `SMOEQ8`) no Windows, no Linux e no macOS. O caso principal é o
+**Qwen2.5-0.5B-Instruct gerando português do Brasil localmente**, sem GPU e sem serviço remoto.
 
-**Portuguese release:** the ZIP also bundles Qwen2.5-0.5B-Instruct Q8 and its
-tokenizer. Run `make portugues-demo` for actual local Portuguese generation.
-See [LEIA-ME-PORTUGUES.md](LEIA-ME-PORTUGUES.md). The larger download is mostly
-model weights; the C executable remains small. Full Kimi K3 remains unsupported.
+| Medido no mesmo i7-10610U (Linux/WSL, prompt de 88 tokens) | v0.1 | **v0.2** |
+|---|---|---|
+| Tempo até o primeiro token | 29,0 s | **1,3 s** |
+| Prefill | 3,0 tok/s | **67–71 tok/s** |
+| Decode | 2,0 tok/s | **22–26 tok/s** |
+| Heap do processo | 1024 MiB | **22 MiB** |
+| Perplexidade (texto PT, 164 tokens) | 5,2750 | 5,2774 (+0,05%) |
 
-**Scope: this is a working Kimi-inspired MoE decoder, not a Kimi K3 implementation
-or checkpoint loader.** It implements its own explicit `smolmoe_v1` architecture:
-GQA causal attention, RoPE, RMSNorm, SwiGLU routed experts, normalized sigmoid
-top-k routing, and optional shared experts. It does not implement KDA, MLA,
-Attention Residuals, latent expert projections, SiTU, MXFP4, vision, or Kimi's
-tokenizer/chat protocol. Published Kimi checkpoints cannot be converted merely
-by renaming tensors. Unsupported architectures fail explicitly.
+Os números, o método e o que foi descartado no caminho estão em [docs/DECISIONS.md](docs/DECISIONS.md).
 
-**A real trained model is now bundled:** Karpathy's TinyStories 15M, converted
-from its legacy llama2.c F32 checkpoint into this runtime's Q8 format, with its
-matching score-BPE tokenizer. It continues short English stories and is not an
-instruction/chat model. Its dense MLPs map to one expert per layer, with router
-weight exactly 1. The conversion is lossy Q8 quantization. This validates actual
-learned text generation; it does not validate Kimi inference or trained MoE quality.
+## Início rápido
 
-The older `examples/demo` and generated numerical fixtures remain **synthetic**.
-The handcrafted synthetic fixture prints a fixed cycle; it is separate from the
-trained model at `examples/tinystories15m`. No K3 accuracy, compatibility, or
-throughput is claimed.
+### Windows (MSYS2 UCRT64 ou qualquer MinGW-w64 GCC/Clang)
 
-## Build and try
+```sh
+make            # gera build/smolmoe.exe (estático em `make release`)
+build/smolmoe.exe --model models/qwen2.5-0.5b-instruct/model.smoe \
+  --config models/qwen2.5-0.5b-instruct/config.ini \
+  --tokenizer models/qwen2.5-0.5b-instruct/tokenizer.qbp \
+  --chat --prompt "Quanto é 7 mais 5? Responda apenas com o número."
+```
 
-Linux, a C99 compiler, and make:
+### Linux / macOS
 
 ```sh
 make
-./smolmoe --help
-
-# Real trained generation, offline: model and tokenizer are included in the ZIP.
-make pretrained-demo
-# Exact logits/token IDs across 8,16,32,64 MiB; automatic/scalar kernels.
-make pretrained-test
+build/smolmoe --model models/qwen2.5-0.5b-instruct/model.smoe \
+  --config models/qwen2.5-0.5b-instruct/config.ini \
+  --tokenizer models/qwen2.5-0.5b-instruct/tokenizer.qbp \
+  --chat --prompt "Escreva uma saudação curta para quem está aprendendo programação."
 ```
 
-`make pretrained-demo` uses this English prompt:
+Os pesos não ficam no git. Veja [docs/MODELS.md](docs/MODELS.md) para obtê-los ou convertê-los.
+
+O texto gerado vai para o stdout, em streaming. As estatísticas saem no stderr como uma linha JSON.
+Saída real, sem edição:
 
 ```text
-Once upon a time, there was a little robot
+12
+{"version":"0.2.0","backend":"avx2","threads":4,"batch":32,...,"ttft_seconds":0.858,"prefill_tokens_per_second":79.7,...}
 ```
 
-The actual generated continuation begins:
+## Opções principais
+
+| Opção | Padrão | Efeito |
+|---|---|---|
+| `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno (Qwen) |
+| `--tokens N` | 64 | Máximo de tokens novos; para no EOS |
+| `--temperature X` | 0 (guloso) | Amostragem quando > 0 |
+| `--top-k N` / `--top-p X` | 40 / 0,95 | Truncamento da amostragem |
+| `--seed N` | 1 | Amostragem reproduzível |
+| `--threads N` | núcleos físicos | Threads de trabalho |
+| `--batch N` | 32 | Tokens do prompt por passada (prefill) |
+| `--context N` | min(modelo, 2048) | Posições do cache KV |
+| `--memory-mib N` | 512 | Teto do heap; pesos mapeados não contam |
+| `--stats`, `--trace`, `--hash-logits`, `--token-ids` | — | Diagnóstico e regressão |
+
+A lista completa está em `smolmoe --help`.
+
+## Como funciona
+
+- **Pesos mapeados em memória** (`mmap` / `MapViewOfFile`): sem cópia, sem cache duplicado, e o SO gerencia as
+  páginas. Antes, um cache LRU próprio sobre `pread` mantinha os pesos duas vezes na RAM e era o maior gargalo.
+- **Produto escalar inteiro exato**: as ativações são quantizadas em blocos de 32 (Q8) e a soma de produtos int8 é
+  exata. A acumulação em float segue uma ordem fixa de 8 lanes, que os kernels escalar e AVX2 reproduzem bit a bit.
+- **Prefill em lote**: o mesmo código processa N tokens por passada. Cada linha de pesos é lida uma vez para 4 tokens.
+- **Pool de threads com partição estática**: o resultado é o mesmo com qualquer número de threads.
+- **Validação única na carga**: escalas finitas e não negativas, extents e shapes. O laço de inferência não tem checagens
+  por acesso.
+
+**Contrato de determinismo:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`,
+`--batch` e kernel (AVX2/escalar). A suíte de testes garante isso. Entre sistemas operacionais ainda não há essa
+garantia, porque `expf`/`cos`/`sin` vêm da libm local (ver o roadmap).
+
+## Desenvolvimento
+
+```sh
+make test        # testes unitários em C + suíte de integração (bun test)
+make sanitize    # ASan/UBSan (Linux/macOS)
+make release     # binário otimizado e enxuto (estático no Windows)
+bun scripts/bench.ts --model-dir models/qwen2.5-0.5b-instruct   # mediana de prefill/decode
+```
+
+Requisitos: compilador C99 (GCC ou Clang), `make` e [Bun](https://bun.sh) para os testes e scripts.
+O runtime não tem dependências além da libc e da libm (e `pthread` em POSIX).
 
 ```text
-. The robot was very sad because it was all alone. It wanted to find a friend to play with.
-One day, the robot saw a big ball.
+src/        runtime C99 (plataforma, kernels, modelo, tokenizers, CLI)
+tests/      testes unitários C + integração TypeScript (fixtures MoE sintéticas)
+scripts/    benchmark, comparação de qualidade, geração de fixtures (TypeScript/Bun)
+tools/      conversores de checkpoints (Python legado, POSIX)
+docs/       formato, decisões, modelos, roadmap
+models/     pesos locais (fora do git)
 ```
 
-This is model output, not a fixed response in the program. Change `--prompt` to
-another story opening. See [docs/PRETRAINED.md](docs/PRETRAINED.md) for import,
-provenance, measured memory/timing, reference comparison and model limitations.
+## Escopo honesto
 
-Python 3.9+ standard library is used only for conversion and tests:
+- Arquiteturas suportadas: `smolmoe_v1` (GQA, RoPE, RMSNorm, SwiGLU, roteamento top-k sigmoide, experts
+  compartilhados) e `smolmoe_qwen2` (com viés em QKV). Qualquer outra é recusada explicitamente.
+- O roteamento MoE é testado só com checkpoints sintéticos. **Nenhum modelo MoE treinado é suportado ainda**; os modelos
+  incluídos são densos, representados como um expert sempre ativo.
+- Não é compatível com Kimi K3 nem com GGUF, e não há servidor HTTP nem modo multi-turno (estão no
+  [roadmap](docs/ROADMAP.md)).
+- O Qwen 0.5B é pequeno: às vezes mistura idiomas ou ignora o formato pedido. Revise as respostas.
 
-```sh
-# End-to-end test weights, not a trained LLM.
-python3 tools/checkpoint.py fixture examples/demo --echo
-./smolmoe --model examples/demo/model.smoe \
-  --config examples/demo/config.ini --tokenizer examples/demo/tokenizer.bpe \
-  --prompt 'Hi' --tokens 33 --context 128 --memory-mib 4
-
-# Nontrivial attention/experts for numerical and cache testing; output is bytes.
-python3 tools/checkpoint.py fixture examples/numerical
-./smolmoe --model examples/numerical/model.smoe \
-  --config examples/numerical/config.ini --tokenizer examples/numerical/tokenizer.bpe \
-  --prompt 'Hi!' --tokens 16 --memory-mib 1 \
-  --stats examples/numerical/stats.json --trace examples/numerical/logits.txt \
-  > examples/numerical/output.bin
-```
-
-For a **compatible trained model**, a conservative starting point on an 8 GB
-Linux machine is a 4096 MiB application budget. Raise toward 6144 MiB only if
-the OS and other workloads leave enough headroom:
-
-```sh
-./smolmoe --model /models/compatible/model.smoe \
-  --config /models/compatible/config.ini --tokenizer /models/compatible/tokenizer.bpe \
-  --prompt 'Explain caching.' --context 1024 --tokens 128 \
-  --memory-mib 4096 --temperature 0.7 --seed 42 --drop-cache
-
-# Greedy decoding and a machine-readable run record.
-./smolmoe --model /models/compatible/model.smoe \
-  --config /models/compatible/config.ini --tokenizer /models/compatible/tokenizer.bpe \
-  --prompt-file prompt.txt --tokens 64 --memory-mib 4096 \
-  --temperature 0 --stats run.json --token-ids tokens.txt > answer.txt
-```
-
-Paths under `/models/compatible` are placeholders. The program does not download
-or assume the existence of any checkpoint. Prompt text must use the trained
-model's formatting; there is no implicit chat template or special-token parsing.
-`--prompt-file` accepts binary prompts, including embedded NULs. Stdout contains
-only generated bytes, which may include control characters for random models.
-Statistics go to stderr as one JSON line and optionally to `--stats`.
-
-## Memory and storage
-
-No checkpoint `mmap`, eager model load, expert pruning, or token-dependent
-approximations are used. Each required weight is read exactly as stored. Changing
-the budget changes cache hits and reads, not the selected experts or arithmetic.
-
-1. Validate the sorted tensor directory and expected shapes before inference.
-2. Allocate tokenizer, tensor metadata, activations, prompt workspace, and KV
-   cache from a counted allocator. Reject insufficient budgets before allocation.
-3. Spend the remainder on 65,520-byte weight tiles, with four-way set-associative
-   LRU replacement. About 75% of slots serve shared/core tensors, the rest routed
-   experts; very small caches use a 50/50 split. Shared experts use the core bank.
-   For a dense model with a single expert, all cache slots serve the full model.
-4. Route top-k exactly, then read only those experts and configured shared experts.
-   Even one expert matrix larger than the entire cache is processed tile by tile.
-
-The budget includes all application heap payloads and allocator headers, including
-cache metadata. It excludes allocator implementation overhead, libc/stdio,
-executable mappings, stack, and the kernel filesystem page cache.
-`tracked_peak_bytes` and `rss_peak_bytes` are separate measurements. RSS can exceed
-the tracked budget. `ru_maxrss` can also reflect the process's inherited high-water
-mark at launch. Neither statistic measures machine-wide filesystem cache usage.
-Use an OS/cgroup memory limit when a hard process or service ceiling is needed;
-leave headroom beyond `--memory-mib`.
-
-`--drop-cache` asks POSIX to discard consumed checkpoint pages. It is advisory,
-may not release partial pages or pages used by other processes, and does not
-impose a machine-wide page-cache cap. Concurrent checkpoint modification is
-unsupported. Do not truncate or rewrite a model during inference.
-
-The minimum weight cache is eight tiles (about 513 KiB). Config-dependent state
-must fit in addition to that. For this architecture, the two F32 KV caches use:
-
-```text
-KV bytes = 2 * layers * context * kv_heads * (dim / heads) * 4
-```
-
-There is no sliding window or KV quantization. Context is checked explicitly and
-generation stops at EOS. The CLI requires `prompt_tokens + requested_new_tokens
-<= context`; it does not silently shorten the prompt or requested output.
-Raw prompt input is limited to `context - 1` **bytes before BPE**, even if merging
-could produce fewer tokens. This keeps tokenization workspace predictable.
-
-The cache is opportunistic: it does not pin all core weights or promise that a
-particular expert stays resident. With changing routes, disk traffic may dominate.
-Q8 storage costs 36 bytes per 32 weights, plus row padding: about 1.125 bytes
-per weight. This is intentionally simple, not MXFP4 or GGUF Q8_0.
-
-## Why streaming is not fast full-K3 inference
-
-Moonshot's published K3 card describes 2.8T total / 104B activated parameters and
-a hybrid architecture unlike this decoder. Even an ideal 4-bit representation of
-104B active weights occupies about 52 GB before scales and other state. If a step
-had to read all 52 GB from storage at an effective 3 GB/s, I/O alone would take
-about 17 seconds. Real traffic depends on reuse and cache occupancy; arithmetic,
-latency, quantization metadata, and attention add work. This is a bandwidth
-illustration, **not a measured K3 benchmark**.
-
-The general bound is `step_seconds >= uncached_bytes / effective_disk_bytes_per_second`.
-Sparse routing saves work by skipping inactive experts; it does not permit
-discarding the selected experts without changing the model. Smaller compatible
-trained models are the useful target on an ordinary CPU. The executable is
-single-threaded: one process uses one CPU thread. AVX2 accelerates small Q8 dot
-products but does not overcome storage bandwidth limits.
-
-## Tokenizer and conversion
-
-Qwen2.5 imports use `tools/import_qwen2.py`: a validated BF16 Safetensors layout,
-Q/K rotary row and bias permutation, QKV biases, tied-head aliasing, and a Qwen
-byte-BPE tokenizer. The C tokenizer includes Unicode 15 NFC normalization and
-Qwen2 pre-tokenization without a runtime regex/Unicode library. `--chat` constructs
-a single-turn ChatML prompt in Brazilian Portuguese; `--system` overrides it.
-Other HF architectures/tokenizers remain unsupported. See the Portuguese guide.
-
-The original synthetic-fixture tokenizer uses byte fallback plus ranked byte-pair merges:
-IDs 0–255 are bytes, 256 is BOS, 257 EOS, then merge outputs starting at 258.
-UTF-8 round-trips without a Unicode dependency. The text format begins `SMBPE1`,
-followed by one `left_id right_id` merge per line, in rank order. The example
-merges encode `Hi!` as token 259. No model-specific regex pre-tokenizer,
-normalization or Hugging Face `tokenizer.json` import is provided for this format.
-This is a tokenizer for this architecture's training/export pipeline, not Kimi BPE.
-
-Trained legacy llama2.c imports use the separate binary `SMSPB1` score-BPE format.
-It retains the source vocabulary pieces, merge scores, UTF-8 code-point lookup,
-byte fallback and dummy-space prefix. It is compatible with that exported
-tokenizer's algorithm, not a general SentencePiece normalizer. IDs are remapped
-consistently in tokenizer, embedding and output head; BOS/EOS remain 256/257.
-
-Encoding uses a deliberately small O(n²) merge loop and a hash table for pair
-lookup. Long prompts will tokenize slowly. Decoding is iterative, uses bounded
-scratch space, and rejects merge outputs exceeding 65,536 decoded bytes.
-
-`tools/checkpoint.py pack SOURCE OUTPUT` quantizes **canonical raw F32 weights**
-one row at a time without NumPy, PyTorch, or other dependencies. `SOURCE` contains:
-
-```text
-config.ini        # exact architecture dimensions, see examples/config.ini
-tokenizer.bpe     # tokenizer used in training
-manifest.json     # every canonical tensor name -> raw F32 source location
-weights.bin       # one or more raw tensor files named by the manifest
-```
-
-Example manifest entries (the actual manifest must contain every tensor):
-
-```json
-{
-  "embed": {"file": "embed.f32"},
-  "final_norm": {"file": "norms.f32", "offset": 0},
-  "lm_head": {"file": "head.f32"},
-  "l.0.q": {"file": "layer0.f32", "offset": 0}
-}
-```
-
-Files store row-major IEEE little-endian F32 weights; offsets are byte offsets.
-Export from an existing training pipeline using `tools/checkpoint.py:shapes` and
-the architecture in [docs/FORMAT.md](docs/FORMAT.md). Passing a Hugging Face
-checkpoint directory directly is unsupported. Shape/architecture conversion is a
-separate model-specific task; this packer does not preserve an incompatible
-model's behavior. No full-K3 conversion path is included.
-
-```sh
-python3 tools/checkpoint.py pack exported-f32/ quantized-model/
-python3 tools/checkpoint.py inspect quantized-model/model.smoe
-```
-
-For the bundled real model, conversion is reproducible without ML libraries:
-
-```sh
-python3 tools/import_llama2c.py downloads/stories15M.bin downloads/tokenizer.bin \
-  examples/tinystories15m --fetch-tiny15m
-```
-
-This optional command downloads the original trained checkpoint and tokenizer,
-verifies their SHA-256 checksums, and converts row by row. Downloads are unnecessary
-when using the bundled converted model. Model provenance is recorded alongside it.
-
-## Determinism and tests
-
-```sh
-make test       # C kernel checks + independent-reference/integration tests
-make sanitize   # same suite under AddressSanitizer and UndefinedBehaviorSanitizer
-make clean
-make            # restore optimized executable after sanitizer build
-```
-
-If LeakSanitizer cannot scan `/proc` threads in a restricted runner, use
-`ASAN_OPTIONS=detect_leaks=0 make sanitize`. This keeps address and undefined
-behavior checks active but disables leak detection. The bundled validation record
-states exactly which checks ran.
-
-Tests exercise:
-
-- Exact hexadecimal logits, generated bytes and token IDs across 1, 2, 4, 16 and
-  32 MiB budgets, both dispatched AVX2 and separately compiled scalar binaries.
-- Seeded sampling across budgets; deterministic top-k tie handling.
-- Full forward logits over multiple autoregressive steps against an independent
-Python float64 implementation, with absolute error below 2e-6 on the fixture.
-- A real checkpoint larger than the low memory budget; a selected tensor larger
-  than the entire cache; Q8 quantization error bounds and partial blocks.
-- A file with a 9 GiB **sparse hole** before the actual weights, run with a 1 MiB
-  tracked budget and (outside ASan) a 64 MiB address-space limit. This tests 64-bit
-  addressing, not 9 GiB of meaningful model parameters or full-model performance.
-- UTF-8/binary tokenizer round-trips, merge ranks, empty input, EOS, timing/stats,
-  insufficient memory, malformed files/configs/merges, and non-finite weights.
-- F32 export/quantization round-trip with no framework.
-- Legacy llama2.c import, tied head, token permutation, score-BPE merging,
-  UTF-8 and binary fallback, malformed score-BPE rejection, and dense imported
-  logits against the independent reference.
-
-`make pretrained-test` separately executes the bundled **trained** checkpoint
-and compares exact logits, token IDs and text across four budgets and both
-kernel paths. See `docs/pretrained-validation.json` for executed results.
-
-The budget comparisons use the same compiler/build settings, checkpoint and CPU.
-The AVX2 kernel preserves scalar accumulation order; `-ffp-contract=off` prevents
-FMA contraction. Do not add `-ffast-math` or reassociation flags. Cross-architecture
-or cross-libm bit identity is not promised, especially for transcendental functions.
-Passing tests establishes these fixtures' behavior, not a proof for every trained
-checkpoint, a language-quality evaluation, or a Kimi compatibility result.
-
-## Statistics
-
-| Field | Meaning |
-|---|---|
-| `budget_bytes` | Requested tracked-allocation ceiling, MiB × 1,048,576 |
-| `tracked_peak_bytes` | Peak counted heap payload + allocation headers |
-| `rss_peak_bytes` | POSIX process RSS high-water mark in bytes |
-| `kv_bytes`, `cache_bytes` | KV payload, and tile payload + cache metadata |
-| `load_seconds` | Initialization, validation and allocation; excludes lazy weight reads |
-| `prefill_seconds` | Sequential forward passes over BOS and prompt |
-| `ttft_seconds` | Start to first emitted non-EOS token, including initialization |
-| `decode_seconds` | Sampling, output writes and subsequent decode forward passes |
-| `prefill_tokens_per_second` | Prompt forward passes / prefill time |
-| `decode_tokens_per_second` | Decode forward passes / decode time; first token uses prefill logits |
-| `read_bytes`, `expert_read_bytes` | Bytes requested by this process, not physical disk traffic |
-| `cache_hits`, `cache_misses` | Tile lookup counters, not per-token hit rates |
-| `expert_calls` | Routed and shared expert evaluations across all processed tokens |
-
-`generated_tokens` excludes EOS. `--token-ids` contains BOS, prompt IDs, generated
-IDs, and EOS if sampled. `--trace` contains pre-sampling logits for each **processed**
-token; the final emitted token need not be fed back to the model. EOS before text
-sets `ttft_seconds` to zero. Kernel page cache can satisfy `pread` calls, so read
-counters are not cold-NVMe benchmarks. Prefill is sequential and is not batched.
-Intermediate vocabulary projections are skipped unless `--trace` or
-`--hash-logits` requests every prompt token's logits. `--hash-logits` adds an
-FNV-1a64 checksum over all raw logits; it is a regression checksum, not a
-cryptographic proof of equality.
-
-## Portability and implementation notes
-
-The core uses C99. The platform layer uses POSIX `pread`, `fstat`, `clock_gettime`,
-`getrusage`, and optional `posix_fadvise`; it targets Linux, not ISO-C-only hosts.
-Large-file support and IEEE binary32 are checked. Disk endian conversion is
-explicit. Tested here on Linux x86-64 with GCC; ARM, 32-bit and other compilers
-were not executed. `make smolmoe-scalar` disables all x86 intrinsics. GCC/Clang on
-x86 can build an AVX2-targeted function inside a baseline binary; CPU dispatch
-checks support at runtime. No `-march=native` or global `-mavx2` is needed.
-
-This is a compact baseline rather than a production model server: no batch
-decoding, speculative decoding, asynchronous prefetch, threading, networking,
-native GGUF/Safetensors runtime reader, general SentencePiece engine, checksummed payload, or training code. Out-of-budget and
-I/O failures exit with an error; there is no recovery protocol. Weights must be
-trusted and immutable for the duration of a run. Validate output quality and
-measure on the actual target CPU and storage before adopting it.
-
-## Primary references checked
-
-- [Official Kimi K3 model card](https://huggingface.co/moonshotai/Kimi-K3)
-- [Official Kimi K3 configuration](https://huggingface.co/moonshotai/Kimi-K3/blob/main/config.json)
-- [Moonshot Kimi K2 deployment guidance](https://github.com/MoonshotAI/Kimi-K2/blob/main/docs/deploy_guidance.md)
-- [Karpathy's trained TinyLlama checkpoints](https://huggingface.co/karpathy/tinyllamas)
-- [llama2.c reference implementation](https://github.com/karpathy/llama2.c)
-
-These sources establish architecture boundaries, not compatibility with this
-implementation. Sources were checked on 2026-11-05.
-
-MIT license. Converted TinyStories 15M weights and tokenizer are bundled with
-provenance; see [THIRD_PARTY.md](THIRD_PARTY.md) and `licenses/llama2.c-MIT.txt`.
-Converted Qwen weights/tokenizer retain Apache-2.0 licensing, bundled alongside
-the model. Generated Unicode data retains its bundled Unicode license.
-The runtime implementation remains self-contained; no upstream inference code
-is required at runtime.
+Licença MIT. Os pesos convertidos mantêm suas licenças originais (Apache-2.0 para Qwen, MIT para TinyStories); ver
+[THIRD_PARTY.md](THIRD_PARTY.md).

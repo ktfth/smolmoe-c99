@@ -1,0 +1,92 @@
+#include "util.h"
+
+#include <errno.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+void die(const char *fmt, ...) {
+    va_list ap;
+    fflush(stdout);
+    fputs("smolmoe: ", stderr);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    exit(EXIT_FAILURE);
+}
+
+typedef union Allocation Allocation;
+union Allocation {
+    struct { Allocation *next; size_t bytes; } h;
+    long double align;
+};
+
+size_t mul_size(size_t a, size_t b) {
+    if (b && a > SIZE_MAX / b) die("size overflow");
+    return a * b;
+}
+
+void *mem_alloc(Memory *m, size_t count, size_t size) {
+    size_t bytes = mul_size(count, size);
+    Allocation *p;
+    if (bytes > SIZE_MAX - sizeof(*p)) die("allocation overflow");
+    bytes += sizeof(*p);
+    if (bytes > m->limit - m->used)
+        die("memory budget too small: need %zu more bytes (used %zu of %zu); "
+            "reduce --context/--batch or increase --memory-mib", bytes, m->used, m->limit);
+    p = (Allocation *)calloc(1, bytes);
+    if (!p) die("allocation of %zu bytes failed", bytes);
+    p->h.next = (Allocation *)m->head;
+    p->h.bytes = bytes;
+    m->head = p;
+    m->used += bytes;
+    if (m->used > m->peak) m->peak = m->used;
+    return p + 1;
+}
+
+void mem_release(Memory *m) {
+    Allocation *p = (Allocation *)m->head;
+    while (p) {
+        Allocation *next = p->h.next;
+        free(p);
+        p = next;
+    }
+    m->head = NULL;
+    m->used = 0;
+}
+
+uint64_t mix64(uint64_t x) {
+    x ^= x >> 30; x *= UINT64_C(0xbf58476d1ce4e5b9);
+    x ^= x >> 27; x *= UINT64_C(0x94d049bb133111eb);
+    return x ^ (x >> 31);
+}
+
+uint32_t parse_u32(const char *s, uint32_t max, const char *what) {
+    char *end;
+    unsigned long long n;
+    if (!*s || *s == '-' || *s == '+') die("invalid %s: %s", what, s);
+    errno = 0;
+    n = strtoull(s, &end, 10);
+    if (errno || *end || n > max) die("invalid %s: %s", what, s);
+    return (uint32_t)n;
+}
+
+double parse_real(const char *s, const char *what) {
+    char *end;
+    double n;
+    errno = 0;
+    n = strtod(s, &end);
+    if (!*s || errno || *end || !isfinite(n)) die("invalid %s: %s", what, s);
+    return n;
+}
+
+char *trim(char *s) {
+    char *end;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') ++s;
+    end = s + strlen(s);
+    while (end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) --end;
+    *end = 0;
+    return s;
+}

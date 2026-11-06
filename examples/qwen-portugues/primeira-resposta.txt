@@ -1,1 +1,0 @@
-Um algoritmo é uma sequência de instruções que指导 um computador a realizar uma tarefa específica. Ele é um conjunto de passos que são executados repetidamente para resolver um problema ou realizar uma tarefa.

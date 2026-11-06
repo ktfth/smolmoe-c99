@@ -1,0 +1,63 @@
+/* Decoder forward pass: GQA attention, RoPE, RMSNorm, SwiGLU experts with
+ * sigmoid top-k routing (docs/FORMAT.md). One code path serves batched
+ * prefill and single-token decode; outputs are identical either way. */
+#ifndef SMOLMOE_MODEL_H
+#define SMOLMOE_MODEL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "config.h"
+#include "modelfile.h"
+#include "threadpool.h"
+#include "util.h"
+
+typedef struct QMat {
+    const unsigned char *data;
+    uint32_t rows, cols, nb;
+} QMat;
+
+typedef struct Expert {
+    QMat gate, up, down;
+} Expert;
+
+typedef struct Layer {
+    const float *attn_norm, *ffn_norm, *q_bias, *k_bias, *v_bias;
+    QMat q, k, v, o, router;
+    Expert *experts, *shared;
+} Layer;
+
+typedef enum { LOGITS_NONE, LOGITS_LAST, LOGITS_ALL } LogitsMode;
+
+typedef struct Model {
+    Config c;
+    uint32_t context, batch, head_dim, kv_dim, logit_rows, nb_dim, nb_hidden;
+    QMat embed, head;
+    const float *final_norm;
+    Layer *layers;
+    Pool *pool;
+    /* Activations, one row per token in the batch. */
+    float *x, *xn, *q, *k, *v, *att, *out, *gate, *up, *logits;
+    float *xd, *hd, *gxd;
+    int8_t *xq, *hq, *gxq;
+    /* Routing state (experts > 1 only). */
+    float *route, *weights, *expert_out;
+    uint32_t *selected, *members;
+    double *inv_freq;
+    float *rope_cos, *rope_sin;
+    float *keys, *values, *scores;
+    uint64_t expert_calls;
+} Model;
+
+/* logit_rows: 1 for normal generation, or the batch size when every prompt
+ * token's logits are needed (--trace, --hash-logits). */
+void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
+                uint32_t logit_rows, Pool *pool, Memory *mem);
+
+/* Runs tokens[0..n) at positions pos0..pos0+n-1. LOGITS_LAST writes the last
+ * token's logits to m->logits; LOGITS_ALL writes n rows of vocab_size. */
+void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode);
+
+size_t model_kv_bytes(const Model *m);
+
+#endif

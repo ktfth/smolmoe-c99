@@ -1,34 +1,97 @@
-CC = cc
-CPPFLAGS ?=
-CFLAGS ?= -O3 -std=c99 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off
-LDLIBS = -lm
+# smolmoe build. Linux, macOS and Windows (MSYS2/MinGW-w64 GCC or Clang).
+#   make                 optimized binary   -> build/smolmoe[.exe]
+#   make test            kernel unit tests + bun integration suite
+#   make sanitize        ASan/UBSan build and tests (Linux/macOS)
+#   make release         stripped, statically linked where supported
 
-.PHONY: all clean test sanitize demo pretrained-demo pretrained-test portugues-demo portugues-test
-all: smolmoe
-smolmoe: src/smolmoe.c src/qwen_tokenizer.h src/unicode.h src/unicode_data.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@ $(LDLIBS)
-smolmoe-scalar: src/smolmoe.c src/qwen_tokenizer.h src/unicode.h src/unicode_data.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DSM_NO_AVX2 $< -o $@ $(LDLIBS)
-tests/kernels: tests/kernels.c src/smolmoe.c src/qwen_tokenizer.h src/unicode.h src/unicode_data.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@ $(LDLIBS)
-tools/q8pack: tools/q8pack.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $< -o $@ $(LDLIBS)
-test: smolmoe smolmoe-scalar tests/kernels tools/q8pack
-	./tests/kernels
-	python3 -m unittest discover -s tests -v
+CC      ?= cc
+OPT     ?= -O3
+STD     := -std=c99 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wstrict-prototypes
+# Determinism contract: never allow FMA contraction or reassociation.
+FPFLAGS := -ffp-contract=off -fno-fast-math
+CFLAGS  ?=
+LDFLAGS ?=
+BUILD   ?= build
+
+SOURCES := util platform threadpool kernels config tokenizer tokenizer_qwen modelfile model sampler main
+LIB     := $(filter-out main,$(SOURCES))
+
+ifeq ($(OS),Windows_NT)
+  EXE        := .exe
+  SYSLIBS    := -lshell32 -lpsapi
+  PLATFORM   := -D_WIN32_WINNT=0x0601 -D__USE_MINGW_ANSI_STDIO=1
+  STATIC     := -static
+else
+  EXE        :=
+  SYSLIBS    := -lpthread
+  PLATFORM   := -pthread
+  STATIC     :=
+endif
+
+ALLFLAGS = $(OPT) $(STD) $(FPFLAGS) $(PLATFORM) $(CFLAGS) -MMD -MP
+LDLIBS   = -lm $(SYSLIBS)
+
+BIN        := $(BUILD)/smolmoe$(EXE)
+BIN_SCALAR := $(BUILD)/smolmoe-scalar$(EXE)
+TEST_KERN  := $(BUILD)/test-kernels$(EXE)
+Q8PACK     := tools/q8pack$(EXE)
+
+OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
+OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
+OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
+
+.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench
+
+all: $(BIN)
+scalar: $(BIN_SCALAR)
+tools: $(Q8PACK)
+
+$(BUILD)/obj/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ALLFLAGS) -c $< -o $@
+
+$(BUILD)/scalar/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ALLFLAGS) -DSM_NO_SIMD -c $< -o $@
+
+$(BUILD)/tests/%.o: tests/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(ALLFLAGS) -Isrc -c $< -o $@
+
+$(BIN): $(OBJ)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BIN_SCALAR): $(OBJ_SCALAR)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+$(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+# Row converter used by tools/import_qwen2.py (POSIX only: Linux, macOS, WSL).
+$(Q8PACK): tools/q8pack.c
+	@mkdir -p $(dir $@)
+	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
+
+test-unit: $(TEST_KERN)
+	$(TEST_KERN)
+
+test-integration: $(BIN) $(BIN_SCALAR)
+	SMOLMOE_BUILD=$(BUILD) bun test
+
+test: test-unit test-integration
+
 sanitize:
-	$(MAKE) clean
-	$(MAKE) test CFLAGS='-O1 -g -std=c99 -Wall -Wextra -Wpedantic -Werror -ffp-contract=off -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie'
-demo: smolmoe
-	python3 tools/checkpoint.py fixture examples/demo --echo
-	./smolmoe --model examples/demo/model.smoe --config examples/demo/config.ini --tokenizer examples/demo/tokenizer.bpe --prompt Hi --tokens 32 --memory-mib 4
-pretrained-demo: smolmoe
-	./smolmoe --model examples/tinystories15m/model.smoe --config examples/tinystories15m/config.ini --tokenizer examples/tinystories15m/tokenizer.spb --prompt 'Once upon a time, there was a little robot' --tokens 80 --context 256 --memory-mib 16
-pretrained-test: smolmoe
-	python3 tools/validate_pretrained.py examples/tinystories15m
-portugues-demo: smolmoe
-	./smolmoe --model examples/qwen-portugues/model.smoe --config examples/qwen-portugues/config.ini --tokenizer examples/qwen-portugues/tokenizer.qbp --chat --prompt 'Escreva uma saudação curta para alguém que está aprendendo programação.' --tokens 64 --context 512 --memory-mib 256
-portugues-test: smolmoe
-	python3 tools/validate_portuguese.py examples/qwen-portugues
+	$(MAKE) BUILD=build/asan OPT="-O1 -g -fno-omit-frame-pointer" \
+		CFLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
+		LDFLAGS="-fsanitize=address,undefined" test
+
+release:
+	$(MAKE) BUILD=build/release OPT="-O3" LDFLAGS="-s $(STATIC)" all
+
+bench: $(BIN)
+	bun scripts/bench.ts
+
 clean:
-	rm -f smolmoe smolmoe-scalar tests/kernels tools/q8pack
+	rm -rf build tools/q8pack tools/q8pack.exe
+
+-include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d

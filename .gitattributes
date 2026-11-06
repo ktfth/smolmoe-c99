@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.smoe binary
+*.qbp binary
+*.spb binary
+*.bin binary
+*.png binary

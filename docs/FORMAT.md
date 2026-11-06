@@ -117,21 +117,38 @@ int8. Scale is finite and nonnegative. The provided writer uses
 then clamps to [-127,127]. Zero blocks use zero scale. Finite input whose scale
 underflows to zero is encoded as zero. This is a lossy conversion.
 
-The dot product sums signed-int8 × F32 activation in increasing column order
-within a block, multiplies that block's sum by its scale, then adds block results
-in increasing block order. AVX2 multiplies eight values at once but reduces in the
-same scalar order; FMA and reassociation are disabled in the supplied build.
-Cache tile size is 65,520 bytes, divisible by both 36 and 4, so Q8 and F32 values
-never cross tile boundaries relative to their tensor start.
+### Runtime arithmetic contract (v0.2)
+
+Weights are never dequantized in bulk. Before each matrix product the runtime
+quantizes the input activation vector into the same block-32 form:
+`scale = max(abs(block)) / 127` (F32), `q = lrintf(x * (1/scale))` clamped to
+[-127, 127], zero padding. Activation quantization costs +0.05% perplexity on
+Qwen2.5-0.5B (measured against the v0.1 F32-activation engine, see
+docs/DECISIONS.md) and enables exact integer dot products.
+
+For each block, the integer products are summed exactly into eight lanes, where
+lane `l` holds the products of elements `4l..4l+3`. Each lane accumulates
+`(weight_scale * activation_scale) * (float)lane_sum` across blocks in increasing
+block order, and the eight lanes are reduced as `((l0+l4)+(l2+l6)) +
+((l1+l5)+(l3+l7))`. The scalar kernel and the AVX2 kernel (`maddubs`/`madd`,
+separate multiply and add, never FMA) implement this order bit for bit, so
+results do not depend on backend, thread count or prompt batch size.
+Reproducibility across operating systems is not promised yet: `expf`, `cos`
+and `sin` come from the platform's libm.
+
+F32 vectors (norms, biases) are copied to the heap at load time. Every Q8 scale
+and F32 value is checked once at load (finite, scales non-negative), so the
+inference loop performs no per-access validation.
 
 ## Config
 
-See [examples/config.ini](../examples/config.ini). This is a strict, flat INI-like
+See [models/qwen2.5-0.5b-instruct/config.ini](../models/qwen2.5-0.5b-instruct/config.ini). This is a strict, flat INI-like
 `key=value` file with optional `#` comments; no sections. Unknown, duplicate,
 missing, invalid, or out-of-range fields are errors. Model context is at most
 1,048,576; D and H at most 65,536; layers at most 1024; E at most 4096; S at most
 16. A divides D, K divides A, and D/A is positive and even. All tensors and
-activations still must fit the requested metadata/state allocation budget.
+activations, the KV cache and tokenizer tables must fit `--memory-mib`; mapped
+weights are not counted.
 
 ## Tokenizer
 

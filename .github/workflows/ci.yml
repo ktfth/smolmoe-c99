@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: linux (${{ matrix.cc }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: build
+        run: make -j4 CC=${{ matrix.cc }} all scalar
+      - name: test
+        run: make CC=${{ matrix.cc }} test
+      - name: sanitize
+        run: make CC=${{ matrix.cc }} sanitize
+
+  windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: make mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: build
+        run: make -j4 all scalar
+      - name: test
+        run: make test
+      - name: release binary
+        run: make release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smolmoe-windows-x64
+          path: build/release/smolmoe.exe
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: build and test
+        run: make -j4 CC=clang test
