@@ -84,18 +84,19 @@ $(Q8PACK): tools/q8pack.c
 test-unit: $(TEST_KERN)
 	$(TEST_KERN)
 
-# Per-test limit; bun ignores a timeout set in bunfig.toml.
+# Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
+SLOW_TEST_MS ?= 180000
 
 test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE)
-	SMOLMOE_BUILD=$(BUILD) bun test --timeout $(TEST_TIMEOUT_MS)
+	SMOLMOE_BUILD=$(BUILD) SMOLMOE_SLOW_MS=$(SLOW_TEST_MS) bun test --timeout $(TEST_TIMEOUT_MS)
 
 test: test-unit test-integration
 
 sanitize:
 	$(MAKE) BUILD=build/asan OPT="-O1 -g -fno-omit-frame-pointer" \
 		CFLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
-		LDFLAGS="-fsanitize=address,undefined" test
+		LDFLAGS="-fsanitize=address,undefined" SLOW_TEST_MS=600000 test
 
 release:
 	$(MAKE) BUILD=build/release OPT="-O3" LDFLAGS="-s $(STATIC)" all

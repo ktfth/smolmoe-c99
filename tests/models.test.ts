@@ -21,7 +21,8 @@ interface GoldenCase {
   readonly runtime_ids: readonly number[];
 }
 
-const SLOW = 180_000;
+/* make sanitize raises it: under ASan the determinism test takes ~5x longer (160 s on CI). */
+const SLOW = Number(process.env.SMOLMOE_SLOW_MS ?? 180_000);
 
 describe.skipIf(!qwen)("Qwen2.5-0.5B-Instruct", () => {
   const tokenize = (bytes: Uint8Array, extra: readonly string[] = []) => {
