@@ -282,6 +282,23 @@ static void answer(Engine *e, uint32_t len) {
     say(e, "(o resultado da ferramenta não cabe no contexto: conversa reiniciada; aumente --context)");
 }
 
+const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t context, uint32_t *ids,
+                                uint32_t *open, uint32_t *close, uint32_t *needed, Memory *mem) {
+    size_t cap = strlen(system) + TOOLS_PROMPT_BYTES;
+    char *text;
+    uint32_t n;
+    *needed = 0;
+    if (!tokenizer_tool_markers(tok, open, close)) return NULL;
+    text = (char *)mem_alloc(mem, cap, 1);
+    if (!tools_system_prompt(system, text, cap)) die("internal error: tool declarations do not fit");
+    n = tokenizer_chat_turn(tok, "system", (const unsigned char *)text, (uint32_t)strlen(text), 0, ids);
+    if (n > context / 2) {
+        *needed = 2 * n;
+        return NULL;
+    }
+    return text;
+}
+
 void engine_start(Engine *e) {
     uint32_t n = tokenizer_chat_turn(e->tok, "system", (const unsigned char *)e->system, (uint32_t)strlen(e->system),
                                      0, e->ids);

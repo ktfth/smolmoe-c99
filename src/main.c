@@ -21,7 +21,6 @@
 #include "tools.h"
 #include "util.h"
 
-#define DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
 #define DEFAULT_CONTEXT 2048u
 #define DEFAULT_BATCH 32u
 #define DEFAULT_TOKENS 64u
@@ -29,7 +28,6 @@
 #define MAX_BATCH 512u
 #define MAX_THREADS 256u
 #define PROMPT_BYTES_PER_TOKEN 4u
-#define TOOLS_PROMPT_BYTES 4096u /* the "# Tools" section the chat appends to --system */
 
 typedef struct Options {
     const char *model, *config, *tokenizer, *prompt, *prompt_file, *system;
@@ -143,7 +141,7 @@ static void parse_value(Options *o, const char *opt, const char *value) {
 static void parse_args(int argc, char **argv, Options *o) {
     int a;
     memset(o, 0, sizeof(*o));
-    o->system = DEFAULT_SYSTEM;
+    o->system = CHAT_DEFAULT_SYSTEM;
     o->tokens = DEFAULT_TOKENS;
     o->memory_mib = 512;
     o->seed = 1;
@@ -474,20 +472,13 @@ static void run_chat(const Run *r) {
  * absent and the declarations fit in half the context. Otherwise the chat runs
  * with the plain system prompt and the markers stay banned. */
 static void enable_tools(Run *r, uint32_t context, Memory *mem) {
-    size_t cap = strlen(r->o->system) + TOOLS_PROMPT_BYTES;
-    char *text;
-    uint32_t n;
-    r->system = r->o->system;
-    if (r->o->no_tools || !tokenizer_tool_markers(r->tok, &r->tool_open, &r->tool_close)) return;
-    text = (char *)mem_alloc(mem, cap, 1);
-    if (!tools_system_prompt(r->o->system, text, cap)) die("internal error: tool declarations do not fit");
-    n = tokenizer_chat_turn(r->tok, "system", (const unsigned char *)text, (uint32_t)strlen(text), 0, r->ids);
-    if (n > context / 2) {
-        fprintf(stderr, "(ferramentas desativadas: o contexto é pequeno; use --context %u ou mais)\n", 2 * n);
-        return;
-    }
-    r->system = text;
-    r->tools = 1;
+    uint32_t needed = 0;
+    const char *text = r->o->no_tools ? NULL
+                                      : engine_tools_prompt(r->tok, r->o->system, context, r->ids, &r->tool_open,
+                                                            &r->tool_close, &needed, mem);
+    if (needed) fprintf(stderr, "(ferramentas desativadas: o contexto é pequeno; use --context %u ou mais)\n", needed);
+    r->system = text ? text : r->o->system;
+    r->tools = text != NULL;
 }
 
 int main(int argc, char **argv) {

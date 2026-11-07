@@ -604,6 +604,68 @@ O contrato de determinismo vale também aqui: os resultados têm de ser os mesmo
 - **O que não foi medido:** um celular de verdade (Termux). O próximo ganho provável é a instrução `SDOT`, que faz
   num passo a soma de 4 produtos de cada lane.
 
+## Iteração 10: WebAssembly no navegador
+
+**Motivo:** o terceiro item da ordem combinada (Release, NEON, WebAssembly, ImGui). O modelo roda no navegador de quem
+acessa, e a hospedagem só entrega arquivos. Guia em [WEB.md](WEB.md).
+
+### Ideia derrubada: Emscripten
+
+O plano previa o Emscripten, mas instalar o emsdk nesta máquina foi bloqueado. O zig 0.13 já estava instalado: ele
+compila C para WASI e traz a libc, só que sem pthreads.
+- **O pool não precisa de pthreads.** O host cria instâncias do módulo na mesma memória compartilhada antes do
+  `main`. Cada uma acerta a própria pilha (`sm_worker_stack`), ocupa uma vaga e dorme em `memory.atomic.wait`. A única
+  parte do pool que muda por plataforma passou a ser dormir, acordar, iniciar e esperar workers.
+- **O módulo testado é o que o navegador roda,** feito pelo mesmo compilador, sem o JavaScript gerado do Emscripten
+  (~100 KB). A página inteira tem 254 KB.
+- **Custo:** um host próprio em TypeScript, o `web/wasm-host.ts`, com testes.
+
+### O motor saiu do terminal
+
+A lógica de uma conversa (captura e rollback de chamadas de ferramenta, escolha forçada, reinício por contexto cheio)
+estava misturada com stdin e stderr no `chat.c`. Ela foi para o `engine.c`, que escreve num sink de três funções
+(texto, fim da resposta, aviso). O terminal, o navegador e a futura interface ImGui usam o mesmo motor.
+- **Prova de que nada mudou:** o binário antigo e o novo dão o mesmo stdout e os mesmos avisos, byte a byte, em
+  roteiros que passam pelas três ferramentas, por chamada descartada, chamada refeita, contexto cheio e mensagem longa
+  demais.
+
+### Kernels SIMD128, idênticos ao escalar
+
+Eles seguem a estrutura do NEON:
+- **Produtos:** produtos exatos de 16 bits (`i32x4.dot_i16x8`), com as somas de 4 em 4 feitas por embaralhamento, o
+  que dá a mesma lane *l* = produtos 4*l* a 4*l*+3.
+- **Contas em float:** multiplicação e soma separadas.
+- **Quantização:** arredonda para o par mais próximo (`nearest`).
+- **Recorte do `exp`:** usa `pmin`/`pmax`, que têm exatamente a semântica `x < LO ? LO : x` do escalar.
+
+O "relaxed SIMD" fica de fora.
+
+**Conferido:**
+- os testes de kernel passam dentro do wasm com `SM_EXPECT_SIMD=1`;
+- o hash dos logits do WebAssembly é o do nativo no TinyStories, no Qwen Q8 e no Qwen Q5, com SIMD128, com
+  `--scalar` e com 1, 2 e 4 threads;
+- um chat com ferramenta sai idêntico ao nativo, tanto pelo executor WASI quanto pelo host da própria página.
+
+O nativo de comparação é o Windows (MinGW) na máquina local e o Linux (glibc) no CI. O wasm usa a libm do musl. Assim,
+o `cos`/`sin` das tabelas de RoPE dá os mesmos floats nas três libms, ao menos nesses modelos.
+
+### Medição (i7-10610U)
+
+| Qwen 0.5B Q8 | Escrita | Leitura do prompt |
+|---|---|---|
+| Nativo, AVX2, 4 threads | 27 tok/s | 60 tok/s |
+| Chrome, SIMD128, 4 threads | 11 tok/s | ~18 tok/s |
+| bun, SIMD128, 1 thread | 6,8 tok/s | 8,7 tok/s |
+| bun, escalar, 1 thread | 1,6 tok/s | 1,7 tok/s |
+
+- **Q8 ou Q5:** o Q8 escreve 1,6× mais rápido que o Q5 no wasm (6,3 contra 4,0 tok/s numa thread). A página fica com
+  o Q8; os 220 MB a mais só pesam no primeiro download, que vai para o cache do navegador.
+- **Pontos fracos medidos:**
+  - a leitura do prompt é 3,3× mais lenta que a nativa;
+  - 4 threads rendem só 1,6×;
+  - abrir a página custa ~20 s, porque o prompt do sistema com as ferramentas (~400 tokens) é reprocessado a cada
+    carga.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.
@@ -621,7 +683,8 @@ O contrato de determinismo vale também aqui: os resultados têm de ser os mesmo
 
 Ver [ROADMAP.md](ROADMAP.md). As suspeitas atuais, ainda sem medição:
 
-- `cos`/`sin` da libm (tabelas de RoPE) ainda podem impedir hashes idênticos entre Windows e Linux. O `expf` já saiu
+- `cos`/`sin` da libm (tabelas de RoPE) ainda podem impedir hashes idênticos entre sistemas, embora MinGW, glibc e
+  musl já concordem nos modelos testados (iteração 10). O `expf` já saiu
   (iteração 5).
 - O kernel Q8 de prefill usa cerca de metade do que o processador permite por bloco (estimativa: ~6 ciclos contra ~3) e
   só ganha 2,4× com 4 threads.

@@ -13,6 +13,11 @@
 #include "tokenizer.h"
 #include "tools.h"
 
+/* The chat's system prompt unless the user gives one (--system). */
+#define CHAT_DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
+/* Room for the "# Tools" section the chat appends to the system prompt. */
+#define TOOLS_PROMPT_BYTES 4096u
+
 /* Where the engine's output goes. The pointers passed to the callbacks are
  * valid only during the call. */
 typedef struct EngineSink {
@@ -52,6 +57,15 @@ typedef struct Engine {
     const char *message;    /* the user message being answered */
     ChatStats stats;
 } Engine;
+
+/* The system prompt with the tool declarations, allocated from mem, when the
+ * vocabulary has the call markers (filled in) and the declarations take at
+ * most half of `context` tokens. Otherwise NULL: the chat runs with `system`
+ * and the markers banned; *needed is then the context the declarations would
+ * need, or 0 when the model has no tools at all. ids: tokenizer_prepare() room
+ * for system + TOOLS_PROMPT_BYTES bytes. */
+const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t context, uint32_t *ids,
+                                uint32_t *open, uint32_t *close, uint32_t *needed, Memory *mem);
 
 /* Processes the system prompt; dies when it does not fit in the context. */
 void engine_start(Engine *e);

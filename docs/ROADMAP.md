@@ -21,7 +21,9 @@ Cada item é medido com `bun scripts/bench.ts --ab` contra o binário anterior. 
      interativo, o custo some.
    - Gravar o cache KV desse prefixo fixo junto com o executável (cerca de 7 MB) e mapeá-lo na partida.
 3. **`sin`/`cos` próprios nas tabelas de RoPE.** É o último uso da libm no caminho do modelo (o `expf` saiu na
-   iteração 5). Sem ele, os hashes ficam idênticos entre sistemas operacionais e a suíte pode fixar hashes-ouro.
+   iteração 5). Sem ele, os hashes ficam idênticos entre sistemas operacionais e a suíte pode fixar hashes-ouro. Na
+   prática, MinGW, glibc e musl (WebAssembly) já dão o mesmo hash no TinyStories e no Qwen (iteração 10). Falta a
+   garantia formal.
 4. **Kernel Q5 mais barato.** O Q5 já existe e economiza 39% de memória por +1,7% de perplexidade, mas custa 2,6× o Q8
    por bloco e não acelera neste notebook (ver DECISIONS, iteração 2). Opções: dois blocos por iteração
    compartilhando a expansão dos bits altos, ou um layout com os bits altos já intercalados para SIMD.
@@ -120,6 +122,22 @@ Critério para entrar: a etapa 2 em uso real. Antes disso o Cosmopolitan é comp
 `smolmoe serve --port 8080` com `/v1/chat/completions` (SSE em streaming), uma sessão por conexão, cache KV
 reaproveitado entre turnos e multi-turno no template ChatML. É o que torna o executável único útil para outros
 programas, como o llamafile faz.
+
+## No navegador (WebAssembly): o que falta
+
+A página funciona e dá os números do nativo (DECISIONS, iteração 10; [WEB.md](WEB.md)). Em aberto:
+
+1. **Publicar.** Hospedar os pesos num endereço público com CORS (Hugging Face ou Vercel Blob), porque o repositório
+   é privado, e publicar `build/web` na Vercel. As duas coisas dependem de decisão do usuário.
+2. **Abrir sem os ~20 s do prompt do sistema.** Guardar o cache KV desse prefixo fixo (~10 MB) no IndexedDB, ou fazer o
+   prefill enquanto o usuário digita (o item 2 de eficiência vale aqui também).
+3. **Leitura do prompt 3,3× mais lenta que a nativa, e 4 threads rendendo só 1,6×.** Medir onde vai o tempo: o produto
+   int8 do SIMD128 (extensões de 8 para 16 bits) ou a espera entre threads.
+4. **Botão "parar"**: uma flag na memória compartilhada que o laço da resposta consulta.
+5. **Firefox e Safari,** e um teste de ponta a ponta automático num navegador de verdade no CI. Hoje o Chrome foi
+   testado à mão, e o motor da página roda no bun pelo mesmo host.
+6. **Erro fatal do C** (`die`): hoje encerra o módulo, e a página pede para recarregar. Devolver erros em vez de
+   encerrar onde a entrada vem do usuário (um arquivo errado).
 
 ## Capacidade de modelo
 

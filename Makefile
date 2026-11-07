@@ -5,6 +5,7 @@
 #   make release         stripped, statically linked where supported
 #   make qwen-pt         dist/qwen-pt[.exe]: runtime + Qwen weights in one file
 #   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
+#   make web             build/web: the browser page (needs zig and bun)
 
 CC      ?= cc
 OPT     ?= -O3
@@ -50,7 +51,7 @@ OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
 OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
-.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt wasi
+.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt wasi web
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -186,6 +187,23 @@ $(WASI)/smolmoe-mt.wasm: $(WASI_MT_OBJ)
 
 wasi: $(WASI)/smolmoe.wasm $(WASI)/smolmoe-mt.wasm $(WASI)/test-kernels.wasm
 
+# The browser page (web/): the threaded objects with src/web.c instead of
+# main, as a reactor (exported functions, no _start), plus the page's
+# TypeScript bundled by bun. Serve build/web with `bun scripts/serve-web.ts`.
+WEB        := build/web
+WEB_OBJ    := $(LIB:%=$(WASI)/mt/%.o) $(WASI)/mt/web.o
+WEB_TS     := $(wildcard web/*.ts)
+
+$(WEB)/smolmoe.wasm: $(WEB_OBJ)
+	@mkdir -p $(dir $@)
+	$(WASI_CC) -mcpu=generic+atomics+bulk_memory+simd128 -mexec-model=reactor $^ $(WASI_MT_LINK) -o $@
+
+$(WEB)/app.js: $(WEB_TS)
+	bun build web/app.ts web/engine-worker.ts web/pool-worker.ts --outdir $(WEB) --target browser --minify
+
+web: $(WEB)/smolmoe.wasm $(WEB)/app.js web/index.html web/vercel.json web/models.json
+	cp web/index.html web/vercel.json web/models.json $(WEB)/
+
 bench: $(BIN)
 	bun scripts/bench.ts
 
@@ -193,4 +211,4 @@ clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
 -include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
-	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/tests/test_kernels.d
+	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/mt/web.d $(WASI)/tests/test_kernels.d

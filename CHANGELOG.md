@@ -2,6 +2,18 @@
 
 ## Não lançado
 
+### Adicionado
+- **Chat no navegador** (`web/`, `make web`): o modelo roda inteiro no navegador, em WebAssembly com SIMD128 e
+  threads. A página aceita um arquivo `.smoe` do computador ou baixa os pesos uma vez para o cache do navegador. A
+  página inteira tem 254 KB, e no Chrome do notebook de testes o Qwen escreve a 11 tokens/s. Guia em
+  [docs/WEB.md](docs/WEB.md).
+- Build WebAssembly com WASI (`make wasi`, zig 0.13). O hash dos logits é o do binário nativo com 1, 2 e 4 threads, e
+  um chat com ferramenta sai idêntico, byte a byte. Detalhes em [DECISIONS.md](docs/DECISIONS.md), iteração 10.
+
+### Alterado
+- A lógica da conversa saiu do chat do terminal para `src/engine.c`, que o terminal e o navegador usam. A saída do
+  terminal é a mesma, byte a byte.
+
 ## 0.3.1 — 2026-11-07
 
 ### Alterado
