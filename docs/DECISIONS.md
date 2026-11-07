@@ -718,6 +718,34 @@ vieram de um gancho próprio: `SMOLMOE_GUI_SCREENSHOT`, em que o F12 lê o quadr
   mensagem e apertava Esc para parar a resposta perdia o texto. Agora o Esc tem rota acima do campo e só para a
   resposta.
 
+### Compilar no PowerShell, sem outro gerenciador
+
+O pedido foi suporte ao `make` ou um CMake para o PowerShell, e meios simples de compilar o terminal e a janela, com
+um atalho por modelo. O usuário preferiu não trazer outro gerenciador. O CMake também duplicaria o Makefile, que já
+cuida dos testes, do WebAssembly, da página e do release.
+
+O `make` não funcionava no PowerShell por três causas, achadas uma a uma:
+- **Sem shell POSIX.** O `make` nativo do Windows (o do winget e o `mingw32-make`) cai no `cmd.exe` quando o PATH
+  não tem um `sh`, e as receitas usam `mkdir -p`, `test` e redirecionamentos. O Makefile agora usa o `sh` que vem
+  com o compilador (`<msys2>/usr/bin`, ou a própria pasta no w64devkit) e põe essa pasta no PATH do build.
+- **DLL de mesmo nome antes no PATH.** No PowerShell desta máquina, a pasta do gcc era a 51ª do PATH, e até um `cc`
+  direto falhava sem mensagem. O `cc1` carregava uma DLL de outra pasta. O Makefile põe a pasta do compilador na
+  frente durante o build.
+- **A janela de desenvolvimento não abria (0xC0000139),** pelo mesmo motivo: um `libstdc++` mais antigo no PATH. No
+  Windows, a janela agora é sempre ligada estática; o programa de terminal não usa C++.
+
+E um detalhe: o `make` nativo repassa os comandos ao shell pela página de código ANSI e estraga os acentos. Por isso
+o `make help` imprime pelo próprio make (`$(info)`), que mantém o UTF-8.
+
+**Conferido no PowerShell e no cmd, numa pasta nova:**
+- `make all gui`, em 38 s;
+- `make test-unit`;
+- os atalhos `qwen`, `qwen-gui`, `qwen-q5` e `stories`: o Qwen Q8 e o Q5 respondem "12" a "7 mais 5";
+- a mensagem do `phi` sem os pesos;
+- o `all-models` com e sem o Phi.
+
+O Git Bash e o CI (shell do MSYS2) seguem como antes.
+
 ### Medição (i7-10610U, Qwen 0.5B Q8, 4 threads)
 
 | | Escrita |

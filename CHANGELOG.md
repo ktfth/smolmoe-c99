@@ -16,6 +16,11 @@
 - **Parar uma resposta no meio**, no motor (`EngineSink.stop`). O que já foi escrito fica no histórico. Uma parada
   dentro de uma chamada de ferramenta tira a mensagem do histórico. O teste prova isso: depois da parada, a mesma
   pergunta recebe exatamente a resposta de uma conversa nova.
+- **Um atalho por modelo:** `make qwen`, `qwen-gui`, `qwen-q5`, `qwen-q5-gui`, `phi`, `phi-gui`, `stories` e
+  `all-models` geram em `dist/` o executável com o modelo dentro. Eles baixam os pesos que faltam, e o Q5 é gerado do
+  Q8. `make help` lista tudo; `make qwen-pt` continua valendo.
+- **`make` no PowerShell e no cmd**, sem outro gerenciador de build. O Makefile usa o shell que vem com o compilador
+  e põe a pasta dele na frente do PATH durante o build.
 - [docs/CAMINHOS.md](docs/CAMINHOS.md): todos os jeitos de rodar (janela, terminal, navegador, scripts, outro
   modelo, da fonte), em cada sistema, e qual modelo escolher.
 - **Chat no navegador** (`web/`, `make web`): o modelo roda inteiro no navegador, em WebAssembly com SIMD128 e

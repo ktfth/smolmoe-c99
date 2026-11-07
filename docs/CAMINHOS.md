@@ -118,22 +118,30 @@ smolmoe-bundle --model modelo.smoe --exe smolmoe-gui-windows-x64.exe --out meu-c
 ```
 
 Um `.smoe` sem configuração dentro também leva `--config` e `--tokenizer`. O formato está em [FORMAT.md](FORMAT.md).
+Compilando da fonte, os atalhos de modelo fazem isso num comando só ([abaixo](#um-atalho-por-modelo)).
 
 ## 7. Compilar da fonte
 
 | Sistema | Ferramentas |
 |---|---|
-| Windows | MSYS2 UCRT64 com `make` e `mingw-w64-ucrt-x86_64-gcc` |
+| Windows | MSYS2 UCRT64 com `mingw-w64-ucrt-x86_64-gcc` e um `make` (o do MSYS2, o `mingw32-make` ou o do winget). Roda no PowerShell, no cmd, no Git Bash ou no shell do MSYS2. |
 | Linux | `gcc` ou `clang`, `make`; para a janela, também `g++`, `pkg-config` e `libglfw3-dev` |
 | macOS | Xcode Command Line Tools; para a janela, `brew install glfw` |
 
 Em todos: o [Bun](https://bun.sh) para baixar os modelos e rodar os testes, e o zig 0.13 só para o WebAssembly.
 
+**No PowerShell e no cmd** o `make` funciona como no Git Bash. Basta o MSYS2 UCRT64 com o gcc, a pasta
+`<msys2>\ucrt64\bin` no PATH e um `make`: o do MSYS2, o `mingw32-make` que vem com o gcc ou o do winget.
+- **O shell:** o Makefile usa sozinho o shell que vem com o compilador.
+- **O PATH:** durante o build, o Makefile põe a pasta do compilador na frente do PATH. Sem isso, outra pasta que viesse
+  antes dela e tivesse uma DLL de mesmo nome fazia o gcc falhar sem mensagem nenhuma.
+
 ```sh
 bun scripts/fetch-models.ts      # pesos em models/, com SHA-256 conferido
 make                             # build/smolmoe, smolmoe-bundle, smolmoe-quantize
 make gui                         # build/smolmoe-gui
-make qwen-pt                     # dist/qwen-pt: o arquivo único do Qwen
+make qwen                        # dist/qwen-pt: chat no terminal com o Qwen dentro (veja os atalhos abaixo)
+make help                        # tudo o que dá para compilar
 make ZIG=zig wasi web            # WebAssembly: módulos WASI para os testes e a página
 make test                        # testes em C e de integração (bun test)
 ```
@@ -145,6 +153,26 @@ build/smolmoe --model models/qwen2.5-0.5b-instruct/model.smoe \
   --config models/qwen2.5-0.5b-instruct/config.ini --tokenizer models/qwen2.5-0.5b-instruct/tokenizer.qbp
 build/smolmoe-gui models/qwen2.5-0.5b-instruct/model.smoe
 ```
+
+### Um atalho por modelo
+
+| Atalho | Gera em `dist/` | O que é |
+|---|---|---|
+| `make qwen` | `qwen-pt` | Chat no terminal com o Qwen2.5-0.5B Q8 (560 MB). `make qwen-pt` é o mesmo. |
+| `make qwen-gui` | `qwen-pt-gui` | A janela com o Qwen Q8 |
+| `make qwen-q5` | `qwen-pt-q5` | Terminal com o Qwen Q5: 340 MB, menos memória. O arquivo Q5 é gerado do Q8. |
+| `make qwen-q5-gui` | `qwen-pt-q5-gui` | A janela com o Qwen Q5 |
+| `make phi` | `phi-4-mini` | Terminal com o Phi-4-mini (4,4 GB). Os pesos vêm de `make phi-weights`: 7,7 GB de download e ~13 GB de disco. |
+| `make phi-gui` | `phi-4-mini-gui` | A janela com o Phi-4-mini |
+| `make stories` | `tinystories` | Historinhas em inglês, para testar se roda |
+| `make all-models` | todos acima | O Phi entra só quando os pesos já estão em `models/` |
+
+Os pesos do Qwen e do TinyStories são baixados e conferidos (SHA-256) na primeira vez. Cada atalho compila o programa
+de release antes, então um só comando basta. `make help` mostra esta lista.
+
+Os arquivos de `dist/` rodam direto: `.\dist\qwen-pt-gui.exe` no PowerShell, ou dois cliques.
+
+### WebAssembly
 
 O build WASI (`build/wasi/*.wasm`) existe para os testes e roda no bun, pelo host de `tests/support/`. Para conversar
 no navegador, use a página (caminho 5).

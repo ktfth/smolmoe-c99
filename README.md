@@ -33,20 +33,24 @@ O mesmo motor de conversa roda em três interfaces, e nenhuma manda texto para f
 ## Um arquivo só: o executável já é o modelo
 
 ```sh
-make qwen-pt                      # gera dist/qwen-pt.exe (Windows) ou dist/qwen-pt: runtime + Qwen, 560 MB
+make qwen                         # dist/qwen-pt.exe (Windows) ou dist/qwen-pt: chat no terminal + Qwen, 560 MB
+make qwen-gui                     # dist/qwen-pt-gui.exe: a janela + Qwen
+make help                         # todos os atalhos: qwen-q5, phi, stories, all-models...
 dist/qwen-pt.exe                  # duplo clique ou terminal: abre o chat em português
 dist/qwen-pt.exe --chat --prompt "..."   # uma resposta e sai (scripts, pipes)
 ```
 
 Como o llamafile, o binário carrega os próprios pesos: não precisa de instalação, DLL extra, Python nem arquivo ao
 lado. O chat lembra a conversa (o cache KV é reaproveitado entre turnos); `/limpar` reinicia e `/sair` encerra. Para um
-executável de 340 MB, empacote a variante Q5 (veja abaixo) com `build/smolmoe-bundle --model ...-q5.smoe
---config ... --tokenizer ... --exe build/smolmoe.exe --out dist/qwen-pt-q5.exe`. O formato do pacote está em
-[docs/FORMAT.md](docs/FORMAT.md).
+executável de 340 MB, use `make qwen-q5`. Há um atalho para cada modelo, no terminal e na janela, listados em
+[docs/CAMINHOS.md](docs/CAMINHOS.md#um-atalho-por-modelo). O formato do pacote está em [docs/FORMAT.md](docs/FORMAT.md).
 
 ## Início rápido
 
 ### Windows (MSYS2 UCRT64 ou qualquer MinGW-w64 GCC/Clang)
+
+Os mesmos comandos funcionam no PowerShell, no cmd, no Git Bash e no shell do MSYS2 (veja
+[docs/CAMINHOS.md](docs/CAMINHOS.md#7-compilar-da-fonte)).
 
 ```sh
 make            # gera build/smolmoe.exe (estático em `make release`)
@@ -222,6 +226,7 @@ make test        # testes unitários em C + suíte de integração (bun test)
 make sanitize    # ASan/UBSan (Linux/macOS)
 make release     # binário otimizado e enxuto (estático no Windows)
 make gui         # a janela: build/smolmoe-gui (C++17; no Linux e no macOS, precisa da GLFW)
+make help        # os alvos comuns e um atalho por modelo (make qwen, make qwen-gui, make all-models...)
 make ZIG=zig wasi web   # WebAssembly: módulos WASI para os testes e a página do navegador (precisa do zig 0.13)
 bun scripts/bench.ts                                    # medianas de leitura/escrita e tempo por fase
 bun scripts/bench.ts --ab build/smolmoe-base.exe        # A/B alternado contra um binário anterior
