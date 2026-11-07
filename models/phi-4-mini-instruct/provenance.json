@@ -9,6 +9,11 @@
   "config_sha256": "ac65d86061d3d0d704ee2511fd0eb8713ef19eb6eedba17c3080a4165d5b933b",
   "tokenizer_sha256": "382cc235b56c725945e149cc25f191da667c836655efd0857b004320e90e91ea",
   "index_sha256": "613a98d5e5716ca96fa75931abedc9c5a5d95f488ce4d62df71e639fe3ac6c59",
+  "output_sha256": {
+    "model.smoe": "83c24b62192add141c230cf30d92d5c0a14d0f36b4642b3249801277419d3468",
+    "config.ini": "6043f61d6aabdd4b4021388b37013897cc6601e5237712947637ba623afc853c",
+    "tokenizer.qbp": "773973f89c1882343167260c0ef227da4237ecf448d19b34ae3821843780d36f"
+  },
   "quantization": "lossy Q8 block32",
   "qk_permutation": "split-half rotary to adjacent-pair within the first 96 of 128 dims per head; pass-through dims, V and O unchanged",
   "rope": {

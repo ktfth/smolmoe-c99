@@ -124,8 +124,12 @@ sanitize:
 		CFLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
 		LDFLAGS="-fsanitize=address,undefined" SLOW_TEST_MS=600000 test
 
+# RELEASE_DIR and RELEASE_LDFLAGS let the release workflow build a static musl
+# binary (-static) or one slice of the macOS universal binary (-arch arm64).
+RELEASE_DIR ?= build/release
+RELEASE_LDFLAGS ?=
 release:
-	$(MAKE) BUILD=build/release OPT="-O3" LDFLAGS="-s $(STATIC)" all
+	$(MAKE) BUILD=$(RELEASE_DIR) OPT="-O3" LDFLAGS="-s $(STATIC) $(RELEASE_LDFLAGS)" all
 
 # Converted weights from the GitHub release, SHA-256 verified (docs/MODELS.md).
 models:

@@ -2,7 +2,16 @@
 
 ## Não lançado
 
+## 0.3.0 — 2026-11-07
+
 ### Adicionado
+- **Release com binários prontos** para Windows x64, Linux x64, Linux ARM64 (também Termux, no Android) e macOS
+  (Intel e Apple Silicon num binário só). Os binários de Linux são estáticos (musl).
+  - Executáveis de arquivo único para o Qwen (chat em português) e o TinyStories.
+  - Modelos num arquivo só: Qwen Q8 e Q5, TinyStories e Phi-4-mini. O Phi vai em partes, por causa do limite de
+    2 GB do GitHub, e é convertido no CI e conferido byte a byte contra o `provenance.json`.
+  - Cada binário passa por um teste rápido no próprio sistema antes de publicar (no ARM64, emulado), e o Release
+    traz `SHA256SUMS`. Instruções em [docs/INSTALL.md](docs/INSTALL.md).
 - **`!comando` no chat:** a linha roda no shell que abriu o smolmoe (PowerShell, pwsh, cmd, Git Bash, bash, zsh) e a
   saída vai direto para o terminal, sem passar pelo modelo.
   - `!cd` muda a pasta do chat, e Ctrl+C interrompe só o comando.

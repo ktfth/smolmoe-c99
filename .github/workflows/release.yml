@@ -1,0 +1,198 @@
+name: release
+
+# A tag v* publishes a release. "Run workflow" builds a draft for any tag name, to try the pipeline.
+# Each job uploads its files straight to the release instead of passing Actions artifacts: in a
+# private repository artifacts count against a small storage quota, and these are about 8 GB.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag (created on this commit if it does not exist)"
+        required: true
+      draft:
+        description: "Leave the release as a draft"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  QWEN: qwen2.5-0.5b-instruct
+  STORIES: tinystories-15m
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: draft release
+        run: |
+          gh release view "$TAG" > /dev/null 2>&1 ||
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "smolmoe $TAG" --notes "Em preparação."
+
+  windows-x64:
+    needs: draft
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: make tar mingw-w64-ucrt-x86_64-gcc
+          path-type: inherit
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: build
+        run: make -j4 release
+      - name: weights
+        run: bun scripts/fetch-models.ts "$QWEN" "$STORIES"
+      - name: package
+        run: bun scripts/release.ts package windows-x64 build/release dist
+      - name: smoke test
+        run: bun scripts/release.ts smoke dist windows-x64
+      - name: upload
+        run: |
+          bun scripts/release.ts sums dist windows-x64
+          gh release upload "$TAG" dist/* --clobber
+
+  linux-x64:
+    needs: draft
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: build (static, musl)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src alpine:3.20 \
+            sh -c 'apk add --no-cache build-base && make -j4 release RELEASE_LDFLAGS=-static'
+          file build/release/smolmoe | tee /dev/stderr | grep -Eq 'x86-64.*static(ally|-pie) linked'
+      - name: weights
+        run: bun scripts/fetch-models.ts "$QWEN" "$STORIES"
+      - name: package
+        run: bun scripts/release.ts package linux-x64 build/release dist
+      - name: smoke test
+        run: bun scripts/release.ts smoke dist linux-x64
+      - name: upload
+        run: |
+          bun scripts/release.ts sums dist linux-x64
+          gh release upload "$TAG" dist/* --clobber
+
+  # Linux ARM64 and Termux (Android runs a static musl binary): built and smoke-tested under QEMU.
+  linux-arm64:
+    needs: draft
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: native bundler (before Docker, which would own build/ as root)
+        run: make -j4 build/smolmoe-bundle
+      - name: build (static, musl, arm64)
+        run: |
+          docker run --rm --platform linux/arm64 -v "$PWD:/src" -w /src alpine:3.20 \
+            sh -c 'apk add --no-cache build-base && make -j4 release RELEASE_DIR=build/arm64 RELEASE_LDFLAGS=-static'
+          file build/arm64/smolmoe | tee /dev/stderr | grep -Eq 'aarch64.*static(ally|-pie) linked'
+      - name: weights
+        run: bun scripts/fetch-models.ts "$QWEN" "$STORIES"
+      - name: package
+        run: bun scripts/release.ts package linux-arm64 build/arm64 dist --bundler build/smolmoe-bundle
+      - name: smoke test (emulated)
+        run: bun scripts/release.ts smoke dist linux-arm64
+      - name: upload
+        run: |
+          bun scripts/release.ts sums dist linux-arm64
+          gh release upload "$TAG" dist/* --clobber
+
+  macos:
+    needs: draft
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: build (universal, arm64 + x86_64)
+        run: |
+          make -j4 release CC=clang RELEASE_DIR=build/arm64 CFLAGS="-arch arm64" RELEASE_LDFLAGS="-arch arm64"
+          make -j4 release CC=clang RELEASE_DIR=build/x86_64 CFLAGS="-arch x86_64" RELEASE_LDFLAGS="-arch x86_64"
+          mkdir -p build/release
+          for b in smolmoe smolmoe-bundle smolmoe-quantize; do
+            lipo -create -output "build/release/$b" "build/arm64/$b" "build/x86_64/$b"
+          done
+          lipo -info build/release/smolmoe
+      - name: weights
+        run: bun scripts/fetch-models.ts "$QWEN" "$STORIES"
+      - name: package
+        run: bun scripts/release.ts package macos build/release dist
+      - name: smoke test (arm64, and x86_64 under Rosetta when present)
+        run: bun scripts/release.ts smoke dist macos
+      - name: upload
+        run: |
+          bun scripts/release.ts sums dist macos
+          gh release upload "$TAG" dist/* --clobber
+
+  # Single-file models, the same on every platform. Phi-4-mini is converted from its pinned source
+  # and must match the hashes in models/phi-4-mini-instruct/provenance.json byte for byte.
+  models:
+    needs: draft
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: free disk space (Phi-4-mini needs about 13 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+      - name: build
+        run: make -j4 release
+      - name: weights
+        run: bun scripts/fetch-models.ts "$QWEN" "$STORIES"
+      - name: models
+        run: bun scripts/release.ts models build/release dist work
+      - name: upload
+        run: |
+          bun scripts/release.ts sums dist models --extra work/joined.sha256
+          gh release upload "$TAG" dist/* --clobber
+
+  publish:
+    needs: [windows-x64, linux-x64, linux-arm64, macos, models]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.15
+      - name: one SHA256SUMS
+        run: |
+          gh release download "$TAG" --pattern 'SHA256SUMS.*' --dir sums --clobber
+          cat sums/SHA256SUMS.* | sort -k 2 > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --clobber
+          for f in sums/SHA256SUMS.*; do gh release delete-asset "$TAG" "$(basename "$f")" --yes; done
+      - name: notes
+        run: |
+          { bun scripts/release.ts notes "$TAG"; echo; cat docs/INSTALL.md; } > notes.md
+          gh release edit "$TAG" --title "smolmoe $TAG" --notes-file notes.md
+      - name: publish
+        if: github.event_name == 'push' || !inputs.draft
+        run: gh release edit "$TAG" --draft=false

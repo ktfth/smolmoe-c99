@@ -14,6 +14,11 @@ quantizados em Q8 (formato `SMOEQ8`) no Windows, no Linux e no macOS. O caso pri
 
 Os números, o método e o que foi descartado no caminho estão em [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Baixar pronto
+
+Cada versão tem binários para Windows, Linux (inclusive ARM e Termux) e macOS, executáveis de arquivo único e os
+modelos, na página de Releases. Como baixar e rodar em cada sistema: [docs/INSTALL.md](docs/INSTALL.md).
+
 ## Um arquivo só: o executável já é o modelo
 
 ```sh
