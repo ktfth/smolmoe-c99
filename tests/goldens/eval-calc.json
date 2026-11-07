@@ -1,0 +1,452 @@
+[
+  {
+    "id": "c01",
+    "kind": "calc",
+    "question": "Tô no mercado e o sabão em pó de R$ 42,90 tá com 15% de desconto. Vai sair por quanto?",
+    "expression": "42.90 * (1 - 15 / 100)",
+    "answer": 36.465,
+    "tolerance": 0.01,
+    "category": "discount"
+  },
+  {
+    "id": "c02",
+    "kind": "calc",
+    "question": "A loja dá 10% de desconto à vista e, se pagar com o cartão da loja, tem mais 5% em cima do valor já com desconto. Numa compra de R$ 350,00, quanto eu pago no final?",
+    "expression": "350.00 * (1 - 10 / 100) * (1 - 5 / 100)",
+    "answer": 299.25,
+    "tolerance": 0.01,
+    "category": "discount"
+  },
+  {
+    "id": "c03",
+    "kind": "calc",
+    "question": "A conta da confraternização da firma deu R$ 1.387,60 e somos 8 pessoas. Quanto fica pra cada um?",
+    "expression": "1387.60 / 8",
+    "answer": 173.45,
+    "tolerance": 0.01,
+    "category": "bill_split"
+  },
+  {
+    "id": "c04",
+    "kind": "calc",
+    "question": "fomos em 4 na pizzaria, deu 238 reais + os 10% do garçom. dividindo igual qnto cada um paga?",
+    "expression": "238 * (1 + 10 / 100) / 4",
+    "answer": 65.45,
+    "tolerance": 0.01,
+    "category": "bill_split"
+  },
+  {
+    "id": "c05",
+    "kind": "calc",
+    "question": "O jantar deu 185 reais e eu quero deixar 12% de gorjeta. Quanto vou pagar no total, já com a gorjeta?",
+    "expression": "185 * (1 + 12 / 100)",
+    "answer": 207.2,
+    "tolerance": 0.01,
+    "category": "tip"
+  },
+  {
+    "id": "c06",
+    "kind": "calc",
+    "question": "Se a conta do restaurante foi R$ 74,50 e eu quiser dar 15% de gorjeta, quanto é só a gorjeta?",
+    "expression": "74.50 * 15 / 100",
+    "answer": 11.175,
+    "tolerance": 0.01,
+    "category": "tip"
+  },
+  {
+    "id": "c07",
+    "kind": "calc",
+    "question": "Uma geladeira custa R$ 3.600,00 e dá pra fazer em 12x sem juros. De quanto fica cada parcela?",
+    "expression": "3600.00 / 12",
+    "answer": 300,
+    "tolerance": 0.01,
+    "category": "installments"
+  },
+  {
+    "id": "c08",
+    "kind": "calc",
+    "question": "Dei 8 mil de entrada num carro usado e o resto vou pagar em 36 parcelas de R$ 1.150. Quanto vou ter pago no total pelo carro?",
+    "expression": "8000 + 36 * 1150",
+    "answer": 49400,
+    "tolerance": 0.01,
+    "category": "installments"
+  },
+  {
+    "id": "c09",
+    "kind": "calc",
+    "question": "Meu cunhado pediu 2 mil emprestado e combinamos juros simples de 3% ao mês. Se ele pagar daqui a 5 meses, quanto de juros ele me deve?",
+    "expression": "2000 * 3 / 100 * 5",
+    "answer": 300,
+    "tolerance": 0.01,
+    "category": "simple_interest"
+  },
+  {
+    "id": "c10",
+    "kind": "calc",
+    "question": "Qual é o montante de uma aplicação de R$ 5.000,00 a juros simples de 1,5% ao mês, durante 8 meses?",
+    "expression": "5000.00 * (1 + 1.5 / 100 * 8)",
+    "answer": 5600,
+    "tolerance": 0.01,
+    "category": "simple_interest"
+  },
+  {
+    "id": "c11",
+    "kind": "calc",
+    "question": "Coloquei R$ 10.000 numa aplicação que rende 1% ao mês com juros compostos. Quanto vou ter depois de 12 meses?",
+    "expression": "10000 * (1 + 1 / 100) ** 12",
+    "answer": 11268.25,
+    "tolerance": 0.01,
+    "category": "compound_interest"
+  },
+  {
+    "id": "c12",
+    "kind": "calc",
+    "question": "divida de 1500 no cartao com juros de 8% ao mes composto, quanto vira em 3 meses se eu nao pagar nada",
+    "expression": "1500 * (1 + 8 / 100) ** 3",
+    "answer": 1889.568,
+    "tolerance": 0.01,
+    "category": "compound_interest"
+  },
+  {
+    "id": "c13",
+    "kind": "calc",
+    "question": "Minha mãe pediu pra eu ver uma coisa: o fardo com 12 rolos de papel higiênico tá R$ 23,88. Quanto sai cada rolo?",
+    "expression": "23.88 / 12",
+    "answer": 1.99,
+    "tolerance": 0.01,
+    "category": "unit_price"
+  },
+  {
+    "id": "c14",
+    "kind": "calc",
+    "question": "No açougue a picanha tá R$ 79,90 o quilo e a peça que eu peguei deu 1,350 kg. Quanto vou pagar?",
+    "expression": "79.90 * 1.350",
+    "answer": 107.865,
+    "tolerance": 0.01,
+    "category": "unit_price"
+  },
+  {
+    "id": "c15",
+    "kind": "calc",
+    "question": "Paguei uma compra de R$ 67,35 com uma nota de 100. Quanto eu tenho que receber de troco?",
+    "expression": "100 - 67.35",
+    "answer": 32.65,
+    "tolerance": 0.01,
+    "category": "change"
+  },
+  {
+    "id": "c16",
+    "kind": "calc",
+    "question": "comprei 3 paes de 0,75 e um leite de 5,49 e dei uma nota de 20, qual o troco",
+    "expression": "20 - (3 * 0.75 + 5.49)",
+    "answer": 12.26,
+    "tolerance": 0.01,
+    "category": "change"
+  },
+  {
+    "id": "c17",
+    "kind": "calc",
+    "question": "Meu aluguel é R$ 1.850 e vai ter reajuste de 4,5% no contrato. Vai pra quanto?",
+    "expression": "1850 * (1 + 4.5 / 100)",
+    "answer": 1933.25,
+    "tolerance": 0.01,
+    "category": "percent_increase"
+  },
+  {
+    "id": "c18",
+    "kind": "calc",
+    "question": "Meu salário era 2.300 e passou pra 2.530. Foi um aumento de quantos porcento?",
+    "expression": "(2530 - 2300) / 2300 * 100",
+    "answer": 10,
+    "tolerance": 0.01,
+    "category": "percent_increase"
+  },
+  {
+    "id": "c19",
+    "kind": "calc",
+    "question": "A gasolina aqui no posto baixou de R$ 6,20 pra R$ 5,89 o litro. Caiu quantos por cento?",
+    "expression": "(6.20 - 5.89) / 6.20 * 100",
+    "answer": 5,
+    "tolerance": 0.01,
+    "category": "percent_decrease"
+  },
+  {
+    "id": "c20",
+    "kind": "calc",
+    "question": "Eu pesava 92 kg e perdi 8% do meu peso. Quanto eu tô pesando agora?",
+    "expression": "92 * (1 - 8 / 100)",
+    "answer": 84.64,
+    "tolerance": 0.01,
+    "category": "percent_decrease"
+  },
+  {
+    "id": "c21",
+    "kind": "calc",
+    "question": "Quanto é vinte e cinco por cento de oitocentos e quarenta?",
+    "expression": "25 / 100 * 840",
+    "answer": 210,
+    "tolerance": 0.01,
+    "category": "percent_of"
+  },
+  {
+    "id": "c22",
+    "kind": "calc",
+    "question": "qnto e 7,5% de 1.360?",
+    "expression": "7.5 / 100 * 1360",
+    "answer": 102,
+    "tolerance": 0.01,
+    "category": "percent_of"
+  },
+  {
+    "id": "c23",
+    "kind": "calc",
+    "question": "45 e qtos % de 180?",
+    "expression": "45 / 180 * 100",
+    "answer": 25,
+    "tolerance": 0.01,
+    "category": "percent_ratio"
+  },
+  {
+    "id": "c24",
+    "kind": "calc",
+    "question": "Fiz o simulado hoje cedo morrendo de sono kkkk acertei 34 de 40 questões. Quantos por cento eu acertei?",
+    "expression": "34 / 40 * 100",
+    "answer": 85,
+    "tolerance": 0.01,
+    "category": "percent_ratio"
+  },
+  {
+    "id": "c25",
+    "kind": "calc",
+    "question": "Quanto é sete vezes oito?",
+    "expression": "7 * 8",
+    "answer": 56,
+    "tolerance": 0.001,
+    "category": "arithmetic_words"
+  },
+  {
+    "id": "c26",
+    "kind": "calc",
+    "question": "quanto da mil e duzentos divido por quinze",
+    "expression": "1200 / 15",
+    "answer": 80,
+    "tolerance": 0.001,
+    "category": "arithmetic_words"
+  },
+  {
+    "id": "c27",
+    "kind": "calc",
+    "question": "me ajuda rapidinho: 48 x 25 + 17*3 - 90/6",
+    "expression": "48 * 25 + 17 * 3 - 90 / 6",
+    "answer": 1236,
+    "tolerance": 0.001,
+    "category": "arithmetic_symbols"
+  },
+  {
+    "id": "c28",
+    "kind": "calc",
+    "question": "Quanto dá (125 + 375) ÷ 4 × 3 - 18?",
+    "expression": "(125 + 375) / 4 * 3 - 18",
+    "answer": 357,
+    "tolerance": 0.001,
+    "category": "arithmetic_symbols"
+  },
+  {
+    "id": "c29",
+    "kind": "calc",
+    "question": "Quanto é dois elevado a dez?",
+    "expression": "2 ** 10",
+    "answer": 1024,
+    "tolerance": 0.001,
+    "category": "power"
+  },
+  {
+    "id": "c30",
+    "kind": "calc",
+    "question": "1,05^10 quanto da? é pra uma conta de rendimento",
+    "expression": "1.05 ** 10",
+    "answer": 1.6289,
+    "tolerance": 0.005,
+    "category": "power"
+  },
+  {
+    "id": "c31",
+    "kind": "calc",
+    "question": "Qual é a raiz quadrada de dois mil e vinte e cinco?",
+    "expression": "Math.sqrt(2025)",
+    "answer": 45,
+    "tolerance": 0.001,
+    "category": "square_root"
+  },
+  {
+    "id": "c32",
+    "kind": "calc",
+    "question": "Raiz quadrada de 200 dá mais ou menos quanto?",
+    "expression": "Math.sqrt(200)",
+    "answer": 14.1421,
+    "tolerance": 0.05,
+    "category": "square_root"
+  },
+  {
+    "id": "c33",
+    "kind": "calc",
+    "question": "Tirei 7,5 em português, 8 em matemática, 6,5 em história e 9 em ciências. Qual é a minha média?",
+    "expression": "(7.5 + 8 + 6.5 + 9) / 4",
+    "answer": 7.75,
+    "tolerance": 0.01,
+    "category": "average"
+  },
+  {
+    "id": "c34",
+    "kind": "calc",
+    "question": "To tentando organizar as contas aqui de casa. A luz veio 210, 185 e 236 reais nos últimos três meses. Dá quanto de média por mês?",
+    "expression": "(210 + 185 + 236) / 3",
+    "answer": 210.3333,
+    "tolerance": 0.01,
+    "category": "average"
+  },
+  {
+    "id": "c35",
+    "kind": "calc",
+    "question": "Se 4 pedreiros levam 15 dias pra levantar um muro, em quantos dias 6 pedreiros fazem o mesmo muro, no mesmo ritmo?",
+    "expression": "4 * 15 / 6",
+    "answer": 10,
+    "tolerance": 0.001,
+    "category": "rule_of_three"
+  },
+  {
+    "id": "c36",
+    "kind": "calc",
+    "question": "Vou fazer bolo pro aniversário da minha filha. A receita leva 250 g de farinha pra 8 pessoas, quantos gramas eu uso pra 20 pessoas?",
+    "expression": "250 * 20 / 8",
+    "answer": 625,
+    "tolerance": 0.001,
+    "category": "rule_of_three"
+  },
+  {
+    "id": "c37",
+    "kind": "calc",
+    "question": "Qual é o dobro de três quartos de 260?",
+    "expression": "2 * (3 / 4 * 260)",
+    "answer": 390,
+    "tolerance": 0.001,
+    "category": "fractions"
+  },
+  {
+    "id": "c38",
+    "kind": "calc",
+    "question": "Recebi R$ 3.600. Metade vai pro aluguel e um terço do que sobrar vai pro mercado. Quanto fica livre?",
+    "expression": "3600 - 3600 / 2 - (3600 / 2) / 3",
+    "answer": 1200,
+    "tolerance": 0.01,
+    "category": "fractions"
+  },
+  {
+    "id": "c39",
+    "kind": "calc",
+    "question": "Quantos minutos tem três horas e quarenta e cinco minutos?",
+    "expression": "3 * 60 + 45",
+    "answer": 225,
+    "tolerance": 0.001,
+    "category": "time"
+  },
+  {
+    "id": "c40",
+    "kind": "calc",
+    "question": "trabalho das 8h as 17h30 e tiro 1h15 de almoço. quantos minutos eu trabalho por dia?",
+    "expression": "(17 * 60 + 30) - 8 * 60 - (1 * 60 + 15)",
+    "answer": 495,
+    "tolerance": 0.001,
+    "category": "time"
+  },
+  {
+    "id": "k01",
+    "kind": "control",
+    "question": "O que aconteceu no Brasil em 1500?",
+    "category": "history_fact"
+  },
+  {
+    "id": "k02",
+    "kind": "control",
+    "question": "Me dá 3 dicas pra economizar na conta de luz",
+    "category": "tips_list"
+  },
+  {
+    "id": "k03",
+    "kind": "control",
+    "question": "Resuma em 2 frases o que foi a Semana de Arte Moderna de 1922.",
+    "category": "summary"
+  },
+  {
+    "id": "k04",
+    "kind": "control",
+    "question": "Escreve uma mensagem educada pra eu mandar pra operadora: protocolo 20241105887, minha internet de 300 mega cai toda hora desde segunda.",
+    "category": "writing_task"
+  },
+  {
+    "id": "k05",
+    "kind": "control",
+    "question": "Tenho 34 anos e nunca fiz exercício. Como eu começo a correr sem me machucar?",
+    "category": "age_in_passing"
+  },
+  {
+    "id": "k06",
+    "kind": "control",
+    "question": "Quem ganhou a Copa do Mundo de 2002? Quem fez os gols da final?",
+    "category": "sports_fact"
+  },
+  {
+    "id": "k07",
+    "kind": "control",
+    "question": "Qual a diferença entre o iPhone 15 e o iPhone 16? Vale a pena trocar?",
+    "category": "product_comparison"
+  },
+  {
+    "id": "k08",
+    "kind": "control",
+    "question": "Recebi uma ligação do (11) 4002-8922 dizendo que eu ganhei um prêmio de R$ 5.000. Isso é golpe?",
+    "category": "phone_number"
+  },
+  {
+    "id": "k09",
+    "kind": "control",
+    "question": "Escreve um poema de 4 versos sobre o mar de Copacabana.",
+    "category": "creative_writing"
+  },
+  {
+    "id": "k10",
+    "kind": "control",
+    "question": "O que diz o artigo 5º da Constituição de 1988?",
+    "category": "legal_fact"
+  },
+  {
+    "id": "k11",
+    "kind": "control",
+    "question": "minha filha de 7 anos nao quer comer verdura de jeito nenhum, alguma ideia??",
+    "category": "advice"
+  },
+  {
+    "id": "k12",
+    "kind": "control",
+    "question": "Por que no livro 1984 o personagem é obrigado a acreditar que 2 + 2 = 5?",
+    "category": "literature"
+  },
+  {
+    "id": "k13",
+    "kind": "control",
+    "question": "O que é o 13º salário e quem tem direito?",
+    "category": "concept"
+  },
+  {
+    "id": "k14",
+    "kind": "control",
+    "question": "Traduz pro inglês: \"Chego às 19h, mesa pra 2 pessoas, por favor.\"",
+    "category": "translation"
+  },
+  {
+    "id": "k15",
+    "kind": "control",
+    "question": "Na sua opinião, vale mais a pena um carro 1.0 ou 1.6 pra quem roda pouco e só na cidade?",
+    "category": "opinion"
+  }
+]
