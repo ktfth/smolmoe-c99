@@ -22,7 +22,7 @@ modelos, na página de Releases. Como baixar e rodar em cada sistema: [docs/INST
 ## No navegador
 
 A página `web/` roda o mesmo chat inteiro no navegador, em WebAssembly com SIMD e threads. Nada sai do computador,
-e as respostas são idênticas às do binário nativo, como os testes provam. Para rodar localmente, use
+e, nos testes, as respostas saem idênticas às do binário nativo. Para rodar localmente, use
 `make ZIG=... web` e depois `bun scripts/serve-web.ts`. Uso, publicação na Vercel e números estão em
 [docs/WEB.md](docs/WEB.md).
 

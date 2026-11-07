@@ -9,6 +9,9 @@ export const INITIAL_PAGES = 1024;
 export const MAXIMUM_PAGES = 32767;
 /* src/threadpool.c: WASM_WORKERS. */
 export const MAX_WORKERS = 15;
+/* The largest model the 2 GiB memory holds with room for the KV cache and
+ * the activations: Qwen 0.5B (560 MB) and TinyStories fit, Phi-4-mini not. */
+export const MAX_MODEL_BYTES = 1536 * 1048576;
 
 const ENOSYS = 52;
 const EBADF = 8;
@@ -113,6 +116,8 @@ export class WasmEngine {
 
   /* Room for the model; fill it before open(). */
   allocate(size: number): number {
+    if (!Number.isInteger(size) || size <= 0 || size > MAX_MODEL_BYTES)
+      throw new EngineError(`um modelo de ${Math.round(size / 1e6)} MB não cabe no navegador (máximo: ${Math.round(MAX_MODEL_BYTES / 1e6)} MB)`);
     const ptr = this.call(() => this.exports.sm_alloc(size));
     if (!ptr) throw new EngineError(`sem memória para ${Math.round(size / 1048576)} MB`);
     return ptr;
@@ -125,7 +130,13 @@ export class WasmEngine {
 
   /* Opens the model written at data[0..size). */
   open(data: number, size: number, context: number): void {
-    this.call(() => this.exports.sm_open(data, size, context, this.workers.length + 1));
+    if (!this.call(() => this.exports.sm_open(data, size, context, this.workers.length + 1)))
+      throw new EngineError("um modelo já está aberto");
+  }
+
+  /* A copy of bytes the module holds (the model, to keep it in the cache). */
+  read(ptr: number, len: number): Uint8Array {
+    return this.copy(ptr, len);
   }
 
   /* Answers one message; returns false when it did not fit in the context. */
@@ -157,12 +168,16 @@ export class WasmEngine {
     return this.cString(this.exports.sm_backend());
   }
 
-  /* Ends the pool workers (they wait inside the module). */
+  /* Ends the pool workers (they wait inside the module). A pool worker that
+   * traps after it started leaves the engine waiting for it: reload. */
   dispose(): void {
     for (const worker of this.workers) worker.terminate();
   }
 
+  /* Runs a call into the module; die() there becomes an EngineError with
+   * what it wrote to stderr during this call. */
   private call<T>(fn: () => T): T {
+    this.stderr = "";
     try {
       return fn();
     } catch (error) {
@@ -182,7 +197,7 @@ export class WasmEngine {
   private cString(ptr: number): string {
     const bytes = new Uint8Array(this.memory.buffer);
     let end = ptr;
-    while (bytes[end] !== 0) ++end;
+    while (end < bytes.length && bytes[end] !== 0) ++end;
     return this.decoder.decode(bytes.slice(ptr, end));
   }
 

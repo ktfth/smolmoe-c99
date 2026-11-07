@@ -1,11 +1,11 @@
 /* The page's engine worker: owns the WebAssembly engine, so the page never
- * blocks. Loads a model (a download, kept in the browser's cache, or a file
- * the user picked) straight into the module's memory, then answers messages.
- * Protocol: web/protocol.ts. */
-import type { FromWorker, ToWorker } from "./protocol";
+ * blocks. Streams a model straight into the module's memory (from the
+ * browser's cache, a download, or a file the user picked), opens it, keeps a
+ * downloaded model in the cache once it opened, then answers messages.
+ * Protocol: web/protocol.ts; model sources: web/model-source.ts. */
+import { CACHE_NAME, forget, type ModelCache, openSource, remember } from "./model-source";
+import type { FromWorker, LoadPhase, ToWorker } from "./protocol";
 import { EngineError, type PoolWorker, WasmEngine } from "./wasm-host";
-
-const CACHE = "smolmoe-modelos-v1";
 
 let engine: WasmEngine | undefined;
 
@@ -13,27 +13,8 @@ function post(message: FromWorker): void {
   postMessage(message);
 }
 
-/* A model's bytes as a stream and their count, from the cache when the URL
- * was downloaded before; a download is cached while it streams. */
-async function source(url: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number; cached: boolean }> {
-  const cache = "caches" in self ? await caches.open(CACHE) : undefined;
-  const hit = await cache?.match(url);
-  if (hit?.body) return { stream: hit.body, size: Number(hit.headers.get("content-length") ?? 0), cached: true };
-  const response = await fetch(url);
-  if (!response.ok || !response.body) throw new EngineError(`download falhou: HTTP ${response.status}`);
-  const size = Number(response.headers.get("content-length") ?? 0);
-  if (!cache) return { stream: response.body, size, cached: false };
-  const [mine, kept] = response.body.tee();
-  const headers = new Headers({ "content-length": String(size), "content-type": "application/octet-stream" });
-  cache.put(url, new Response(kept, { headers })).catch(() => {
-    /* Out of quota: the model just downloads again next time. */
-  });
-  return { stream: mine, size, cached: false };
-}
-
-/* Copies a stream of known size into the module's memory, reporting progress. */
-async function load(stream: ReadableStream<Uint8Array>, size: number, phase: "download" | "cache" | "file"): Promise<number> {
-  if (!size) throw new EngineError("tamanho do modelo desconhecido (o servidor não enviou Content-Length)");
+/* Copies a stream of `size` bytes into the module's memory, reporting progress. */
+async function load(stream: ReadableStream<Uint8Array>, size: number, phase: LoadPhase): Promise<number> {
   const ptr = engine!.allocate(size);
   const reader = stream.getReader();
   let offset = 0;
@@ -41,7 +22,10 @@ async function load(stream: ReadableStream<Uint8Array>, size: number, phase: "do
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (offset + value.length > size) throw new EngineError("o arquivo é maior que o anunciado");
+    if (offset + value.length > size) {
+      await reader.cancel();
+      throw new EngineError("o arquivo é maior que o esperado");
+    }
     engine!.fill(ptr, offset, value);
     offset += value.length;
     if (offset - last >= 8 << 20 || offset === size) {
@@ -57,20 +41,32 @@ async function open(message: Extract<ToWorker, { type: "open" }>): Promise<void>
   const module = await WebAssembly.compileStreaming(fetch(new URL("./smolmoe.wasm", import.meta.url)));
   engine = await WasmEngine.create(module, message.threads,
     () => new Worker(new URL("./pool-worker.js", import.meta.url), { type: "module" }) as unknown as PoolWorker);
+  const cache: ModelCache | undefined = message.model && "caches" in self ? await caches.open(CACHE_NAME) : undefined;
   let ptr: number;
   let size: number;
+  let cached = false;
   if (message.file) {
     size = message.file.size;
     ptr = await load(message.file.stream(), size, "file");
   } else {
-    const s = await source(message.url!);
-    size = s.size;
-    ptr = await load(s.stream, size, s.cached ? "cache" : "download");
+    const source = await openSource(message.model!, cache, (url) => fetch(url));
+    size = source.size;
+    cached = source.cached;
+    ptr = await load(source.stream, size, cached ? "cache" : "download");
   }
   post({ type: "progress", phase: "prepare", loaded: size, total: size });
-  engine.open(ptr, size, message.context);
+  try {
+    engine.open(ptr, size, message.context);
+  } catch (error) {
+    if (cached) await forget(message.model!, cache); /* a cached copy the engine refuses is not kept */
+    throw error;
+  }
   const stats = engine.stats();
   post({ type: "ready", backend: engine.backend(), threads: stats.threads, context: stats.context, stats });
+  if (cache && !cached) {
+    /* Out of quota or storage off: the model just downloads again next time. */
+    await remember(message.model!, cache, (offset, length) => engine!.read(ptr + offset, length)).catch(() => undefined);
+  }
 }
 
 function send(text: string): void {
@@ -88,6 +84,7 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
     else if (message.type === "send") send(message.text);
     else if (message.type === "reset") engine?.reset();
   } catch (error) {
+    engine?.dispose();
     post({ type: "error", message: error instanceof Error ? error.message : String(error), fatal: true });
   }
 };

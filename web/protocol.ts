@@ -2,7 +2,7 @@
 import type { EngineStats } from "./wasm-host";
 
 export type ToWorker =
-  | { type: "open"; url?: string; file?: File; context: number; threads: number }
+  | { type: "open"; model?: ModelEntry; file?: File; context: number; threads: number }
   | { type: "send"; text: string }
   | { type: "reset" };
 

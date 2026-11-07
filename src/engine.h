@@ -65,15 +65,14 @@ typedef struct Engine {
  * need, or 0 when the model has no tools at all. ids: tokenizer_prepare() room
  * for system + TOOLS_PROMPT_BYTES bytes. */
 const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t context, uint32_t *ids,
-                                uint32_t *open, uint32_t *close, uint32_t *needed, Memory *mem);
+                                uint32_t *tool_open, uint32_t *tool_close, uint32_t *needed, Memory *mem);
 
 /* Processes the system prompt; dies when it does not fit in the context. */
 void engine_start(Engine *e);
 
 /* Answers one user message: len bytes followed by a NUL (the tools read it as a
- * string). When the conversation
- * no longer fits, it restarts from the system prompt first. Returns 0, with a
- * notice, when the message alone does not fit. */
+ * string). When the conversation no longer fits, it restarts from the system
+ * prompt first. Returns 0, with a notice, when the message alone does not fit. */
 int engine_send(Engine *e, const char *text, uint32_t len);
 
 /* Forgets the conversation, keeping the processed system prompt. */

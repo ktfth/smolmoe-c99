@@ -2,7 +2,7 @@
  * web/vercel.json): COOP/COEP for shared memory and threads.
  *   bun scripts/serve-web.ts [--port 8080] [--dir build/web] */
 import { existsSync, statSync } from "node:fs";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const args = process.argv.slice(2);
 const option = (name: string, fallback: string): string => {
@@ -30,11 +30,17 @@ if (!existsSync(join(root, "index.html"))) {
 
 Bun.serve({
   port,
+  hostname: "localhost", /* a development server: not for the rest of the network */
   fetch(request) {
-    const path = decodeURIComponent(new URL(request.url).pathname);
+    let path: string;
+    try {
+      path = decodeURIComponent(new URL(request.url).pathname);
+    } catch {
+      return new Response("bad request", { status: 400, headers: HEADERS });
+    }
     const file = resolve(join(root, path.endsWith("/") ? `${path}index.html` : path));
     const inside = relative(root, file);
-    if (inside.startsWith("..") || !existsSync(file) || !statSync(file).isFile())
+    if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside) || !existsSync(file) || !statSync(file).isFile())
       return new Response("not found", { status: 404, headers: HEADERS });
     return new Response(Bun.file(file), {
       headers: { ...HEADERS, "Content-Type": TYPES[extname(file)] ?? "application/octet-stream" },

@@ -2,15 +2,16 @@
  * The browser build (make web) driven by the page's own host code
  * (web/wasm-host.ts) under bun: memory limits, worker threads, loading a
  * self-contained .smoe, and a tool chat that must match the native chat.
- * The browser-only parts (download, cache, DOM) are checked by hand; see
- * docs/WEB.md.
+ * The cache logic runs against a fake Cache API; the DOM and a real
+ * download were checked by hand (docs/WEB.md).
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { readableNotice } from "../web/format";
-import { INITIAL_PAGES, MAXIMUM_PAGES, type PoolWorker, utf8Prefix, WasmEngine } from "../web/wasm-host";
+import { cacheKey, type Fetch, forget, type ModelCache, openSource, remember, SourceError } from "../web/model-source";
+import { EngineError, INITIAL_PAGES, MAX_MODEL_BYTES, MAXIMUM_PAGES, type PoolWorker, utf8Prefix, WasmEngine } from "../web/wasm-host";
 import { BINARY, BUNDLE_BINARY, bundledModel, modelArgs, ROOT, run, runWithInput, tempDir } from "./support/run";
 
 const WEB_WASM = join(ROOT, "build", "web", "smolmoe.wasm");
@@ -47,6 +48,78 @@ describe("page text", () => {
   });
 });
 
+describe("model source and cache", () => {
+  const model = { name: "teste", file: "m.smoe", bytes: 20, sha256: "abc", url: "https://exemplo.test/m.smoe" };
+  const bytes = Uint8Array.from({ length: 20 }, (_, i) => i);
+
+  /* An in-memory Cache API. */
+  function fakeCache() {
+    const store = new Map<string, { body: Uint8Array; headers: Headers }>();
+    const cache: ModelCache = {
+      match: async (key) => {
+        const hit = store.get(key);
+        return hit ? new Response(hit.body, { headers: hit.headers }) : undefined;
+      },
+      put: async (key, response) => {
+        store.set(key, { body: new Uint8Array(await response.arrayBuffer()), headers: response.headers });
+      },
+      delete: async (key) => store.delete(key),
+    };
+    return { cache, store };
+  }
+
+  const serve = (body: Uint8Array, length?: number, status = 200): Fetch => async () => {
+    const headers = new Headers();
+    if (length !== undefined) headers.set("content-length", String(length));
+    return new Response(status === 200 ? body : null, { status, headers });
+  };
+  const failFetch: Fetch = async () => {
+    throw new Error("fetch must not run");
+  };
+  const readAll = async (s: ReadableStream<Uint8Array>) => new Uint8Array(await new Response(s).arrayBuffer());
+
+  test("a download is not cached by openSource; remember() keeps it and the next open reads the cache", async () => {
+    const { cache, store } = fakeCache();
+    const first = await openSource(model, cache, serve(bytes, 20));
+    expect(first.cached).toBe(false);
+    expect(await readAll(first.stream)).toEqual(bytes);
+    expect(store.size).toBe(0);
+    let reads = 0;
+    await remember(model, cache, (offset, length) => {
+      ++reads;
+      return bytes.slice(offset, offset + length);
+    });
+    expect(reads).toBeGreaterThan(0);
+    expect(store.has(cacheKey(model))).toBe(true);
+    const second = await openSource(model, cache, failFetch);
+    expect(second).toMatchObject({ cached: true, size: 20 });
+    expect(await readAll(second.stream)).toEqual(bytes);
+  });
+
+  test("a cached copy of the wrong size is dropped and downloaded again", async () => {
+    const { cache, store } = fakeCache();
+    store.set(cacheKey(model), { body: bytes.slice(0, 5), headers: new Headers({ "content-length": "5" }) });
+    const source = await openSource(model, cache, serve(bytes, 20));
+    expect(source.cached).toBe(false);
+    expect(store.size).toBe(0);
+  });
+
+  test("a server announcing another size is refused; no Content-Length falls back to the expected size", async () => {
+    const { cache } = fakeCache();
+    await expect(openSource(model, cache, serve(bytes, 19))).rejects.toThrow(SourceError);
+    await expect(openSource(model, cache, serve(bytes, 20, 404))).rejects.toThrow("HTTP 404");
+    expect((await openSource(model, cache, serve(bytes))).size).toBe(20);
+  });
+
+  test("forget() drops a cached copy, and a new SHA-256 is a new cache entry", async () => {
+    const { cache, store } = fakeCache();
+    await remember(model, cache, (offset, length) => bytes.slice(offset, offset + length));
+    expect(cacheKey({ ...model, sha256: "def" })).not.toBe(cacheKey(model));
+    await forget(model, cache);
+    expect(store.size).toBe(0);
+  });
+});
+
 describe.skipIf(!built)("browser build", () => {
   test("the module's memory import accepts the host's shared memory", async () => {
     const module = new WebAssembly.Module(await Bun.file(WEB_WASM).arrayBuffer());
@@ -64,6 +137,7 @@ describe.skipIf(!built)("browser build", () => {
     const pool = new URL("../web/pool-worker.ts", import.meta.url);
     const engine = await WasmEngine.create(module, 4, () => new Worker(pool) as unknown as PoolWorker);
     try {
+      expect(() => engine.allocate(MAX_MODEL_BYTES + 1)).toThrow(EngineError);
       const file = Bun.file(single);
       const ptr = engine.allocate(file.size);
       let offset = 0;

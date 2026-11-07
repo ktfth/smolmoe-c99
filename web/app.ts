@@ -145,7 +145,7 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
     case "error":
       setBusy(false);
       if (!ui.chat.hidden) addMessage("notice", `Erro: ${m.message}. Recarregue a página.`);
-      else setStatus(`Erro: ${m.message}`, true);
+      else setStatus(`Erro: ${m.message}. Recarregue a página para tentar de novo.`, true);
       break;
   }
 };
@@ -171,7 +171,7 @@ async function init(): Promise<void> {
     ui.file.disabled = true;
     return;
   }
-  ui.download.onclick = () => start({ type: "open", url: model!.url, context: DEFAULT_CONTEXT, threads: threads() });
+  ui.download.onclick = () => start({ type: "open", model, context: DEFAULT_CONTEXT, threads: threads() });
   ui.file.onchange = () => {
     const file = ui.file.files?.[0];
     if (file) start({ type: "open", file, context: DEFAULT_CONTEXT, threads: threads() });
@@ -189,7 +189,7 @@ ui.form.onsubmit = (event) => {
 };
 
 ui.input.onkeydown = (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     ui.form.requestSubmit();
   }
