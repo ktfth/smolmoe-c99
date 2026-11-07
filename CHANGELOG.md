@@ -1,6 +1,6 @@
 # Changelog
 
-## Não lançado
+## 0.4.0 — 2026-11-07
 
 ### Adicionado
 - **Chat numa janela** (`smolmoe-gui`, `make gui`), em C++17 com Dear ImGui: Win32 + Direct3D 11 no Windows,

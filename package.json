@@ -1,6 +1,6 @@
 {
   "name": "smolmoe",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Test suite and tooling for the smolmoe C99 inference runtime",

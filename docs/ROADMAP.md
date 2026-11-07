@@ -143,7 +143,7 @@ A página funciona e dá os números do nativo (DECISIONS, iteração 10; [WEB.m
 
 ## Janela (ImGui): o que falta
 
-A janela funciona no Windows e entra no Release a partir da primeira versão depois da 0.3.1 (DECISIONS, iteração 11; [DESKTOP.md](DESKTOP.md)).
+A janela funciona no Windows e está no Release desde a v0.4.0 (DECISIONS, iteração 11; [DESKTOP.md](DESKTOP.md)).
 Em aberto:
 
 1. **Linux e macOS no Release.** Hoje a janela compila no CI, mas depende da GLFW do sistema. Os caminhos possíveis:
