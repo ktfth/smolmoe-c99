@@ -448,17 +448,17 @@ int quantize_q8_neon(const float *x, uint32_t n, float *d, int8_t *q) {
     uint32_t b, k, full = n / QK;
     for (b = 0; b < full; ++b, x += QK, q += QK) {
         float32x4_t v[8], amax = vdupq_n_f32(0.0f), inv;
-        uint32x4_t finite = vdupq_n_u32(0xFFFFFFFFu);
+        uint32x4_t ok_mask = vdupq_n_u32(0xFFFFFFFFu);
         int16x8_t h[4];
         float scale;
         for (k = 0; k < 8; ++k) {
             float32x4_t a;
             v[k] = vld1q_f32(x + 4 * k);
             a = vabsq_f32(v[k]);
-            finite = vandq_u32(finite, vcleq_f32(a, big)); /* false for inf and NaN */
+            ok_mask = vandq_u32(ok_mask, vcleq_f32(a, big)); /* false for inf and NaN */
             amax = vmaxq_f32(amax, a);
         }
-        if (vminvq_u32(finite) == 0) return -1;
+        if (vminvq_u32(ok_mask) == 0) return -1;
         scale = vmaxvq_f32(amax) / 127.0f;
         d[b] = scale;
         inv = vdupq_n_f32(inverse_scale(scale));

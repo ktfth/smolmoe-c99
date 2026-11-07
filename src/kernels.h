@@ -23,8 +23,10 @@
 #  define SM_HAVE_AVX2 1
 #endif
 
-/* NEON (Advanced SIMD) is part of every AArch64 CPU: no runtime check. */
-#if !defined(SM_NO_SIMD) && defined(__aarch64__)
+/* NEON (Advanced SIMD) is part of every AArch64 CPU: no runtime check. The Q5
+ * unpacking assumes little-endian lanes, as every AArch64 OS we target uses. */
+#if !defined(SM_NO_SIMD) && defined(__aarch64__) && defined(__ARM_NEON) && \
+    (!defined(__BYTE_ORDER__) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 #  define SM_HAVE_NEON 1
 #endif
 

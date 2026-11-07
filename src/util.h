@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define SMOLMOE_VERSION "0.3.0"
+#define SMOLMOE_VERSION "0.3.1"
 
 #if defined(__GNUC__) || defined(__clang__)
 #  define SM_NORETURN __attribute__((noreturn))

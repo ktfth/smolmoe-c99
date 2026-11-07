@@ -8,7 +8,25 @@ on:
 permissions:
   contents: read
 
+# Every runner here has AVX2 or NEON: the kernel tests fail instead of skipping the SIMD comparisons.
+env:
+  SM_EXPECT_SIMD: "1"
+
 jobs:
+  # GCC's NEON headers on Linux ARM64 (the Mac job covers Clang): the unit tests, under QEMU.
+  linux-arm64:
+    name: linux-arm64 (gcc, emulated)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: unit tests
+        run: |
+          docker run --rm --platform linux/arm64 -e SM_EXPECT_SIMD -v "$PWD:/src" -w /src alpine:3.20 \
+            sh -c 'apk add --no-cache build-base && make -j4 test-unit'
+
   linux:
     name: linux (${{ matrix.cc }})
     runs-on: ubuntu-24.04

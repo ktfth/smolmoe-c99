@@ -47,8 +47,8 @@ chmod +x qwen-pt-linux-arm64
 ./qwen-pt-linux-arm64
 ```
 
-O Qwen usa cerca de 0,6 GB de memória. Por enquanto o ARM roda sem os kernels otimizados (NEON), então é mais lento
-que num PC. Esses kernels são o próximo passo.
+O Qwen usa cerca de 0,6 GB de memória. Desde a v0.3.1, o ARM usa os kernels NEON: no Mac do CI, eles escrevem 3,7×
+mais rápido que o código sem eles. Num celular a velocidade ainda não foi medida.
 
 ### Phi-4-mini (modelo maior)
 

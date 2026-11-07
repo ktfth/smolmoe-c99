@@ -570,6 +570,40 @@ usuário:** a saída fica só na tela (o modelo não a vê) e o perfil do PowerS
   restaurá-los; o chat salva e restaura os dois a cada `!`. O caminho do `--stats` é aberto antes da conversa, para
   um `!cd` não mudar onde o arquivo é gravado.
 
+## Iteração 9: NEON no ARM64
+
+**Motivo:** a v0.3.0 levou binários para Linux ARM64, Termux e Apple Silicon, mas lá rodava só o código escalar. O
+plano combinado era o Release primeiro e o NEON logo depois.
+
+### Como ficou idêntico ao escalar
+
+O contrato de determinismo vale também aqui: os resultados têm de ser os mesmos bit a bit.
+
+- **Produto escalar Q8/Q5:** no escalar e no AVX2, cada uma das 8 lanes acumula a soma exata de 4 produtos
+  consecutivos (lane *l* = produtos 4*l* a 4*l*+3). No NEON, os produtos de 16 bits (`vmull_s8`) somados aos pares duas
+  vezes (`vpaddlq_s16`, `vpaddq_s32`) dão as mesmas somas inteiras, nas mesmas lanes. Depois vêm as mesmas duas
+  roundings por bloco (`d × soma`, depois `+`, sem multiplicação fundida) e a mesma ordem de redução.
+- **Quantização das ativações:** `vcvtnq` arredonda como o `lrintf`, e |x × inv| nunca passa de 127.
+- **Exponencial da SwiGLU:** as mesmas operações em binary64. Sem gather no NEON, a tabela é lida por lane.
+- O NEON faz parte de todo AArch64, então não há verificação em tempo de execução.
+
+### Medição (CI, Apple M2 Pro virtual, 5 threads, A/B alternado contra o binário escalar)
+
+| | Escalar | NEON | Ganho |
+|---|---|---|---|
+| Leitura de um prompt de 301 tokens | 53,8 tok/s | 141,7 tok/s | 2,6× |
+| Leitura no chat | 50,0 tok/s | 148,4 tok/s | 3,0× |
+| Escrita no chat | 17,3 tok/s | 64,3 tok/s | 3,7× |
+| Primeiro token, prompt longo | 5,63 s | 2,16 s | −62% |
+
+- **Identidade conferida no próprio Apple Silicon:** os testes de kernel comparam escalar e NEON bit a bit, e o hash
+  dos logits brutos é o mesmo com NEON, com `--scalar` e com o binário escalar.
+- **Cobertura no CI:** os testes de kernel deixaram de chamar o AVX2 pelo nome e comparam o escalar com o backend que
+  a máquina escolhe. O CI passou a baixar os pesos também no Windows e no macOS, então os testes com o modelo real
+  rodam nos três sistemas. No Windows, isso inclui os de colagem no console.
+- **O que não foi medido:** um celular de verdade (Termux). O próximo ganho provável é a instrução `SDOT`, que faz
+  num passo a soma de 4 produtos de cada lane.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.

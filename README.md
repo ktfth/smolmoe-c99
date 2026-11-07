@@ -192,15 +192,17 @@ computação do que a banda economizada. Use-o quando a memória for o limite.
 - **Pesos mapeados em memória** (`mmap` / `MapViewOfFile`): sem cópia, sem cache duplicado, e o SO gerencia as
   páginas. Antes, um cache LRU próprio sobre `pread` mantinha os pesos duas vezes na RAM e era o maior gargalo.
 - **Produto escalar inteiro exato**: as ativações são quantizadas em blocos de 32 (Q8) e a soma de produtos int8 é
-  exata. A acumulação em float segue uma ordem fixa de 8 lanes, que os kernels escalar e AVX2 reproduzem bit a bit.
+  exata. A acumulação em float segue uma ordem fixa de 8 lanes, que os kernels escalar, AVX2 e NEON reproduzem bit a
+  bit.
 - **Prefill em lote**: o mesmo código processa N tokens por passada. Cada linha de pesos é lida uma vez para 4 tokens.
 - **Pool de threads com partição estática**: o resultado é o mesmo com qualquer número de threads.
 - **Validação única na carga**: escalas finitas e não negativas, extents e shapes. O laço de inferência não tem checagens
   por acesso.
 
 **Contrato de determinismo:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`,
-`--batch` e kernel (AVX2/escalar). A suíte de testes garante isso. A exponencial é própria e idêntica em todo sistema
-operacional; entre sistemas ainda não há garantia formal só porque as tabelas de RoPE usam `cos`/`sin` da libm local.
+`--batch` e kernel (AVX2, NEON ou escalar). A suíte de testes garante isso. A exponencial é própria e idêntica em
+todo sistema operacional; entre sistemas ainda não há garantia formal só porque as tabelas de RoPE usam `cos`/`sin`
+da libm local.
 
 ## Desenvolvimento
 

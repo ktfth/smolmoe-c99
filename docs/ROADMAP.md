@@ -27,7 +27,10 @@ Cada item é medido com `bun scripts/bench.ts --ab` contra o binário anterior. 
    compartilhando a expansão dos bits altos, ou um layout com os bits altos já intercalados para SIMD.
 5. **Q4 com escalas por sub-bloco (estilo K-quant)**, só junto com modelos de 1,5B+. O Q4 simples custou +21% de
    perplexidade no 0,5B e foi removido.
-6. **Kernels NEON (ARM64).** Mesma ordem de lanes. Abre Apple Silicon, Raspberry Pi e servidores Graviton.
+6. **NEON com `SDOT` (ARMv8.2).** Os kernels NEON já existem (DECISIONS, iteração 9): 2,6× a 3,7× sobre o escalar
+   no Apple M2. A instrução `SDOT` faz num passo a soma de 4 produtos de cada lane, a mesma conta, e quase todo
+   celular desde 2018 a tem. Pede detecção em tempo de execução (`getauxval` no Linux e no Android, `sysctl` no
+   macOS) e uma medição num celular de verdade.
 7. **Cache KV em F16.** Metade da memória e da banda em contextos longos.
 
 ## Funções no chat: o que a medição deixou aberto
@@ -144,5 +147,6 @@ Feito: **Phi-4-mini** (iteração 6) e o **conversor em TypeScript** para Qwen2 
 
 ## Operação
 
-- Releases assinadas no CI: Windows (x64), Linux (x64, ARM64) e macOS (universal), com SHA-256 publicado.
+- Releases no CI: feitas desde a v0.3.0 (Windows x64, Linux x64 e ARM64, macOS universal, com SHA-256). Sem
+  assinatura digital, por decisão; assinar (Apple e Authenticode) fica para quando o projeto for público.
 - Testes de regressão de qualidade no CI usando o TinyStories (27 MB, cabe no cache do CI).
