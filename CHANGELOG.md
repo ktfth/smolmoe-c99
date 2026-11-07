@@ -3,6 +3,21 @@
 ## Não lançado
 
 ### Adicionado
+- **Chat numa janela** (`smolmoe-gui`, `make gui`), em C++17 com Dear ImGui: Win32 + Direct3D 11 no Windows,
+  GLFW + OpenGL 3 no Linux e no macOS.
+  - A resposta chega aos poucos, sem travar a janela.
+  - O botão "Parar" (ou Esc) interrompe uma resposta, e Ctrl+N começa outra conversa.
+  - Os avisos das ferramentas aparecem resumidos, e dá para copiar qualquer mensagem.
+  - O modelo vem de um `.smoe` (botão no Windows, caminho digitado no Linux e no macOS, arrastar ou linha de comando)
+    ou de dentro do próprio executável.
+  - O Release do Windows passa a trazer `qwen-pt-gui-windows-x64.exe` (janela + Qwen, dois cliques) e
+    `smolmoe-gui-windows-x64.exe`.
+  - Guia em [docs/DESKTOP.md](docs/DESKTOP.md).
+- **Parar uma resposta no meio**, no motor (`EngineSink.stop`). O que já foi escrito fica no histórico. Uma parada
+  dentro de uma chamada de ferramenta tira a mensagem do histórico. O teste prova isso: depois da parada, a mesma
+  pergunta recebe exatamente a resposta de uma conversa nova.
+- [docs/CAMINHOS.md](docs/CAMINHOS.md): todos os jeitos de rodar (janela, terminal, navegador, scripts, outro
+  modelo, da fonte), em cada sistema, e qual modelo escolher.
 - **Chat no navegador** (`web/`, `make web`): o modelo roda inteiro no navegador, em WebAssembly com SIMD128 e
   threads. A página aceita um arquivo `.smoe` do computador ou baixa os pesos uma vez para o cache do navegador. A
   página inteira tem 254 KB, e no Chrome do notebook de testes o Qwen escreve a 11 tokens/s. Guia em
@@ -11,8 +26,10 @@
   um chat com ferramenta sai idêntico, byte a byte. Detalhes em [DECISIONS.md](docs/DECISIONS.md), iteração 10.
 
 ### Alterado
-- A lógica da conversa saiu do chat do terminal para `src/engine.c`, que o terminal e o navegador usam. A saída do
-  terminal é a mesma, byte a byte.
+- A lógica da conversa saiu do chat do terminal para `src/engine.c`, que o terminal, o navegador e a janela usam. A
+  saída do terminal é a mesma, byte a byte.
+- `die()` aceita um gancho (`die_set_handler`), que a janela usa para mostrar o erro em vez de sumir.
+- A página do navegador fica para uso local; a publicação foi adiada.
 
 ## 0.3.1 — 2026-11-07
 

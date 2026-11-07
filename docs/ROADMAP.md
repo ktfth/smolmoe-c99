@@ -127,17 +127,34 @@ programas, como o llamafile faz.
 
 A página funciona e dá os números do nativo (DECISIONS, iteração 10; [WEB.md](WEB.md)). Em aberto:
 
-1. **Publicar.** Hospedar os pesos num endereço público com CORS (Hugging Face ou Vercel Blob), porque o repositório
-   é privado, e publicar `build/web` na Vercel. As duas coisas dependem de decisão do usuário.
+1. **Publicar: adiado.** Em 2026-11-07 ficou decidido que a página roda localmente por enquanto. Para publicar
+   faltam um endereço público com CORS para os pesos (Hugging Face ou Vercel Blob), porque o repositório é privado,
+   e a publicação de `build/web`.
 2. **Abrir sem os ~20 s do prompt do sistema.** Guardar o cache KV desse prefixo fixo (~10 MB) no IndexedDB, ou fazer o
    prefill enquanto o usuário digita (o item 2 de eficiência vale aqui também).
 3. **Leitura do prompt 3,3× mais lenta que a nativa, e 4 threads rendendo só 1,6×.** Medir onde vai o tempo: o produto
    int8 do SIMD128 (extensões de 8 para 16 bits) ou a espera entre threads.
-4. **Botão "parar"**: uma flag na memória compartilhada que o laço da resposta consulta.
+4. **Botão "parar".** O motor já para pelo `sink.stop`, e a janela usa isso (iteração 11). Falta ligá-lo na
+   página: uma flag na memória compartilhada que o `sm_send` consulta, e o botão.
 5. **Firefox e Safari,** e um teste de ponta a ponta automático num navegador de verdade no CI. Hoje o Chrome foi
    testado à mão, e o motor da página roda no bun pelo mesmo host.
 6. **Erro fatal do C** (`die`): hoje encerra o módulo, e a página pede para recarregar. Devolver erros em vez de
    encerrar onde a entrada vem do usuário (um arquivo errado).
+
+## Janela (ImGui): o que falta
+
+A janela funciona no Windows e entra no Release a partir da primeira versão depois da 0.3.1 (DECISIONS, iteração 11; [DESKTOP.md](DESKTOP.md)).
+Em aberto:
+
+1. **Linux e macOS no Release.** Hoje a janela compila no CI, mas depende da GLFW do sistema. Os caminhos possíveis:
+   - empacotar a GLFW estática no binário;
+   - no Linux, publicar um binário dinâmico com a lista de pacotes necessários.
+
+   Antes disso, abrir a janela à mão nos dois sistemas.
+2. **Testes de ponta a ponta automáticos:** abrir a janela no CI do Windows, mandar teclas e conferir a captura do F12.
+3. **Mouse, Ctrl+N e mudança de DPI** testados à mão (a primeira rodada foi com a tela bloqueada).
+4. **Salvar e reabrir conversas,** e escolher outro modelo sem fechar a janela.
+5. **Abrir mais rápido:** o mesmo cache do prompt do sistema que a página precisa (item 2 da página).
 
 ## Capacidade de modelo
 
