@@ -44,6 +44,17 @@ rodar**: os dois atuais já serviram para decidir.
 5. **Ferramentas no chat do Phi-4-mini.** As fontes divergem sobre o formato de chamada (`<|tool_call|>` ou
    `functools[...]`); medir no próprio modelo antes de ligar.
 
+## `!comando` no chat: o que falta testar
+
+1. **A janela padrão do Git Bash (mintty).** Ela não dá um console aos programas do Windows: o chat recebe o teclado
+   por um pipe, onde o `!` fica desligado. O reconhecimento desse pipe como terminal (`msys_terminal` em
+   `src/process.c`) e a detecção de colagem nele (`PeekNamedPipe`) **nunca rodaram**; os testes usaram o bash por
+   outro caminho.
+   - **Teste manual:** abrir o chat no Git Bash. O banner tem de mostrar "Comandos: !comando roda no bash", e `!ls`
+     tem de rodar. Depois, colar duas linhas com um `!` na segunda: nada pode rodar.
+   - **Se falhar:** o `!` simplesmente não roda (vai como texto ao modelo), sem risco. Basta corrigir a detecção.
+   - Um teste automático exigiria abrir o mintty no CI. Avaliar depois do teste manual.
+
 ## Ferramentas novas (plano combinado; cada uma medida com perguntas novas)
 
 1. **`calcular`: no `main` por decisão do usuário, mas empatada no teste às cegas com o Qwen 0,5B.** Foram 12 de 40

@@ -123,7 +123,7 @@ jobs:
 
   macos:
     needs: draft
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
