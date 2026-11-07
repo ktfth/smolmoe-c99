@@ -44,6 +44,12 @@
   11,3681.
 - Com as ferramentas ligadas, o chat leva cerca de 5 s a mais para abrir (o prompt de sistema vai de 31 para 279
   tokens). `--no-tools` volta ao comportamento anterior.
+- `.env` e `.env.*` ficam fora do Git (o token do Hugging Face mora ali).
+
+### Medido e não incluído
+- **Ferramenta `calcular`.** No teste às cegas, o Qwen 0,5B acertou 12 de 40 contas com ela e 11 de 40 sem ela, e
+  ela fez errar 7 contas que o modelo acertava sozinho. O código está no ramo `feat/calcular`. Detalhes em
+  [DECISIONS.md](docs/DECISIONS.md), iteração 7.
 
 ## 0.2.0 — 2026-11-06
 

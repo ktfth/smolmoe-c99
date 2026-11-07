@@ -456,6 +456,73 @@ em 1038.
   de Q/K, atenção local de 512 tokens, duas frequências de RoPE, cabeça de tamanho próprio) e um tokenizer
   SentencePiece de 262 mil peças.
 
+## Iteração 7: a calculadora não passou no teste às cegas
+
+**Pedido:** ferramentas novas, começando por `calcular`. Motivo: na iteração 6, o Qwen 0,5B respondeu "030" para
+"15% de 230" e 50 para um desconto de 25% em 80.
+
+### O que foi construído
+
+O código está no ramo `feat/calcular` e não entrou no `main`:
+
+- **Avaliador de expressões em C**, em double. Entende símbolos e palavras ("mais", "vezes", "15% de 230"), número no
+  formato brasileiro, e devolve o resultado formatado do mesmo jeito ("1.126,83").
+- **Aterramento:** todo número da conta tem que vir da mensagem, em algarismos ou por extenso. As exceções são
+  constantes pequenas e porcentagens.
+- **Chamada forçada:** quando a mensagem é só uma conta e o modelo escolhe outra ferramenta, o runtime abre a chamada
+  de `calcular` e o modelo escreve só a expressão.
+- Testes de unidade e correções da revisão de código.
+
+### Como medimos
+
+- **Conjunto às cegas:** 55 perguntas (40 contas em 20 categorias e 15 controles que têm números mas não pedem
+  conta). Foram escritas por um agente sem acesso ao código e commitadas antes da ferramenta ficar pronta (`f41d518`).
+  O conjunto rodou uma única vez.
+- **Linha de base:** o mesmo modelo, com as mesmas perguntas, sem ferramentas. A comparação é pergunta a pergunta.
+- **Leitura dos números só no formato brasileiro.** Na primeira contagem, o avaliador também aceitava a leitura
+  americana ("1,776" como 1776), o que inflava o placar. A recontagem usou as respostas gravadas, sem rodar o modelo
+  de novo, e mudou um acerto em cada lado.
+
+### Resultado
+
+| | Sem ferramentas | Com `calcular` |
+|---|---|---|
+| Resposta certa (40 contas) | 11 (IC 95% 16–43%) | 12 (IC 95% 18–45%) |
+| Chamadas indevidas (15 controles) | 0 | 2 |
+
+Pergunta a pergunta: 4 certas nos dois casos, **8 que só a ferramenta acertou e 7 que ela fez errar**. Na prática, a
+ferramenta troca um erro por outro.
+
+- **O que ela resolveu:** conta direta e porcentagem simples. Exemplos: "sete vezes oito", "48 x 25 + 17*3 − 90/6",
+  reajuste de 4,5%, juros compostos e preço por quilo.
+- **O que ela piorou:** o modelo escreveu a fórmula errada, e a conta exata de uma fórmula errada continua errada:
+  - troco como "67,35 − 100" (R$ −32,65);
+  - o total no lugar da gorjeta;
+  - porcentagem de acerto como 40 ÷ 34;
+  - "(125 + 375) ÷ 4 × 3 − 18" sem os parênteses (388,25 no lugar de 357);
+  - regra de três inversa (pedreiros) como 15 ÷ 4.
+- Em 13 das 40 contas o modelo nem chamou a ferramenta. Em 3 delas, que ele acertava sozinho, errou mesmo sem
+  chamar: as declarações no prompt de sistema já mudam a resposta.
+- Chamadas indevidas: "2 + 2 = 5", na pergunta sobre o livro *1984*, abriu a calculadora. "desde segunda" abriu
+  `data_atual` (o portão de datas já tinha essa falha).
+- O avaliador foi conferido à parte nas expressões das falhas e calcula certo. **O gargalo é o modelo montar a conta.**
+
+### Ideia derrubada: "o modelo decide e copia, e o C calcula" também vale para contas
+
+Nas datas funcionou porque o argumento é copiado da mensagem ("natal"). Numa conta, o argumento é a fórmula, e
+escrever a fórmula é justamente o raciocínio que um modelo de 0,5B não faz. Forçar a chamada sempre não foi testado,
+e o ganho esperado é pequeno pelo mesmo motivo: a fórmula continuaria sendo do modelo.
+
+### Decisão
+
+- `calcular` fica fora do `main`. O código e os testes estão no ramo `feat/calcular`.
+- **Reavaliar com um modelo que escreve fórmulas melhor.** Sem ferramenta, o Phi-4-mini já acertou "15% de 230" e o
+  desconto (iteração 6), mas antes precisa de ferramentas no chat. O protocolo é o mesmo: conjunto novo às cegas e
+  linha de base pareada.
+- **Lição de processo:** a maquinaria toda (aterramento, chamada forçada, revisão) foi construída antes de testar a
+  hipótese central às cegas. No ajudante de comandos, primeiro se mede às cegas o modelo com os exemplos recuperados,
+  contra o modelo sem eles. A maquinaria de segurança só é construída se esse ganho aparecer.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.
@@ -465,6 +532,8 @@ em 1038.
    validado contra o `tokenizers` do Hugging Face em 11 casos.
 4. **Determinismo como contrato testado.** Ele não depende mais de abrir mão de desempenho.
 5. **Português local, de verdade.** A resposta "12" sai em 0,86 s no Windows nativo, num notebook.
+6. **Ferramenta só entra se passar às cegas.** Ela é medida num conjunto escrito sem ver o código e comparada, pergunta
+   a pergunta, com o modelo sem ela. A calculadora não passou (iteração 7) e ficou de fora.
 
 ## Próximas demolições candidatas
 
