@@ -666,9 +666,74 @@ o `cos`/`sin` das tabelas de RoPE dá os mesmos floats nas três libms, ao menos
   - abrir a página custa ~20 s, porque o prompt do sistema com as ferramentas (~400 tokens) é reprocessado a cada
     carga.
 
+## Iteração 11: a janela (Dear ImGui)
+
+**Motivo:** o quarto item da ordem combinada (Release, NEON, WebAssembly, ImGui). O pedido foi uma interface simples
+para desktop, e o Windows é obrigatório. Guia em [DESKTOP.md](DESKTOP.md).
+
+### O que foi construído
+
+- **Interface:** Dear ImGui 1.91.9b, copiado sem mudanças para `third_party/imgui`, com o SHA-256 do pacote em
+  THIRD_PARTY.md.
+  - A 1.92 ficou de fora porque trocou o sistema de fontes.
+  - **Windows:** Win32 + Direct3D 11, que não pedem nada além do sistema.
+  - **Linux e macOS:** GLFW + OpenGL 3.
+- **Sem misturar com o runtime:** o runtime continua C99. A janela é um programa C++17 à parte (`gui/`), que fala
+  com o modelo por um cabeçalho C mínimo, `src/desktop.h`.
+  - O `desktop.h` só puxa o `engine_sink.h`, que depende apenas de `stdint.h`.
+  - O `desktop.c` abre o modelo nos três formatos: `.smoe` autocontido, pasta com `config.ini` ou modelo
+    embutido no executável.
+- **O motor numa thread de trabalho:** o motor é síncrono, e um `engine_send` leva segundos.
+  - A thread é dona do motor e atende a uma fila de pedidos.
+  - O sink acrescenta o texto à conversa sob um mutex e acorda a janela.
+- **Release do Windows:** `smolmoe-gui-windows-x64.exe` (1,45 MB, estático, só DLLs do Windows) e
+  `qwen-pt-gui-windows-x64.exe` (janela + Qwen, 562 MB).
+
+### Ideias derrubadas
+
+- **"Parar" só na interface:** a janela deixaria de mostrar a resposta, mas o modelo continuaria até 512 tokens
+  gastando CPU, e o histórico guardaria um texto que o usuário não viu. O "parar" foi para o motor:
+  - o `sink.stop` é consultado antes de cada token;
+  - parado no texto, o que saiu fica no histórico;
+  - parado dentro de uma chamada de ferramenta, o cache KV volta ao início da mensagem, pela mesma regra do rollback de
+    chamadas: o histórico nunca guarda uma chamada sem resultado.
+  - **Prova:** com o Qwen, depois de uma chamada interrompida, a mesma pergunta recebe exatamente a resposta de uma
+    conversa nova.
+- **`setjmp`/`longjmp` para sobreviver ao `die()`:** o `die()` também roda nas threads do pool (a validação
+  dos pesos é paralela), e um `longjmp` na thread errada corromperia o processo. Ficou assim:
+  - os erros esperados (arquivo que não existe, que não é modelo, sem configuração, sem chat) voltam como mensagem de
+    `desktop_open`, e dá para escolher outro arquivo;
+  - o resto passa por um gancho no `die()` (`die_set_handler`), que estaciona a thread e mostra o erro na janela.
+- **Embutir uma fonte (Noto Sans):** seria mais um arquivo externo, de centenas de KB. As fontes do sistema (Segoe UI,
+  DejaVu Sans, Arial) cobrem o português, e a fonte do próprio ImGui, que cobre o Latin-1, fica de reserva.
+
+### O que o teste à mão achou
+
+O teste foi no Windows 11, com mensagens do Windows enviadas por script. A tela estava bloqueada, então as capturas
+vieram de um gancho próprio: `SMOLMOE_GUI_SCREENSHOT`, em que o F12 lê o quadro direto do Direct3D.
+- **Erro na linha de comando travava o processo.** Num programa GUI, `GetStdHandle` devolve NULL mesmo com o stderr
+  redirecionado, então a caixa de diálogo de erro abria, invisível, e o processo não terminava. A verificação passou
+  para o descritor da biblioteca C, o mesmo que escreveu a mensagem.
+- **O Esc apagava o rascunho.** No ImGui, o Esc num campo de texto desfaz a edição, então quem digitava a próxima
+  mensagem e apertava Esc para parar a resposta perdia o texto. Agora o Esc tem rota acima do campo e só para a
+  resposta.
+
+### Medição (i7-10610U, Qwen 0.5B Q8, 4 threads)
+
+| | Escrita |
+|---|---|
+| Janela | 20,9 a 25,2 tok/s |
+| Terminal | 23 a 27 tok/s |
+
+- **Abertura:** cerca de 8 s até o chat ficar pronto, quase todos no prompt do sistema com as ferramentas, como no
+  terminal.
+- **Em repouso:** sem nada acontecendo, a janela dorme até chegar um evento, ou por até meio segundo (o cursor do campo pisca). Durante uma
+  resposta, redesenha a cada quadro.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
-1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.
+1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é
+   um programa à parte, em C++ com Dear ImGui, e o runtime não depende dela.
 2. **Formato `SMOEQ8` validado de forma estrita.** Diretório ordenado, extents sem sobreposição e shapes checados
    contra a config. Entradas hostis falham com erro claro, e há testes para cada caso.
 3. **Tokenizers corretos sem bibliotecas.** BPE do Qwen2 com NFC do Unicode 15 e as regras de pré-tokenização,

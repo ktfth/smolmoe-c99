@@ -7,7 +7,9 @@ autenticado (`gh auth login`). Sem tag, `gh release download` baixa a versão ma
 
 | Arquivo | Para quê |
 |---|---|
-| `qwen-pt-windows-x64.exe`, `qwen-pt-linux-x64`, `qwen-pt-linux-arm64`, `qwen-pt-macos` | Chat em português num arquivo só: o programa e o Qwen2.5-0.5B (560 MB) |
+| `qwen-pt-gui-windows-x64.exe` | **Chat numa janela**, num arquivo só: a janela e o Qwen2.5-0.5B. Dois cliques e pronto. |
+| `smolmoe-gui-windows-x64.exe` | Só a janela, para abrir um arquivo `.smoe` (por exemplo, o Q5 ou o Phi-4-mini) |
+| `qwen-pt-windows-x64.exe`, `qwen-pt-linux-x64`, `qwen-pt-linux-arm64`, `qwen-pt-macos` | Chat em português no terminal, num arquivo só: o programa e o Qwen2.5-0.5B (560 MB) |
 | `tinystories-<sistema>` | Historinhas em inglês (28 MB), bom para testar se roda |
 | `smolmoe-<sistema>` | Só o programa, para usar com um arquivo de modelo (`--model`) |
 | `qwen2.5-0.5b-instruct-q8.smoe`, `qwen2.5-0.5b-instruct-q5.smoe`, `tinystories-15m.smoe` | Modelos num arquivo só (configuração e tokenizer dentro) |
@@ -16,8 +18,23 @@ autenticado (`gh auth login`). Sem tag, `gh release download` baixa a versão ma
 | `SHA256SUMS` | Somas SHA-256 de tudo, inclusive do Phi-4-mini já juntado |
 
 `linux-arm64` serve para Linux ARM e para o **Termux** (Android 64 bits). O `macos` roda em Mac Intel e Mac M.
+No Linux e no macOS, a janela ainda não vem pronta: ela é compilada com `make gui`. O guia `docs/CAMINHOS.md`, no
+repositório, compara todos os jeitos de rodar.
 
-### Windows
+### Janela (Windows)
+
+```powershell
+gh release download --pattern qwen-pt-gui-windows-x64.exe
+.\qwen-pt-gui-windows-x64.exe
+```
+
+- **Teclas:** Enter envia, Ctrl+Enter quebra a linha, Esc interrompe a resposta e Ctrl+N começa outra conversa.
+- **Outro modelo:** com o `smolmoe-gui-windows-x64.exe`, escolha o `.smoe` no botão "Abrir modelo (.smoe)…" ou arraste o
+  arquivo para a janela.
+- **SmartScreen:** como todos os binários daqui, a janela não tem assinatura digital. O aviso da primeira vez se
+  resolve como no terminal, logo abaixo.
+
+### Windows (terminal)
 
 ```powershell
 gh release download --pattern qwen-pt-windows-x64.exe
@@ -68,6 +85,10 @@ No Windows, junte as partes no `cmd`:
 copy /b phi-4-mini-instruct.smoe.001 + phi-4-mini-instruct.smoe.002 + phi-4-mini-instruct.smoe.003 phi-4-mini-instruct.smoe
 smolmoe-windows-x64.exe --model phi-4-mini-instruct.smoe
 ```
+
+Na janela, a última linha vira `smolmoe-gui-windows-x64.exe phi-4-mini-instruct.smoe`. A janela usa contexto 4096, o
+dobro do terminal, e por isso o Phi pede cerca de 0,5 GB a mais; `--context 2048` iguala ao terminal. O Phi ainda não
+foi testado na janela.
 
 O chat do Phi ainda não tem as ferramentas (datas e contas).
 

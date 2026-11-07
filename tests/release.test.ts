@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  absoluteLinks, changelogSection, exeSuffix, partNames, sha256File, splitFile, sumsText,
+  absoluteLinks, changelogSection, exeSuffix, GUI_PLATFORMS, partNames, sha256File, splitFile, sumsText,
 } from "../scripts/release";
 import { tempDir } from "./support/run";
 
@@ -53,5 +53,9 @@ describe("release files", () => {
     expect(exeSuffix("windows-x64")).toBe(".exe");
     expect(exeSuffix("linux-arm64")).toBe("");
     expect(exeSuffix("macos")).toBe("");
+  });
+
+  test("the Windows release must carry the desktop window; the others build it from source", () => {
+    expect([...GUI_PLATFORMS]).toEqual(["windows-x64"]);
   });
 });

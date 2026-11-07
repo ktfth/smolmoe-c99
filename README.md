@@ -14,17 +14,21 @@ quantizados em Q8 (formato `SMOEQ8`) no Windows, no Linux e no macOS. O caso pri
 
 Os números, o método e o que foi descartado no caminho estão em [docs/DECISIONS.md](docs/DECISIONS.md).
 
-## Baixar pronto
+## Jeitos de usar
 
-Cada versão tem binários para Windows, Linux (inclusive ARM e Termux) e macOS, executáveis de arquivo único e os
-modelos, na página de Releases. Como baixar e rodar em cada sistema: [docs/INSTALL.md](docs/INSTALL.md).
+O mesmo motor de conversa roda em três interfaces, e nenhuma manda texto para fora do computador. O guia
+[docs/CAMINHOS.md](docs/CAMINHOS.md) mostra cada caminho em cada sistema e qual modelo escolher.
 
-## No navegador
+| Caminho | Como começar | Guia |
+|---|---|---|
+| **Janela** | Windows: `qwen-pt-gui-windows-x64.exe` do Release (a partir da primeira versão depois da 0.3.1), com dois cliques. Linux e macOS: `make gui`. | [DESKTOP.md](docs/DESKTOP.md) |
+| **Chat no terminal** | `qwen-pt-<sistema>` do Release: Windows, Linux, macOS e Termux. | [INSTALL.md](docs/INSTALL.md) |
+| **Navegador, local** | `make ZIG=... web` e `bun scripts/serve-web.ts`. Depois abra o `.smoe` na página. | [WEB.md](docs/WEB.md) |
+| **Outro modelo** | `smolmoe-<sistema> --model phi-4-mini-instruct.smoe` (ou o Q5) | [INSTALL.md](docs/INSTALL.md) |
+| **Scripts** | `qwen-pt --chat --prompt "..."` escreve uma resposta e sai. | [Opções](#opções-principais) |
+| **Da fonte** | `make`, `make gui`, `make test` | [Desenvolvimento](#desenvolvimento) |
 
-A página `web/` roda o mesmo chat inteiro no navegador, em WebAssembly com SIMD e threads. Nada sai do computador,
-e, nos testes, as respostas saem idênticas às do binário nativo. Para rodar localmente, use
-`make ZIG=... web` e depois `bun scripts/serve-web.ts`. Uso, publicação na Vercel e números estão em
-[docs/WEB.md](docs/WEB.md).
+![A janela do smolmoe no tema escuro](docs/images/desktop-escuro.png)
 
 ## Um arquivo só: o executável já é o modelo
 
@@ -217,6 +221,7 @@ da libm local (na prática, Windows, Linux e WebAssembly já dão o mesmo hash n
 make test        # testes unitários em C + suíte de integração (bun test)
 make sanitize    # ASan/UBSan (Linux/macOS)
 make release     # binário otimizado e enxuto (estático no Windows)
+make gui         # a janela: build/smolmoe-gui (C++17; no Linux e no macOS, precisa da GLFW)
 make ZIG=zig wasi web   # WebAssembly: módulos WASI para os testes e a página do navegador (precisa do zig 0.13)
 bun scripts/bench.ts                                    # medianas de leitura/escrita e tempo por fase
 bun scripts/bench.ts --ab build/smolmoe-base.exe        # A/B alternado contra um binário anterior
@@ -228,10 +233,14 @@ dois por igual. O script sai com erro se alguma métrica piorar além do limiar 
 `--profile` no runtime mostra para onde vai o tempo de cada passada.
 
 Requisitos: compilador C99 (GCC ou Clang), `make` e [Bun](https://bun.sh) para os testes e scripts.
-O runtime não tem dependências além da libc e da libm (e `pthread` em POSIX).
+O runtime não tem dependências além da libc e da libm (e `pthread` em POSIX). A janela, que é opcional, usa C++17 e
+o Dear ImGui, que vem no repositório (`third_party/imgui`). No Linux e no macOS ela também precisa da GLFW.
 
 ```text
-src/        runtime C99 (plataforma, kernels, modelo, tokenizers, CLI)
+src/        runtime C99 (plataforma, kernels, modelo, tokenizers, CLI, motor de conversa)
+gui/        a janela em C++17 com Dear ImGui (Win32 + Direct3D 11, ou GLFW + OpenGL 3)
+web/        a página do navegador (TypeScript) sobre o build WebAssembly
+third_party/  Dear ImGui 1.91.9b, sem mudanças (MIT)
 tests/      testes unitários C + integração TypeScript (fixtures MoE sintéticas)
 scripts/    benchmark, comparação de qualidade, geração de fixtures (TypeScript/Bun)
 tools/      conversores de checkpoints (Python legado, POSIX)
@@ -248,6 +257,8 @@ models/     pesos locais (fora do git)
 - O roteamento MoE é testado só com checkpoints sintéticos. **Nenhum modelo MoE treinado é suportado ainda**; os modelos
   incluídos são densos, representados como um expert sempre ativo.
 - Não é compatível com Kimi K3 nem com GGUF, e ainda não há servidor HTTP (está no [roadmap](docs/ROADMAP.md)).
+- A janela vem pronta só para Windows, a partir da primeira versão depois da 0.3.1. No Linux e no macOS, ela compila no CI, mas ainda não foi aberta à mão
+  ([DESKTOP.md](docs/DESKTOP.md)).
 - O Qwen 0.5B é pequeno: às vezes mistura idiomas ou ignora o formato pedido. Revise as respostas.
 - O checkpoint precisa ficar imutável durante a execução. No Windows o arquivo é aberto sem permitir escrita; no
   Linux/macOS, truncar ou reescrever o `.smoe` enquanto ele roda derruba o processo (`SIGBUS`), como em qualquer

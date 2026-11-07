@@ -295,6 +295,45 @@ static int parse_call(const char *s, size_t n, Call *c) {
     return j.p == j.end && c->has_name;
 }
 
+/* A flat result value: a string (into out when wanted), a number or a literal. */
+static int result_value(Json *j, char *out, size_t cap) {
+    char skipped[TOOL_RESULT_MAX];
+    Arg literal;
+    skip_ws(j);
+    if (peek(j, '"')) return out ? parse_string(j, out, cap) : parse_string(j, skipped, sizeof(skipped));
+    if (out) return 0;
+    if (j->p < j->end && (*j->p == '-' || (*j->p >= '0' && *j->p <= '9')))
+        return parse_number(j, skipped, sizeof(skipped));
+    return parse_literal(j, &literal);
+}
+
+static int result_string(const char *result, const char *key, char *out, size_t cap) {
+    char name[ARG_KEY_MAX];
+    int found = 0;
+    Json j;
+    j.p = result;
+    j.end = result + strlen(result);
+    if (!eat(&j, '{')) return 0;
+    if (!peek(&j, '}')) {
+        do {
+            int wanted;
+            if (!parse_string(&j, name, sizeof(name)) || !eat(&j, ':')) return 0;
+            wanted = !found && !strcmp(name, key);
+            if (!result_value(&j, wanted ? out : NULL, cap)) return 0;
+            found |= wanted;
+        } while (eat(&j, ','));
+    }
+    if (!eat(&j, '}')) return 0;
+    skip_ws(&j);
+    return found && j.p == j.end;
+}
+
+int tool_result_string(const char *result, const char *key, char *out, size_t cap) {
+    int ok = cap && result_string(result, key, out, cap);
+    if (cap && !ok) out[0] = 0; /* a failed parse may have written part of a value */
+    return ok;
+}
+
 /* ---- tools ----------------------------------------------------------------- */
 
 static const Arg *find_arg(const Call *c, const char *key) {

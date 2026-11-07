@@ -4,9 +4,14 @@ A página `web/` roda o chat inteiro no navegador de quem a abre, em WebAssembly
 estáticos (a página, o `.wasm` de 240 KB e os pesos), e nenhuma mensagem sai do computador. É o mesmo código C do
 binário nativo e o mesmo motor de conversa (`src/engine.c`), com as ferramentas de data e de conta.
 
+**Por enquanto, a página é para rodar no seu computador** (decisão de 2026-11-07): `make web`, o servidor local e
+um `.smoe` aberto do disco. A seção sobre publicar fica para quando houver publicação. Os outros jeitos de rodar
+estão em [CAMINHOS.md](CAMINHOS.md).
+
 ## Usar
 
-1. Abra a página num navegador recente: Chrome, Edge, Firefox ou Safari, com WebAssembly SIMD e threads.
+1. Abra a página no Chrome ou no Edge recentes (testada no Chrome). O Firefox e o Safari também têm WebAssembly SIMD
+   e threads, mas ainda não foram testados.
 2. Escolha uma das opções:
    - **Abrir arquivo .smoe:** use o `qwen2.5-0.5b-instruct-q8.smoe` (560 MB) da página de releases.
    - **Baixar e abrir:** aparece quando `web/models.json` tem uma URL pública para os pesos. Depois que o modelo
@@ -28,7 +33,9 @@ bun scripts/serve-web.ts            # http://localhost:8080/, com os cabeçalhos
 O build precisa do zig 0.13, que traz a libc do WASI, e do bun. Os testes `tests/wasm.test.ts` e `tests/web.test.ts`
 rodam com `make test` quando `build/wasi` e `build/web` existem. No CI, eles são obrigatórios (`SM_EXPECT_WASM=1`).
 
-## Publicar (Vercel ou qualquer hospedagem estática)
+## Publicar (adiado: Vercel ou qualquer hospedagem estática)
+
+Nada disto está em uso: a página não foi publicada. O que segue é o que falta para publicar quando for decidido.
 
 - Publique a pasta `build/web`. O `vercel.json` dela já envia os cabeçalhos `Cross-Origin-Opener-Policy: same-origin`
   e `Cross-Origin-Embedder-Policy: require-corp`. Sem eles, o navegador não libera memória compartilhada, e a página

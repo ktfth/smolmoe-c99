@@ -53,4 +53,9 @@ int tool_call_grounded(const char *call, size_t n, const char *user_text);
 int tool_run(const char *call, size_t n, const char *user_text, const ToolClock *now, char name[TOOL_NAME_MAX],
              char result[TOOL_RESULT_MAX]);
 
+/* The string value of `key` in a tool result (a flat JSON object, as tool_run
+ * writes), into out; 0 when it is absent, not a string, too long, or the
+ * result is malformed, and then out is "" (when cap > 0). */
+int tool_result_string(const char *result, const char *key, char *out, size_t cap);
+
 #endif

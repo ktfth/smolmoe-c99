@@ -11,6 +11,9 @@ export const BINARY = join(BUILD, `smolmoe${EXE}`);
 export const SCALAR_BINARY = join(BUILD, `smolmoe-scalar${EXE}`);
 export const QUANTIZE_BINARY = join(BUILD, `smolmoe-quantize${EXE}`);
 export const BUNDLE_BINARY = join(BUILD, `smolmoe-bundle${EXE}`);
+/** The desktop window (make gui) and its model layer's test program (src/desktop.c). */
+export const GUI_BINARY = join(BUILD, `smolmoe-gui${EXE}`);
+export const DESKTOP_TEST_BINARY = join(BUILD, `test-desktop${EXE}`);
 /** Windows only: types into a program in its own console (tests/support/console_input.c). */
 export const CONSOLE_INPUT_BINARY = join(BUILD, `console-input${EXE}`);
 export const EXE_SUFFIX = EXE;

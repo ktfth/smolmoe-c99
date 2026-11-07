@@ -6,14 +6,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define DIE_MESSAGE_BYTES 1024
+
+static void (*die_handler)(const char *message);
+
+void die_set_handler(void (*handler)(const char *message)) { die_handler = handler; }
+
 void die(const char *fmt, ...) {
+    char message[DIE_MESSAGE_BYTES];
     va_list ap;
     fflush(stdout);
-    fputs("smolmoe: ", stderr);
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    vsnprintf(message, sizeof(message), fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    fprintf(stderr, "smolmoe: %s\n", message);
+    if (die_handler) die_handler(message);
     exit(EXIT_FAILURE);
 }
 
