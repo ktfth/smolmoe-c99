@@ -29,4 +29,9 @@ int date_parse(const char *text, Date today, Date *out);
  * "horas", "semana", "falta"...). A lexical cue, not understanding. */
 int date_or_time_mentioned(const char *text);
 
+/* Stricter: the text is about a date. A bare numeric date ("3/4") counts only
+ * next to a date word ("dia", "até", "data"...), since "3/4 de 200" is a
+ * fraction; time words, month names and holidays always count. */
+int date_question(const char *text);
+
 #endif

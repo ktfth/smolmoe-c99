@@ -1,9 +1,9 @@
 #include "calendar.h"
+#include "textfold.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define FOLD_MAX 512     /* longest text searched for a date: a chat message */
 #define SEARCH_YEARS 8   /* 29 Feb can be 8 years away (2096 -> 2104) */
 #define MAX_MENTIONS 16  /* dates looked at in one text */
 
@@ -110,28 +110,6 @@ static Date holiday_in(const Holiday *h, int y) {
 
 /* ---- parsing ------------------------------------------------------------------ */
 
-/* Lowercase ASCII, Portuguese accents removed, ordinal marks dropped, spaces
- * collapsed. Other non-ASCII bytes become '?'. Returns 0 when too long. */
-static int fold(const char *s, char *out, size_t cap) {
-    static const char latin[65] = "aaaaaaaceeeeiiii?nooooo?ouuuuy??aaaaaaaceeeeiiii?nooooo?ouuuuy?y";
-    const unsigned char *p = (const unsigned char *)s;
-    size_t n = 0;
-    for (; *p; ++p) {
-        char c;
-        if (*p == 0xc3 && p[1] >= 0x80 && p[1] <= 0xbf) c = latin[*++p - 0x80];
-        else if (*p == 0xc2 && (p[1] == 0xaa || p[1] == 0xba)) { ++p; continue; } /* ª º */
-        else if (*p >= 0x80) c = '?';
-        else c = (char)(*p >= 'A' && *p <= 'Z' ? *p + 32 : *p);
-        if (c == '\t' || c == '\n' || c == '\r') c = ' ';
-        if (c == ' ' && (n == 0 || out[n - 1] == ' ')) continue;
-        if (n + 1 >= cap) return 0;
-        out[n++] = c;
-    }
-    if (n && out[n - 1] == ' ') --n;
-    out[n] = 0;
-    return 1;
-}
-
 static int read_number(const char **p, int max_digits, int *value) {
     int n = 0, v = 0;
     while (**p >= '0' && **p <= '9') {
@@ -142,14 +120,13 @@ static int read_number(const char **p, int max_digits, int *value) {
     return n;
 }
 
-static int is_letter(char c) { return c >= 'a' && c <= 'z'; }
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 
 static int month_at(const char **p, int *month) {
     int i;
     for (i = 0; i < 12; ++i) {
         size_t n = strlen(MONTH_KEYS[i]);
-        if (!strncmp(*p, MONTH_KEYS[i], n) && !is_letter((*p)[n])) {
+        if (!strncmp(*p, MONTH_KEYS[i], n) && !text_is_letter((*p)[n])) {
             *month = i + 1;
             *p += n;
             return 1;
@@ -235,17 +212,6 @@ typedef struct Mention {
     Date date;
 } Mention;
 
-/* The next whole-word occurrence of `word` in s, at or after `from`. */
-static const char *find_word(const char *s, const char *from, const char *word) {
-    size_t n = strlen(word);
-    const char *p = from;
-    while ((p = strstr(p, word)) != NULL) {
-        if ((p == s || !is_letter(p[-1])) && !is_letter(p[n])) return p;
-        ++p;
-    }
-    return NULL;
-}
-
 static int inside(const Mention *found, int n, size_t at) {
     int i;
     for (i = 0; i < n; ++i)
@@ -256,9 +222,9 @@ static int inside(const Mention *found, int n, size_t at) {
 static int add_holidays(const char *s, Date today, Mention *found, int n, int max) {
     size_t i;
     for (i = 0; i < sizeof(HOLIDAYS) / sizeof(HOLIDAYS[0]) && n < max; ++i) {
-        const char *at = find_word(s, s, HOLIDAYS[i].name);
+        const char *at = text_find_word(s, s, HOLIDAYS[i].name);
         /* Skip occurrences inside an earlier, longer name ("vespera de natal"). */
-        while (at && inside(found, n, (size_t)(at - s))) at = find_word(s, at + 1, HOLIDAYS[i].name);
+        while (at && inside(found, n, (size_t)(at - s))) at = text_find_word(s, at + 1, HOLIDAYS[i].name);
         if (!at || !next_holiday(&HOLIDAYS[i], today, &found[n].date)) continue;
         found[n].at = (size_t)(at - s);
         found[n].len = strlen(HOLIDAYS[i].name);
@@ -286,23 +252,12 @@ static int add_numeric(const char *s, Date today, Mention *found, int n, int max
     return n;
 }
 
-/* Folds at most the last cap-1 bytes of a long text, starting on a character
- * boundary: a chat question usually ends with what it asks about. */
-static void fold_tail(const char *text, char *out, size_t cap) {
-    size_t len = strlen(text);
-    if (len >= cap) {
-        text += len - (cap - 1);
-        while (((unsigned char)*text & 0xc0) == 0x80) ++text;
-    }
-    if (!fold(text, out, cap)) out[0] = 0; /* cannot happen: folding never lengthens */
-}
-
 /* Dates in order of mention, each date once. */
 static int mentions(const char *text, Date today, Date *out, int max) {
     char s[FOLD_MAX];
     Mention found[MAX_MENTIONS];
     int n, i, j, count = 0;
-    fold_tail(text, s, sizeof(s));
+    text_fold_tail(text, s, sizeof(s));
     n = add_holidays(s, today, found, 0, MAX_MENTIONS);
     n = add_numeric(s, today, found, n, MAX_MENTIONS);
     for (i = 1; i < n; ++i) /* insertion sort by position */
@@ -327,19 +282,7 @@ static const char *const TIME_WORDS[] = {"hoje", "amanha", "ontem", "agora", "ho
                                          "data", "datas", "semana", "mes", "falta", "faltam", "faltando",
                                          "faltar", "aniversario", "calendario", "feriado", "feriados"};
 
-static int has_time_word(const char *s) {
-    while (*s) {
-        const char *start;
-        size_t n, i;
-        while (*s && (*s < 'a' || *s > 'z')) ++s;
-        start = s;
-        while (*s >= 'a' && *s <= 'z') ++s;
-        n = (size_t)(s - start);
-        for (i = 0; n && i < sizeof(TIME_WORDS) / sizeof(TIME_WORDS[0]); ++i)
-            if (strlen(TIME_WORDS[i]) == n && !strncmp(start, TIME_WORDS[i], n)) return 1;
-    }
-    return 0;
-}
+static int has_time_word(const char *s) { return text_has_word(s, TIME_WORDS, sizeof(TIME_WORDS) / sizeof(TIME_WORDS[0])); }
 
 int date_or_time_mentioned(const char *text) {
     char s[FOLD_MAX];
@@ -347,6 +290,30 @@ int date_or_time_mentioned(const char *text) {
     reference.year = 2000; /* any valid day: only whether a date is named matters */
     reference.month = 1;
     reference.day = 1;
-    fold_tail(text, s, sizeof(s));
+    text_fold_tail(text, s, sizeof(s));
     return has_time_word(s) || date_parse(text, reference, &any);
+}
+
+/* Words that make a bare "3/4" a date ("dias até 3/4") rather than a fraction ("3/4 de 200"). */
+static const char *const DATE_CONTEXT[] = {"dia", "dias", "ate", "data", "prazo", "vencimento", "quando"};
+
+static int names_month_or_holiday(const char *s) {
+    size_t i;
+    for (i = 0; i < 12; ++i)
+        if (text_find_word(s, s, MONTH_KEYS[i])) return 1;
+    for (i = 0; i < sizeof(HOLIDAYS) / sizeof(HOLIDAYS[0]); ++i)
+        if (text_find_word(s, s, HOLIDAYS[i].name)) return 1;
+    return 0;
+}
+
+int date_question(const char *text) {
+    char s[FOLD_MAX];
+    Date any, reference;
+    reference.year = 2000;
+    reference.month = 1;
+    reference.day = 1;
+    text_fold_tail(text, s, sizeof(s));
+    if (has_time_word(s) || names_month_or_holiday(s)) return 1;
+    return date_parse(text, reference, &any) &&
+           text_has_word(s, DATE_CONTEXT, sizeof(DATE_CONTEXT) / sizeof(DATE_CONTEXT[0]));
 }

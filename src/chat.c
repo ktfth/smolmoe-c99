@@ -60,12 +60,20 @@ static uint32_t emit(const ChatContext *c, Calls *calls, uint32_t token, unsigne
     return len;
 }
 
-/* Streams one reply; every generated token is fed back, it is history. */
-static uint32_t reply(const ChatContext *c, uint32_t *pos, ChatStats *st, double turn_start, Calls *calls) {
+/* Streams one reply; every generated token is fed back, it is history. With a
+ * prefix, the reply starts inside a call the runtime opened (forced choice):
+ * the prefix is the call text already in the context. */
+static uint32_t reply(const ChatContext *c, uint32_t *pos, ChatStats *st, double turn_start, Calls *calls,
+                      const char *prefix, uint32_t prefix_len) {
     Model *m = c->model;
     uint32_t i, generated = 0, shown = 0;
     unsigned char last = 0;
     memset(calls, 0, sizeof(*calls));
+    if (prefix) {
+        open_call(calls);
+        memcpy(calls->text[0], prefix, prefix_len);
+        calls->len[0] = prefix_len;
+    }
     for (i = 0; i < c->max_reply; ++i) {
         uint32_t token;
         /* Never an empty reply: with the tool markers banned, the model's next
@@ -90,12 +98,13 @@ static uint32_t reply(const ChatContext *c, uint32_t *pos, ChatStats *st, double
 }
 
 /* Prefills `n` tokens already in c->ids, streams the reply and closes it. */
-static void assistant_turn(const ChatContext *c, uint32_t n, uint32_t *pos, ChatStats *st, Calls *calls) {
+static void assistant_turn(const ChatContext *c, uint32_t n, uint32_t *pos, ChatStats *st, Calls *calls,
+                           const char *prefix, uint32_t prefix_len) {
     double t0 = now_seconds(), t1;
     model_prefill(c->model, c->ids, n, *pos, 1);
     *pos += n;
     t1 = now_seconds();
-    st->generated += reply(c, pos, st, t0, calls);
+    st->generated += reply(c, pos, st, t0, calls, prefix, prefix_len);
     st->prefill_seconds += t1 - t0;
     st->decode_seconds += now_seconds() - t1;
     st->prompt_tokens += n;
@@ -172,20 +181,47 @@ static int all_grounded(const ChatContext *c, const Calls *calls) {
     return grounded;
 }
 
+/* The message clearly needs one tool (tools_forced_choice) but the model
+ * picked another: the runtime writes <tool_call> and the call up to the
+ * argument, and the model only writes the argument. Returns 0 when there is
+ * no forced choice or no room for it. */
+static int forced_reply(const ChatContext *c, uint32_t *pos, ChatStats *st, Calls *calls, int len) {
+    char prefix[CALL_BYTES];
+    const char *tool = tools_forced_choice(c->line);
+    uint32_t n, plen;
+    if (!tool || !(plen = (uint32_t)tools_call_prefix(tool, prefix, sizeof(prefix)))) return 0;
+    n = tokenizer_chat_turn(c->tok, "user", (const unsigned char *)c->line, (uint32_t)len, 1, c->ids);
+    c->ids[n++] = c->tool_open;
+    n += tokenizer_encode(c->tok, (const unsigned char *)prefix, plen, c->ids + n, 0, NULL);
+    if (*pos + n + c->max_reply + CLOSE_RESERVE > c->model->context) return 0;
+    fputs("(chamada refeita com ", stderr);
+    print_name(tool);
+    fputs(")\n", stderr);
+    offer_tools(c, 1);
+    assistant_turn(c, n, pos, st, calls, prefix, plen);
+    return 1;
+}
+
 /* The first reply to a user message. If any call in it does not fit the
  * message, the whole reply is rolled back (the KV cache is overwritten from
- * `start`, so the history never holds a call without its result) and the model
- * answers again with the tools banned. */
+ * `start`, so the history never holds a call without its result). Then, when
+ * the message clearly needs one tool, that call is opened for the model;
+ * otherwise, or if that call does not fit either, the model answers again with
+ * the tools banned. */
 static void first_reply(const ChatContext *c, uint32_t *pos, ChatStats *st, Calls *calls, int len) {
     const unsigned char *line = (const unsigned char *)c->line;
     uint32_t start = *pos, n = tokenizer_chat_turn(c->tok, "user", line, (uint32_t)len, 1, c->ids);
     offer_tools(c, c->tools && tools_relevant(c->line));
-    assistant_turn(c, n, pos, st, calls);
+    assistant_turn(c, n, pos, st, calls, NULL, 0);
     if (!calls->count || all_grounded(c, calls)) return;
     *pos = start;
+    if (forced_reply(c, pos, st, calls, len)) {
+        if (calls->count && all_grounded(c, calls)) return;
+        *pos = start;
+    }
     offer_tools(c, 0);
     n = tokenizer_chat_turn(c->tok, "user", line, (uint32_t)len, 1, c->ids);
-    assistant_turn(c, n, pos, st, calls);
+    assistant_turn(c, n, pos, st, calls, NULL, 0);
 }
 
 /* One tool round: run the calls, then the model answers with the tools banned
@@ -196,7 +232,7 @@ static int tool_round(const ChatContext *c, uint32_t *pos, ChatStats *st, Calls 
     n = tool_results(c, calls, st);
     if (*pos + n + c->max_reply + CLOSE_RESERVE > c->model->context) return 0;
     offer_tools(c, 0);
-    assistant_turn(c, n, pos, st, calls);
+    assistant_turn(c, n, pos, st, calls, NULL, 0);
     return 1;
 }
 
@@ -233,7 +269,7 @@ void chat_run(const ChatContext *c, ChatStats *st) {
     }
     st->prompt_tokens = system_len = pos = n;
     fprintf(stderr, "smolmoe " SMOLMOE_VERSION " - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.\n");
-    if (c->tools) fputs("Ferramentas: data_atual, dias_ate.\n", stderr);
+    if (c->tools) fputs("Ferramentas: data_atual, dias_ate, calcular.\n", stderr);
     for (;;) {
         int len, truncated;
         fputs("\n> ", stderr);

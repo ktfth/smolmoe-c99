@@ -143,6 +143,20 @@ describe.skipIf(!qwen)("chat tools", () => {
     expect(r.stdout.toString()).toContain("6 de novembro");
   }, SLOW);
 
+  test("does the arithmetic in calcular and answers in the Brazilian format", () => {
+    const r = chat("Quanto é 15% de 230?");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("[ferramenta] calcular");
+    expect(r.stdout.toString()).toContain("34,5");
+  }, SLOW);
+
+  test("redoes a wrong-tool call as calcular when the message is only a calculation", () => {
+    const r = chat("Um produto de 80 reais com 25% de desconto sai por quanto?");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("[ferramenta] calcular");
+    expect(r.stdout.toString()).toContain("60");
+  }, SLOW);
+
   test("--no-tools keeps the plain chat", () => {
     const r = chat("Quanto tempo falta para o natal?", ["--no-tools"]);
     expect(r.code).toBe(0);

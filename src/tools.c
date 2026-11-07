@@ -1,4 +1,5 @@
 #include "tools.h"
+#include "calc.h"
 #include "calendar.h"
 #include "util.h"
 
@@ -437,7 +438,40 @@ static int days_until(const Call *c, const char *user_text, const ToolClock *now
     return 1;
 }
 
-int tools_relevant(const char *user_text) { return date_or_time_mentioned(user_text); }
+/* ---- calcular --------------------------------------------------------------- */
+
+static const char *expression_arg(const Call *c) {
+    const Arg *a = find_arg(c, "expressao");
+    if (!a) a = find_arg(c, "expression");
+    return a && (a->kind == ARG_STRING || a->kind == ARG_NUMBER) ? a->value : NULL;
+}
+
+/* The runtime does the arithmetic; the user's message decides what "1.500" means. */
+static int calculate(const Call *c, const char *user_text, char result[TOOL_RESULT_MAX]) {
+    char err[96], formatted[64], escaped[2 * ARG_VALUE_MAX];
+    double value;
+    const char *expr = expression_arg(c);
+    if (!expr) return error_result(result, "falta o argumento \"expressao\", com a conta a fazer");
+    if (!calc_eval(expr, user_text, &value, err, sizeof(err))) return error_result(result, "não consegui calcular: %s", err);
+    calc_format(value, formatted, sizeof(formatted));
+    json_escape(escaped, sizeof(escaped), expr);
+    snprintf(result, TOOL_RESULT_MAX, "{\"resumo\": \"O resultado é %s.\", \"expressao\": \"%s\", \"resultado\": \"%s\"}",
+             formatted, escaped, formatted);
+    return 1;
+}
+
+int tools_relevant(const char *user_text) { return date_or_time_mentioned(user_text) || calc_relevant(user_text); }
+
+const char *tools_forced_choice(const char *user_text) {
+    return calc_relevant(user_text) && !date_question(user_text) ? "calcular" : NULL;
+}
+
+size_t tools_call_prefix(const char *tool, char *out, size_t cap) {
+    int w;
+    if (strcmp(tool, "calcular")) return 0;
+    w = snprintf(out, cap, "\n{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"");
+    return w < 0 || (size_t)w >= cap ? 0 : (size_t)w;
+}
 
 int tool_call_grounded(const char *call, size_t n, const char *user_text) {
     Call c;
@@ -447,7 +481,9 @@ int tool_call_grounded(const char *call, size_t n, const char *user_text) {
     reference.day = 1;
     if (!parse_call(call, n, &c)) return 0;
     if (!strcmp(c.name, "data_atual")) return 1;
-    return !strcmp(c.name, "dias_ate") && date_find(user_text, reference, &named, 1) > 0;
+    if (!strcmp(c.name, "calcular")) return expression_arg(&c) && calc_grounded(expression_arg(&c), user_text);
+    /* "3/4 de 200" is a fraction, not the 3rd of April. */
+    return !strcmp(c.name, "dias_ate") && date_question(user_text) && date_find(user_text, reference, &named, 1) > 0;
 }
 
 int tool_run(const char *call, size_t n, const char *user_text, const ToolClock *now, char name[TOOL_NAME_MAX],
@@ -460,6 +496,7 @@ int tool_run(const char *call, size_t n, const char *user_text, const ToolClock 
     snprintf(name, TOOL_NAME_MAX, "%s", c.name);
     if (!strcmp(c.name, "data_atual")) return current_date(now, result);
     if (!strcmp(c.name, "dias_ate")) return days_until(&c, user_text, now, result);
+    if (!strcmp(c.name, "calcular")) return calculate(&c, user_text, result);
     return error_result(result, "função desconhecida: %s", c.name);
 }
 
@@ -475,6 +512,12 @@ static const char *const TOOL_SPECS[] = {
     "quanto tempo falta para uma data.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"data\": "
     "{\"type\": \"string\", \"description\": \"A data ou o feriado exatamente como o usuário escreveu\"}}, "
     "\"required\": [\"data\"]}}}",
+    /* No example expression: models copy example numbers (DECISIONS, iteration 4). */
+    "{\"type\": \"function\", \"function\": {\"name\": \"calcular\", \"description\": "
+    "\"Faz uma conta exata com os números do usuário: soma, subtração, multiplicação, divisão, porcentagem, "
+    "potência e raiz. Use sempre que a resposta depender de um cálculo.\", \"parameters\": {\"type\": \"object\", "
+    "\"properties\": {\"expressao\": {\"type\": \"string\", \"description\": \"A conta, com + - * / ^ e "
+    "parênteses\"}}, \"required\": [\"expressao\"]}}}",
 };
 
 size_t tools_system_prompt(const char *system, char *out, size_t cap) {
