@@ -137,17 +137,20 @@ const SETS: Record<string, () => readonly Case[]> = {
 if (!SETS[values.set!]) throw new Error("--set must be dev, holdout, holdout2, calcdev or calc");
 const SET = SETS[values.set!]!();
 
-/* Every number in a reply, in each reading its shape allows: Brazilian (1.126,83; 34,5), US thousands
- * (1,126.83) or a plain decimal point (36.47). A "-" is a sign only after a space or "(" ("10-5" is not -5). */
-function numbersIn(text: string): number[] {
+/* Every number in a reply, read the Brazilian way (1.126,83; 34,5; 1776). The replies are in Portuguese, so
+ * "1,776" is one point seven seven six, not 1776. With `foreign`, the readings a US shape gives instead
+ * (1,126.83; 36.47): they are counted apart, never as right. A "-" is a sign only after a space or "(". */
+function numbersIn(text: string, foreign = false): number[] {
   const out: number[] = [];
   for (const m of text.matchAll(/\d+(?:[.,]\d+)*/g)) {
     const s = m[0], at = m.index ?? 0;
     const signed = at > 0 && text[at - 1] === "-" && (at === 1 || /[\s(]/.test(text[at - 2]!));
-    const readings = new Set<number>();
-    if (/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s) || /^\d+(,\d+)?$/.test(s)) readings.add(Number(s.replace(/\./g, "").replace(",", ".")));
-    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) readings.add(Number(s.replace(/,/g, "")));
-    if (/^\d+\.\d+$/.test(s)) readings.add(Number(s));
+    const readings: number[] = [];
+    if (!foreign && (/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s) || /^\d+(,\d+)?$/.test(s))) {
+      readings.push(Number(s.replace(/\./g, "").replace(",", ".")));
+    }
+    if (foreign && /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) readings.push(Number(s.replace(/,/g, "")));
+    if (foreign && /^\d+\.\d+$/.test(s)) readings.push(Number(s));
     for (const v of readings) out.push(signed ? -v : v);
   }
   return out;
@@ -196,13 +199,14 @@ function sessionTurns(): { tools: string[]; answer: string }[] {
 }
 
 const turns = values.session ? sessionTurns() : SET.map(ask);
-let toolOk = 0, answerOk = 0, bothOk = 0, answerCases = 0, controls = 0, falseCalls = 0;
+let toolOk = 0, answerOk = 0, bothOk = 0, answerCases = 0, controls = 0, falseCalls = 0, foreignOnly = 0;
 const rows: string[] = [];
 for (const [i, c] of SET.entries()) {
   const { tools, answer } = turns[i]!;
   const rightTool = c.tool ? tools.includes(c.tool) : tools.length === 0;
-  const rightNumber = c.value === undefined ||
-    numbersIn(answer).some((v) => Math.abs(v - c.value!) <= (c.tolerance ?? 0.01));
+  const near = (found: number[]) => found.some((v) => Math.abs(v - c.value!) <= (c.tolerance ?? 0.01));
+  const rightNumber = c.value === undefined || near(numbersIn(answer));
+  foreignOnly += Number(!rightNumber && near(numbersIn(answer, true)));
   const rightAnswer = rightNumber && (c.answer === undefined || answer.toLowerCase().includes(c.answer.toLowerCase())) &&
     !(c.tool === "dias_ate" && PAST.test(answer));
   toolOk += Number(rightTool);
@@ -223,4 +227,5 @@ console.log("| Pergunta | Ferramenta esperada | Chamada | Resultado |\n|---|---|
 console.log(rows.join("\n"));
 console.log(`\n${values.session ? "sessão única" : "chats novos"}${values["no-tools"] ? " (sem ferramentas)" : ""}: ` +
   `ferramenta certa: ${toolOk}/${SET.length}; resposta certa: ${answerOk}/${answerCases} (IC 95% ${wilson(answerOk, answerCases)}); ` +
-  `ambos: ${bothOk}/${SET.length}; chamadas indevidas nos controles: ${falseCalls}/${controls}`);
+  `ambos: ${bothOk}/${SET.length}; chamadas indevidas nos controles: ${falseCalls}/${controls}; ` +
+  `certas só no formato americano (não contam): ${foreignOnly}`);
