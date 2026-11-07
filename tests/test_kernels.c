@@ -164,16 +164,93 @@ static void test_x4_q5(DotQ8x4 fn, const char *name) {
     }
 }
 
-static void test_backends_bit_identical(void) {
+/* The SIMD backend this machine selects (AVX2 or NEON), reached through the
+ * dispatch pointers; NULL when only the scalar code runs here, which fails
+ * under SM_EXPECT_SIMD=1 (CI) so the comparisons cannot vanish silently. */
+static const char *simd_backend(void) {
+    const char *name = kernels_select(0), *expect = getenv("SM_EXPECT_SIMD");
+    if (!strcmp(name, "scalar")) {
+        CHECK(!(expect && !strcmp(expect, "1")), "SM_EXPECT_SIMD=1 but the scalar backend was selected");
+        puts("no SIMD backend on this build or CPU; backend identity skipped");
+        return NULL;
+    }
+    /* A pointer left on the scalar version would make every comparison pass trivially. */
 #if defined(SM_HAVE_AVX2)
+    CHECK(dot_q8 == dot_q8_avx2 && dot_q8_x4 == dot_q8_avx2_x4 && dot_q5 == dot_q5_avx2 &&
+          dot_q5_x4 == dot_q5_avx2_x4 && quantize_q8 == quantize_q8_avx2 && silu_mul == silu_mul_avx2,
+          "%s: a dispatch pointer does not reach the SIMD code", name);
+#elif defined(SM_HAVE_NEON)
+    CHECK(dot_q8 == dot_q8_neon && dot_q8_x4 == dot_q8_neon_x4 && dot_q5 == dot_q5_neon &&
+          dot_q5_x4 == dot_q5_neon_x4 && quantize_q8 == quantize_q8_neon && silu_mul == silu_mul_neon,
+          "%s: a dispatch pointer does not reach the SIMD code", name);
+#endif
+    return name;
+}
+
+/* Lane 0 gets -4098 from the first block, then d * s = (1 + 2^-12) * 4097 =
+ * 4098 + 2^-12 from the second, which rounds to 4098 (a tie, to even). With
+ * the kernels' two roundings the result is exactly 0; a fused multiply-add
+ * gives 2^-12. Fails if -ffp-contract=off is lost from the build. */
+static void test_no_fused_multiply_add(void) {
+    unsigned char w[2 * Q8_BLOCK_BYTES];
+    float xd[4 * 2], scale1 = 1.0f, scale2 = 1.0f + 1.0f / 4096, out[4];
+    int8_t xq[4 * 2 * QK];
+    uint32_t t;
+    memset(w, 0, sizeof(w));
+    memset(xq, 0, sizeof(xq));
+    memcpy(w, &scale1, 4);
+    memcpy(w + Q8_BLOCK_BYTES, &scale2, 4);
+    w[4] = 127, w[5] = 17;                                          /* 127 * -32 + 17 * -2 = -4098 */
+    w[Q8_BLOCK_BYTES + 4] = 127, w[Q8_BLOCK_BYTES + 5] = 1;         /* 127 * 32 + 1 * 33 = 4097 */
+    for (t = 0; t < 4; ++t) {
+        int8_t *row = xq + t * 2 * QK;
+        row[0] = -32, row[1] = -2, row[QK] = 32, row[QK + 1] = 33;
+        xd[2 * t] = xd[2 * t + 1] = 1.0f;
+    }
+    CHECK(dot_q8_scalar(w, xd, xq, 2) == 0.0f, "scalar dot fused a multiply-add: %a",
+          (double)dot_q8_scalar(w, xd, xq, 2));
+    if (!simd_backend()) return;
+    CHECK(dot_q8(w, xd, xq, 2) == 0.0f, "simd dot fused a multiply-add: %a", (double)dot_q8(w, xd, xq, 2));
+    dot_q8_x4(w, xd, xq, 2, 2, out);
+    for (t = 0; t < 4; ++t) CHECK(out[t] == 0.0f, "simd x4 row %u fused a multiply-add: %a", t, (double)out[t]);
+}
+
+/* Q5 blocks with every high bit set, none set and alternating, and Q8 weights
+ * at both extremes against activations of -127: the edges random data misses. */
+static void test_backend_edges(void) {
+    static const uint32_t HIGH[3] = {0xFFFFFFFFu, 0u, 0xAAAAAAAAu};
+    static const unsigned char LOW[3] = {0xF0, 0xFF, 0x5A};
+    unsigned char w5[3 * Q5_BLOCK_BYTES], w8[3 * Q8_BLOCK_BYTES];
+    float xd[3] = {1.0f, 0.5f, 2.0f}, one = 1.0f;
+    int8_t xq[3 * QK];
+    uint32_t b, j;
+    if (!simd_backend()) return;
+    for (b = 0; b < 3; ++b) {
+        unsigned char *blk = w5 + b * Q5_BLOCK_BYTES;
+        blk[0] = 0x00, blk[1] = 0x3c; /* f16 1.0 */
+        memcpy(blk + 2, &HIGH[b], 4);
+        memset(blk + 6, LOW[b], 16);
+        memcpy(w8 + b * Q8_BLOCK_BYTES, &one, 4);
+        for (j = 0; j < QK; ++j) {
+            w8[b * Q8_BLOCK_BYTES + 4 + j] = (unsigned char)(int8_t)(j % 2 ? -128 : 127);
+            xq[b * QK + j] = (int8_t)(b == 2 ? (j % 3 ? 127 : -127) : -127);
+        }
+    }
+    {
+        float a5 = dot_q5_scalar(w5, xd, xq, 3), b5 = dot_q5(w5, xd, xq, 3);
+        float a8 = dot_q8_scalar(w8, xd, xq, 3), b8 = dot_q8(w8, xd, xq, 3);
+        CHECK(memcmp(&a5, &b5, sizeof(a5)) == 0, "q5 high-bit edges: scalar %a simd %a", (double)a5, (double)b5);
+        CHECK(memcmp(&a8, &b8, sizeof(a8)) == 0, "q8 extreme weights: scalar %a simd %a", (double)a8, (double)b8);
+    }
+}
+
+static void test_backends_bit_identical(void) {
     unsigned char w[MAX_BLOCKS * Q8_BLOCK_BYTES];
     float x[MAX_BLOCKS * QK], xd[MAX_BLOCKS];
     int8_t xq[MAX_BLOCKS * QK];
     uint32_t nb, trial;
-    if (strcmp(kernels_select(0), "avx2")) {
-        puts("avx2 unavailable on this CPU; backend identity skipped");
-        return;
-    }
+    const char *simd = simd_backend();
+    if (!simd) return;
     for (trial = 0; trial < 200; ++trial) {
         uint32_t i;
         float a, b;
@@ -182,10 +259,10 @@ static void test_backends_bit_identical(void) {
         for (i = 0; i < nb * QK; ++i) x[i] = uniform(-50.0f, 50.0f);
         quantize_q8(x, nb * QK, xd, xq);
         a = dot_q8_scalar(w, xd, xq, nb);
-        b = dot_q8_avx2(w, xd, xq, nb);
-        CHECK(memcmp(&a, &b, sizeof(a)) == 0, "trial %u nb=%u scalar %a avx2 %a", trial, nb, a, b);
+        b = dot_q8(w, xd, xq, nb);
+        CHECK(memcmp(&a, &b, sizeof(a)) == 0, "trial %u nb=%u scalar %a %s %a", trial, nb, a, simd, b);
     }
-    test_x4(dot_q8_avx2_x4, "avx2");
+    test_x4(dot_q8_x4, simd);
     for (trial = 0; trial < 200; ++trial) {
         static unsigned char w5[MAX_BLOCKS * Q5_BLOCK_BYTES];
         uint32_t i;
@@ -195,18 +272,13 @@ static void test_backends_bit_identical(void) {
         for (i = 0; i < nb * QK; ++i) x[i] = uniform(-50.0f, 50.0f);
         quantize_q8(x, nb * QK, xd, xq);
         a = dot_q5_scalar(w5, xd, xq, nb);
-        b = dot_q5_avx2(w5, xd, xq, nb);
-        CHECK(memcmp(&a, &b, sizeof(a)) == 0, "q5 trial %u nb=%u scalar %a avx2 %a", trial, nb, a, b);
+        b = dot_q5(w5, xd, xq, nb);
+        CHECK(memcmp(&a, &b, sizeof(a)) == 0, "q5 trial %u nb=%u scalar %a %s %a", trial, nb, a, simd, b);
     }
-    test_x4_q5(dot_q5_avx2_x4, "avx2");
-#else
-    puts("built without SIMD; backend identity skipped");
-#endif
+    test_x4_q5(dot_q5_x4, simd);
 }
 
-#if defined(SM_HAVE_AVX2)
 static int same_bits(const void *a, const void *b, size_t n) { return memcmp(a, b, n) == 0; }
-#endif
 
 /* Distance in units in the last place between two finite floats of any sign. */
 static long ulp_distance(float a, float b) {
@@ -264,44 +336,46 @@ static void test_silu_backends(void) {
         int ok = isnan(want) ? isnan(got) : isinf(want) ? got == want : fabsf(got - want) <= 1e-6f * fabsf(want) + 1e-30f;
         CHECK(ok, "silu %u (gate %a): %a vs %a", i, (double)gate[i], (double)got, (double)want);
     }
-#if defined(SM_HAVE_AVX2)
-    if (strcmp(kernels_select(0), "avx2")) return;
+    if (!simd_backend()) return;
     for (n = 0; n <= 19; ++n) { /* every tail length */
         for (i = 0; i < n; ++i) up_scalar[i] = up_simd[i] = uniform(-4.0f, 4.0f);
         silu_mul_scalar(up_scalar, gate, n);
-        silu_mul_avx2(up_simd, gate, n);
-        CHECK(same_bits(up_scalar, up_simd, n * sizeof(float)), "silu avx2 differs at n=%u", n);
+        silu_mul(up_simd, gate, n);
+        CHECK(same_bits(up_scalar, up_simd, n * sizeof(float)), "silu simd differs at n=%u", n);
     }
     for (i = 0; i < 1003; ++i) up_scalar[i] = up_simd[i] = uniform(-4.0f, 4.0f);
     silu_mul_scalar(up_scalar, gate, 1003);
-    silu_mul_avx2(up_simd, gate, 1003);
-    CHECK(same_bits(up_scalar, up_simd, sizeof(up_simd)), "silu avx2 differs");
-#else
-    (void)n;
-#endif
+    silu_mul(up_simd, gate, 1003);
+    CHECK(same_bits(up_scalar, up_simd, sizeof(up_simd)), "silu simd differs");
 }
 
 static void test_quantize_backends(void) {
-#if defined(SM_HAVE_AVX2)
     static float x[MAX_BLOCKS * QK + 7];
     static int8_t qa[MAX_BLOCKS * QK + QK], qb[MAX_BLOCKS * QK + QK];
     float da[MAX_BLOCKS + 1], db[MAX_BLOCKS + 1];
     uint32_t trial, i;
-    if (strcmp(kernels_select(0), "avx2")) return;
+    if (!simd_backend()) return;
     for (trial = 0; trial < 300; ++trial) {
         uint32_t n = 1 + next() % (MAX_BLOCKS * QK + 7), nb = (n + QK - 1) / QK;
-        float spread = trial % 4 == 0 ? 1e-30f : trial % 4 == 1 ? 1e30f : 50.0f;
+        /* 1e-37 gives scales near FLT_MIN, 1e-39 subnormal inputs whose blocks quantize to zeros. */
+        float spread = trial % 6 == 0 ? 1e-30f : trial % 6 == 1 ? 1e30f : trial % 6 == 2 ? 1e-37f
+                     : trial % 6 == 3 ? 1e-39f : 50.0f;
         for (i = 0; i < n; ++i) x[i] = trial % 5 == 0 && i % 33 == 0 ? 0.0f : uniform(-spread, spread);
-        CHECK(quantize_q8_scalar(x, n, da, qa) == 0 && quantize_q8_avx2(x, n, db, qb) == 0, "quantize trial %u", trial);
+        CHECK(quantize_q8_scalar(x, n, da, qa) == 0 && quantize_q8(x, n, db, qb) == 0, "quantize trial %u", trial);
         CHECK(same_bits(da, db, nb * sizeof(float)) && same_bits(qa, qb, (size_t)nb * QK),
-              "quantize avx2 differs: trial %u n=%u", trial, n);
+              "quantize simd differs: trial %u n=%u", trial, n);
     }
-    for (i = 0; i < 64; ++i) x[i] = 1.0f;
-    x[40] = INFINITY;
-    CHECK(quantize_q8_avx2(x, 64, db, qb) == -1, "avx2 quantize accepted inf");
-    x[40] = NAN;
-    CHECK(quantize_q8_avx2(x, 64, db, qb) == -1, "avx2 quantize accepted NaN");
-#endif
+    /* Non-finite values in the first and last lanes of a vector, in a later block and in the partial tail. */
+    {
+        static const uint32_t AT[] = {0, 7, 31, 40, 66};
+        uint32_t k;
+        for (k = 0; k < sizeof(AT) / sizeof(AT[0]); ++k) {
+            for (i = 0; i < 67; ++i) x[i] = 1.0f;
+            x[AT[k]] = k % 2 ? NAN : INFINITY;
+            CHECK(quantize_q8(x, 67, db, qb) == -1, "simd quantize accepted %s at %u", k % 2 ? "NaN" : "inf", AT[k]);
+            CHECK(quantize_q8_scalar(x, 67, da, qa) == -1, "scalar quantize accepted a non-finite value at %u", AT[k]);
+        }
+    }
 }
 
 static void test_dot_f32(void) {
@@ -385,6 +459,8 @@ int main(void) {
     test_x4(dot_q8_scalar_x4, "scalar");
     test_x4_q5(dot_q5_scalar_x4, "scalar");
     test_backends_bit_identical();
+    test_no_fused_multiply_add();
+    test_backend_edges();
     test_exp_det();
     test_silu_backends();
     test_quantize_backends();

@@ -2,6 +2,15 @@
 
 ## Não lançado
 
+## 0.3.1 — 2026-11-07
+
+### Alterado
+- **ARM64 de 2,6× a 3,7× mais rápido** (Apple Silicon, Linux ARM, Termux): kernels NEON para os produtos
+  escalares Q8 e Q5, a quantização das ativações e a SwiGLU, com resultados idênticos bit a bit aos do código
+  escalar. No Mac do CI, a escrita no chat foi de 17,3 para 64,3 tokens/s. Detalhes em
+  [DECISIONS.md](docs/DECISIONS.md), iteração 9.
+- O CI roda os testes com o modelo real também no Windows e no macOS.
+
 ## 0.3.0 — 2026-11-07
 
 ### Adicionado
