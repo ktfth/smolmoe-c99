@@ -107,6 +107,11 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
     }
     for (i = 0; i < e->max_reply; ++i) {
         uint32_t token;
+        /* A stop before the first token leaves an empty reply: still a valid turn. */
+        if (e->sink.stop && e->sink.stop(e->sink.ctx)) {
+            e->stopped = 1;
+            break;
+        }
         /* Never an empty reply: with the tool markers banned, the model's next
          * choice after a call it wanted to make was often <|im_end|>. */
         e->banned[EOS_ID] = (unsigned char)(i == 0);
@@ -229,6 +234,15 @@ static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     return 1;
 }
 
+/* A reply stopped inside a tool call leaves the history with its message
+ * (from `start`); one stopped in plain text stays as far as it got. */
+static void drop_stopped_call(Engine *e, Calls *calls, uint32_t start) {
+    if (!calls->count) return;
+    calls->count = 0;
+    e->pos = start;
+    say(e, "(resposta interrompida durante uma ferramenta: a mensagem saiu da conversa)");
+}
+
 /* The first reply to a user message. If any call in it does not fit the
  * message, the whole reply is rolled back (the KV cache is overwritten from
  * `start`, so the history never holds a call without its result). Then, when
@@ -240,9 +254,17 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
     uint32_t start = e->pos, n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
     offer_tools(e, e->tools && tools_relevant(e->message));
     assistant_turn(e, n, calls, NULL, 0);
+    if (e->stopped) {
+        drop_stopped_call(e, calls, start);
+        return;
+    }
     if (!calls->count || all_grounded(e, calls)) return;
     e->pos = start;
     if (forced_reply(e, calls, len)) {
+        if (e->stopped) {
+            drop_stopped_call(e, calls, start);
+            return;
+        }
         if (calls->count && all_grounded(e, calls)) return;
         e->pos = start;
     }
@@ -270,12 +292,12 @@ static void answer(Engine *e, uint32_t len) {
     Calls calls;
     int fresh = e->pos == e->system_len;
     first_reply(e, &calls, len);
-    if (tool_round(e, &calls)) return;
+    if (e->stopped || tool_round(e, &calls)) return;
     if (!fresh) {
         e->pos = e->system_len;
         say(e, "(contexto cheio: conversa reiniciada)");
         first_reply(e, &calls, len);
-        if (tool_round(e, &calls)) return;
+        if (e->stopped || tool_round(e, &calls)) return;
     }
     /* Do not leave a call without its result in the history. */
     e->pos = e->system_len;
@@ -314,6 +336,7 @@ void engine_start(Engine *e) {
 
 int engine_send(Engine *e, const char *text, uint32_t len) {
     uint32_t n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)text, len, 1, e->ids);
+    e->stopped = 0;
     if (!fits(e, n)) {
         if (e->system_len + n + e->max_reply + CLOSE_RESERVE > e->model->context) {
             say(e, "(mensagem longa demais para o contexto; aumente --context)");
@@ -329,4 +352,7 @@ int engine_send(Engine *e, const char *text, uint32_t len) {
     return 1;
 }
 
-void engine_reset(Engine *e) { e->pos = e->system_len; }
+void engine_reset(Engine *e) {
+    e->pos = e->system_len;
+    e->stopped = 0;
+}

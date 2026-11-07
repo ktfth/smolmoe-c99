@@ -41,6 +41,12 @@ jobs:
           bun-version: 1.2.15
       - name: build
         run: make -j4 CC=${{ matrix.cc }} all scalar
+      # The desktop window against the system's GLFW (Win32 and Cocoa builds are in the other jobs).
+      - name: desktop window
+        if: matrix.cc == 'gcc'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libglfw3-dev
+          make -j4 gui
       # One job runs the real-model tests (Qwen goldens, chat memory); the rest skip them.
       - name: models
         if: matrix.cc == 'gcc'
@@ -60,6 +66,7 @@ jobs:
         run: make CC=${{ matrix.cc }} test
         env:
           SM_EXPECT_WASM: ${{ matrix.cc == 'gcc' && '1' || '' }}
+          SM_EXPECT_GUI: ${{ matrix.cc == 'gcc' && '1' || '' }}
       - name: sanitize
         run: make CC=${{ matrix.cc }} sanitize
 
@@ -79,7 +86,7 @@ jobs:
         with:
           bun-version: 1.2.15
       - name: build
-        run: make -j4 all scalar
+        run: make -j4 all scalar gui
       # Real-model tests on Windows too: the chat tools and "!" in a real console.
       - name: models
         run: bun scripts/fetch-models.ts qwen2.5-0.5b-instruct tinystories-15m
@@ -87,8 +94,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - name: test
         run: make test
+        env:
+          SM_EXPECT_GUI: "1"
       - name: release binary
-        run: make release
+        run: make release release-gui
       - uses: actions/upload-artifact@v6
         with:
           name: smolmoe-windows-x64
@@ -96,6 +105,7 @@ jobs:
             build/release/smolmoe.exe
             build/release/smolmoe-bundle.exe
             build/release/smolmoe-quantize.exe
+            build/release/smolmoe-gui.exe
 
   macos:
     runs-on: macos-latest
@@ -110,7 +120,13 @@ jobs:
         run: bun scripts/fetch-models.ts qwen2.5-0.5b-instruct tinystories-15m
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: desktop window
+        run: |
+          brew install glfw
+          make -j4 CC=clang gui
       - name: build and test
         run: make -j4 CC=clang test
+        env:
+          SM_EXPECT_GUI: "1"
       - name: NEON against scalar
         run: bun scripts/bench.ts --runs 3 --ab build/smolmoe-scalar

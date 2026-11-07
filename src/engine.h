@@ -1,5 +1,6 @@
 /* One conversation with a chat model, independent of where its text goes: the
- * terminal chat (chat.c) and the browser build drive the same engine.
+ * terminal chat (chat.c), the browser build (web.c) and the desktop window
+ * (desktop.c) drive the same engine.
  * The KV cache is kept across messages, so each one only processes new tokens.
  * With tools on, calls the model writes between <tool_call> markers are run by
  * the runtime and their results fed back before the model answers. */
@@ -8,6 +9,7 @@
 
 #include <stdint.h>
 
+#include "engine_sink.h"
 #include "model.h"
 #include "sampler.h"
 #include "tokenizer.h"
@@ -17,21 +19,6 @@
 #define CHAT_DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
 /* Room for the "# Tools" section the chat appends to the system prompt. */
 #define TOOLS_PROMPT_BYTES 4096u
-
-/* Where the engine's output goes. The pointers passed to the callbacks are
- * valid only during the call. */
-typedef struct EngineSink {
-    void *ctx;
-    /* Reply bytes as they are generated; a UTF-8 character may be split
-     * across calls, and n may be 0. */
-    void (*text)(void *ctx, const unsigned char *bytes, uint32_t n);
-    /* After each reply: anything held back can be written out now. */
-    void (*reply_end)(void *ctx);
-    /* One line about what the runtime did (a tool call, a restart), without
-     * the line ending. The tool name and call the model wrote have their
-     * control bytes replaced; a tool result is JSON. */
-    void (*notice)(void *ctx, const char *line);
-} EngineSink;
 
 typedef struct ChatStats {
     uint32_t turns, prompt_tokens, generated, tool_calls;
@@ -54,6 +41,7 @@ typedef struct Engine {
     EngineSink sink;
     /* State. */
     uint32_t pos, system_len;
+    int stopped;            /* the last engine_send() was ended by sink.stop */
     const char *message;    /* the user message being answered */
     ChatStats stats;
 } Engine;
@@ -72,7 +60,10 @@ void engine_start(Engine *e);
 
 /* Answers one user message: len bytes followed by a NUL (the tools read it as a
  * string). When the conversation no longer fits, it restarts from the system
- * prompt first. Returns 0, with a notice, when the message alone does not fit. */
+ * prompt first. Returns 0, with a notice, when the message alone does not fit.
+ * When sink.stop ends a reply, e->stopped is set and the reply stays in the
+ * history as far as it got, unless it was inside a tool call: then the whole
+ * message leaves the history, so it never holds a call without its result. */
 int engine_send(Engine *e, const char *text, uint32_t len);
 
 /* Forgets the conversation, keeping the processed system prompt. */

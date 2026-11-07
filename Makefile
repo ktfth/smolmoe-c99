@@ -2,10 +2,11 @@
 #   make                 optimized binaries -> build/smolmoe[.exe], build/smolmoe-quantize[.exe]
 #   make test            kernel unit tests + bun integration suite
 #   make sanitize        ASan/UBSan build and tests (Linux/macOS)
-#   make release         stripped, statically linked where supported
+#   make release         stripped, statically linked where supported (release-gui: the same for the window)
 #   make qwen-pt         dist/qwen-pt[.exe]: runtime + Qwen weights in one file
 #   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
 #   make web             build/web: the browser page (needs zig and bun)
+#   make gui             build/smolmoe-gui[.exe]: the desktop window (C++17; GLFW on Linux/macOS)
 
 CC      ?= cc
 OPT     ?= -O3
@@ -43,6 +44,7 @@ TEST_TOOLS := $(BUILD)/test-tools$(EXE)
 TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 TEST_CALC  := $(BUILD)/test-calc$(EXE)
 TEST_SHELL := $(BUILD)/test-shell$(EXE)
+TEST_DESKTOP := $(BUILD)/test-desktop$(EXE)
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
@@ -51,7 +53,7 @@ OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
 OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
-.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt wasi web
+.PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -96,6 +98,9 @@ $(TEST_CALC): $(BUILD)/tests/test_calc.o $(OBJ_LIB)
 $(TEST_SHELL): $(BUILD)/tests/test_shell.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_DESKTOP): $(BUILD)/tests/test_desktop.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 $(BUILD)/console-input.exe: tests/support/console_input.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) $(STD) $(PLATFORM) $< -o $@
@@ -105,18 +110,19 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
 	$(TEST_SHELL)
+	$(TEST_DESKTOP)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
 SLOW_TEST_MS ?= 180000
 
-test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE) $(CONSOLE_INPUT)
+test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE) $(CONSOLE_INPUT) $(TEST_DESKTOP)
 	SMOLMOE_BUILD=$(BUILD) SMOLMOE_SLOW_MS=$(SLOW_TEST_MS) bun test --timeout $(TEST_TIMEOUT_MS)
 
 test: test-unit test-integration
@@ -132,6 +138,8 @@ RELEASE_DIR ?= build/release
 RELEASE_LDFLAGS ?=
 release:
 	$(MAKE) BUILD=$(RELEASE_DIR) OPT="-O3" LDFLAGS="-s $(STATIC) $(RELEASE_LDFLAGS)" all
+release-gui: release
+	$(MAKE) BUILD=$(RELEASE_DIR) OPT="-O3" LDFLAGS="-s $(STATIC) $(RELEASE_LDFLAGS)" gui
 
 # Converted weights from the GitHub release, SHA-256 verified (docs/MODELS.md).
 models:
@@ -204,6 +212,49 @@ $(WEB)/app.js: $(WEB_TS)
 web: $(WEB)/smolmoe.wasm $(WEB)/app.js web/index.html web/vercel.json web/models.json
 	cp web/index.html web/vercel.json web/models.json $(WEB)/
 
+# The desktop window (gui/, docs/DESKTOP.md): Dear ImGui (third_party/imgui, MIT)
+# on Win32 + Direct3D 11, or on GLFW + OpenGL 3 (the GLFW development package:
+# libglfw3-dev, brew install glfw). The runtime objects are the C ones above.
+GUI        := $(BUILD)/smolmoe-gui$(EXE)
+IMGUI      := third_party/imgui
+CXXSTD     := -std=c++17
+GUI_FLAGS   = $(OPT) $(CXXSTD) -Wall -Wextra -Wpedantic -Werror -Isrc -I$(IMGUI) -I$(IMGUI)/backends $(GUI_CFLAGS) \
+	$(PLATFORM) $(CXXFLAGS) -MMD -MP
+IMGUI_FLAGS = $(OPT) $(CXXSTD) -I$(IMGUI) $(GUI_CFLAGS) $(PLATFORM) $(CXXFLAGS) -MMD -MP
+IMGUI_CORE := imgui imgui_draw imgui_tables imgui_widgets misc/cpp/imgui_stdlib
+ifeq ($(OS),Windows_NT)
+  GUI_MAIN       := platform_win32
+  IMGUI_BACKENDS := backends/imgui_impl_win32 backends/imgui_impl_dx11
+  GUI_LIBS        = -mwindows -ld3d11 -ld3dcompiler -ldxgi -ldwmapi -lgdi32 -lcomdlg32 -ladvapi32
+else ifeq ($(shell uname -s),Darwin)
+  GUI_MAIN       := platform_glfw
+  IMGUI_BACKENDS := backends/imgui_impl_glfw backends/imgui_impl_opengl3
+  # Homebrew's GLFW, also without pkg-config.
+  GUI_CFLAGS      = $(shell pkg-config --cflags glfw3 2>/dev/null || echo -I$$(brew --prefix)/include)
+  GUI_LIBS        = $(shell pkg-config --libs glfw3 2>/dev/null || echo -L$$(brew --prefix)/lib -lglfw) \
+	-framework OpenGL -framework Cocoa -framework IOKit
+else
+  GUI_MAIN       := platform_glfw
+  IMGUI_BACKENDS := backends/imgui_impl_glfw backends/imgui_impl_opengl3
+  GUI_CFLAGS      = $(shell pkg-config --cflags glfw3)
+  GUI_LIBS        = $(shell pkg-config --libs glfw3) -lGL -ldl
+endif
+GUI_OBJ    := $(addprefix $(BUILD)/gui/,$(GUI_MAIN).o session.o view.o args.o) \
+	$(addprefix $(BUILD)/imgui/,$(addsuffix .o,$(IMGUI_CORE) $(IMGUI_BACKENDS)))
+
+$(BUILD)/gui/%.o: gui/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(GUI_FLAGS) -c $< -o $@
+
+$(BUILD)/imgui/%.o: $(IMGUI)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(IMGUI_FLAGS) -c $< -o $@
+
+$(GUI): $(GUI_OBJ) $(BUILD)/obj/desktop.o $(OBJ_LIB)
+	$(CXX) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(GUI_LIBS) $(LDLIBS)
+
+gui: $(GUI)
+
 bench: $(BIN)
 	bun scripts/bench.ts
 
@@ -211,4 +262,5 @@ clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
 -include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
+	$(BUILD)/tests/test_desktop.d $(BUILD)/obj/desktop.d $(GUI_OBJ:.o=.d) \
 	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/mt/web.d $(WASI)/tests/test_kernels.d

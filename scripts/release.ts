@@ -8,10 +8,13 @@
  *       OUT/qwen-pt-PLATFORM[.exe]          runtime + Qwen2.5-0.5B: Portuguese chat in one file
  *       OUT/tinystories-PLATFORM[.exe]      runtime + TinyStories 15M (English stories)
  *       OUT/smolmoe-tools-PLATFORM.tar.gz   smolmoe-bundle and smolmoe-quantize
+ *       OUT/smolmoe-gui-PLATFORM[.exe]      the desktop window, when BIN has one (make release-gui)
+ *       OUT/qwen-pt-gui-PLATFORM[.exe]      the window + Qwen2.5-0.5B: double-click and chat
  *     BIN holds a release build. --bundler is a smolmoe-bundle that runs on this machine, when BIN's
  *     cannot (an arm64 build on x64). The weights come from models/ (bun scripts/fetch-models.ts).
  *   smoke DIR PLATFORM
- *     runs each executable in DIR once; the Qwen chat must answer "Quanto é 7 mais 5?" with 12.
+ *     runs each executable in DIR once; the Qwen chat must answer "Quanto é 7 mais 5?" with 12. The window
+ *     programs only print their version: drawing needs a desktop.
  *   models BIN OUT WORK
  *     single-file models (config and tokenizer embedded): Qwen Q8 and Q5 and TinyStories from
  *     models/, and Phi-4-mini converted from its pinned source in WORK, checked against
@@ -39,6 +42,8 @@ const STORIES = "tinystories-15m";
 const PHI = "phi-4-mini-instruct";
 
 export const exeSuffix = (p: Platform): string => (p === "windows-x64" ? ".exe" : "");
+/** Platforms whose release must carry the desktop window (elsewhere it needs the system's GLFW). */
+export const GUI_PLATFORMS: ReadonlySet<Platform> = new Set<Platform>(["windows-x64"]);
 
 function isPlatform(s: string | undefined): s is Platform {
   return (PLATFORMS as readonly string[]).includes(s ?? "");
@@ -126,6 +131,13 @@ function packagePlatform(platform: Platform, binDir: string, outDir: string, bun
   }
   /* The archive name is relative: GNU tar on Windows would read "C:" as a host. BIN may be read-only
    * (a Docker build), so LICENSE comes from the repository root. */
+  const gui = join(bin, `smolmoe-gui${x}`);
+  if (!existsSync(gui) && GUI_PLATFORMS.has(platform)) throw new Error(`${gui} is missing: run make release-gui`);
+  if (existsSync(gui)) {
+    copyFileSync(gui, join(out, `smolmoe-gui-${platform}${x}`));
+    run([bundler, ...modelFiles(QWEN, "tokenizer.qbp"), "--exe", gui, "--out", join(out, `qwen-pt-gui-${platform}${x}`)],
+      "bundling qwen-pt-gui");
+  }
   run(["tar", "-czf", `smolmoe-tools-${platform}.tar.gz`, "-C", bin, `smolmoe-bundle${x}`, `smolmoe-quantize${x}`,
     "-C", ROOT, "LICENSE"], "packing the tools", out);
 }
@@ -147,6 +159,14 @@ function smoke(dir: string, platform: Platform): void {
     if (answer.trim() !== "12") throw new Error(`qwen-pt answered ${JSON.stringify(answer)}, not 12`);
   for (const story of runEverySlice(platform, at("tinystories"), ["--prompt", "Once upon a time", "--tokens", "8"]))
     if (!story.trim()) throw new Error("tinystories wrote nothing");
+  for (const name of ["smolmoe-gui", "qwen-pt-gui"]) {
+    if (!existsSync(at(name))) {
+      if (GUI_PLATFORMS.has(platform)) throw new Error(`${name} is missing from ${dir}`);
+      continue;
+    }
+    for (const v of runEverySlice(platform, at(name), ["--version"]))
+      if (!/^smolmoe-gui \d+\.\d+\.\d+/.test(v)) throw new Error(`unexpected ${name} --version: ${v}`);
+  }
   console.log(`${platform}: smoke test passed`);
 }
 

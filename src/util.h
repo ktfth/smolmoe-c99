@@ -22,6 +22,10 @@
 #endif
 
 SM_NORETURN void die(const char *fmt, ...) SM_PRINTF(1, 2);
+/* Called by die() with the message, after printing it and before exiting. It
+ * may also never return: the desktop chat parks the failing thread and shows
+ * the message in its window. NULL (the default): nothing. */
+void die_set_handler(void (*handler)(const char *message));
 
 /* Counted heap. Every runtime allocation (tokenizer, activations, KV cache,
  * thread pool) is charged against a fixed budget and zero-initialized.
