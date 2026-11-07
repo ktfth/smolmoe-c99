@@ -82,15 +82,19 @@ smolmoe-gui [MODELO.smoe] [--context N] [--threads N]
 
 ```sh
 make gui            # build/smolmoe-gui[.exe]
-make release-gui    # build/release/smolmoe-gui[.exe]: otimizado, sem símbolos, estático no Windows
+make release-gui    # build/release/smolmoe-gui[.exe]: otimizado e sem símbolos
+make qwen-gui       # dist/qwen-pt-gui[.exe]: a janela com o Qwen dentro (há um atalho por modelo: make help)
 ```
+
+No Windows, esses comandos funcionam no PowerShell e no cmd também ([CAMINHOS.md](CAMINHOS.md#7-compilar-da-fonte)).
 
 - **Requisitos:** um compilador C++17 (g++ ou clang++) além do C99 do resto.
   - **Windows:** o MSYS2 UCRT64 com `mingw-w64-ucrt-x86_64-gcc`, que já traz o g++ e os cabeçalhos do Direct3D 11.
   - **Linux e macOS:** a GLFW 3.3 ou mais nova e o `pkg-config` (no macOS, sem ele, o Makefile procura a GLFW do
     Homebrew).
-- **Windows:** o `.exe` de release é estático e só depende de DLLs que vêm com o Windows 10 e 11, inclusive o
-  `D3DCOMPILER_47.dll`.
+- **Windows:** o `.exe` é sempre estático, também no build de desenvolvimento, e só depende de DLLs que vêm com o
+  Windows 10 e 11, inclusive o `D3DCOMPILER_47.dll`. Com as DLLs do MinGW, a janela não abria quando outra pasta do
+  PATH tinha um `libstdc++` mais antigo (erro 0xC0000139).
 - **Linux e macOS:** o binário usa a GLFW e o OpenGL do sistema, e por isso ainda não vai no Release (veja os limites).
 
 ## Como funciona

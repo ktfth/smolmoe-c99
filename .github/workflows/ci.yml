@@ -47,6 +47,10 @@ jobs:
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q libglfw3-dev
           make -j4 gui
+      # The model aliases resolve (a dry run: no weights are bundled here).
+      - name: make help and the model aliases
+        if: matrix.cc == 'gcc'
+        run: make help > /dev/null && make -n all-models > /dev/null
       # One job runs the real-model tests (Qwen goldens, chat memory); the rest skip them.
       - name: models
         if: matrix.cc == 'gcc'
@@ -78,15 +82,28 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: msys2/setup-msys2@v2
+        id: msys2
         with:
           msystem: UCRT64
-          install: make mingw-w64-ucrt-x86_64-gcc
+          install: make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
           path-type: inherit
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.15
       - name: build
         run: make -j4 all scalar gui
+      # The same Makefile from PowerShell with native Windows make (mingw32-make), which has
+      # no POSIX shell on PATH: the Makefile finds the one next to the compiler (docs/CAMINHOS.md).
+      - name: build from PowerShell
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;$env:PATH"
+          mingw32-make help
+          mingw32-make -j4 BUILD=build/pwsh all gui
+          mingw32-make -n all-models
+          ./build/pwsh/smolmoe.exe --version
+          ./build/pwsh/smolmoe-gui.exe --version
       # Real-model tests on Windows too: the chat tools and "!" in a real console.
       - name: models
         run: bun scripts/fetch-models.ts qwen2.5-0.5b-instruct tinystories-15m
@@ -124,6 +141,9 @@ jobs:
         run: |
           brew install glfw
           make -j4 CC=clang gui
+      # Apple's make is 3.81: the help and the model aliases must still resolve.
+      - name: make help and the model aliases
+        run: make help > /dev/null && make -n CC=clang all-models > /dev/null
       - name: build and test
         run: make -j4 CC=clang test
         env:
