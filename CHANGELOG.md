@@ -11,6 +11,15 @@
   - Uma chamada que não combina com a mensagem é descartada.
   - Medição: 12 de 15 certas em perguntas novas, que não foram usadas no desenho. Os limites conhecidos estão em
     [DECISIONS.md](docs/DECISIONS.md), iteração 4.
+- **Ferramenta `calcular`:** o modelo escreve a conta e o programa a calcula, com símbolos ou palavras ("15% de
+  230", "dois mil e quinhentos") e números no formato brasileiro.
+  - Todo número da conta precisa vir da mensagem.
+  - Quando a mensagem é só uma conta e o modelo escolhe outra ferramenta, o runtime abre a chamada de `calcular`.
+  - **Medição às cegas:** 12 de 40 contas certas com ela e 11 de 40 sem ela. Ela também faz errar contas que o modelo
+    acertava sozinho, quando ele monta a fórmula errada. Entrou por decisão do usuário; detalhes em
+    [DECISIONS.md](docs/DECISIONS.md), iteração 7.
+- `scripts/eval-tools.ts`: conjuntos da calculadora (`--set calcdev` e `--set calc`, às cegas), linha de base sem
+  ferramentas (`--no-tools`), intervalo de confiança de 95% e leitura de números só no formato brasileiro.
 - `--no-tools` desliga as ferramentas. `--now AAAA-MM-DDTHH:MM` fixa o relógio, para execuções reproduzíveis.
 - Campo `tool_calls` nas estatísticas do chat.
 - `scripts/eval-tools.ts`: mede a escolha de ferramenta e a resposta.
@@ -42,14 +51,9 @@
 - Exponencial própria (corretamente arredondada em mais de 99,99% das entradas), idêntica no escalar e no AVX2 e em
   qualquer sistema operacional. Os números mudam no último bit em casos raros. A perplexidade foi de 11,3885 para
   11,3681.
-- Com as ferramentas ligadas, o chat leva cerca de 5 s a mais para abrir (o prompt de sistema vai de 31 para 279
-  tokens). `--no-tools` volta ao comportamento anterior.
+- Com as ferramentas ligadas, o chat leva cerca de 5,5 s a mais para abrir: o prompt de sistema vai de 31 para 397
+  tokens (279 com as de data e mais 118 da `calcular`). `--no-tools` volta ao comportamento anterior.
 - `.env` e `.env.*` ficam fora do Git (o token do Hugging Face mora ali).
-
-### Medido e não incluído
-- **Ferramenta `calcular`.** No teste às cegas, o Qwen 0,5B acertou 12 de 40 contas com ela e 11 de 40 sem ela, e
-  ela fez errar 7 contas que o modelo acertava sozinho. O código está no ramo `feat/calcular`. Detalhes em
-  [DECISIONS.md](docs/DECISIONS.md), iteração 7.
 
 ## 0.2.0 — 2026-11-06
 

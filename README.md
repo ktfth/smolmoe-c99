@@ -77,7 +77,7 @@ Saída real, sem edição:
 |---|---|---|
 | (sem `--prompt`) / `-i` | — | Chat multi-turno no terminal (modelos de chat) |
 | `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno com `--prompt` |
-| `--no-tools` | ferramentas ligadas no chat | Chat sem as funções de data (abre cerca de 5 s mais rápido) |
+| `--no-tools` | ferramentas ligadas no chat | Chat sem as funções de data e de conta (abre cerca de 5,5 s mais rápido) |
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa a hora que as ferramentas usam (execuções reproduzíveis) |
 | `--tokens N` | 64 (512 no chat) | Máximo de tokens novos; para no EOS |
 | `--temperature X` | 0 (guloso) | Amostragem quando > 0 |
@@ -118,6 +118,26 @@ usou a data da própria pergunta ("natal"). Para isso existe o aterramento.
   - Às vezes escreve "atrás" em vez de "faltam".
 
   Os detalhes estão em [docs/DECISIONS.md](docs/DECISIONS.md), iteração 4.
+
+### Função no chat: contas (`calcular`)
+
+O modelo escreve a conta, e o programa a calcula em double e responde no formato brasileiro:
+
+```text
+> Quanto é 15% de 230?
+[ferramenta] calcular: {"name": "calcular", "arguments": {"expressao": "15% de 230"}} -> {"resumo": "O resultado é 34,5.", ...}
+O resultado é 34,5.
+```
+
+- Entende símbolos e palavras ("mais", "vezes", "dividido por", "15% de 230", "raiz(144)") e números como "1.234,56"
+  ou "dois mil e quinhentos".
+- Todo número da conta tem que vir da mensagem (exceto constantes pequenas e porcentagens). Uma conta com número
+  inventado é descartada.
+- **Limite medido, e importante:** o programa calcula certo a conta que recebe, mas quem escreve a conta é o modelo.
+  No teste às cegas, o Qwen 0,5B acertou 12 de 40 contas com a ferramenta e 11 de 40 sem ela. Ela acerta conta direta
+  e porcentagem simples, mas faz errar quando o modelo monta a fórmula errada (troco como "48,20 − 50" dá R$ −1,80).
+  O aviso `[ferramenta]` mostra a conta escrita. Os detalhes estão em [docs/DECISIONS.md](docs/DECISIONS.md),
+  iteração 7.
 
 ### Q5: 39% menos memória
 

@@ -46,9 +46,9 @@ rodar**: os dois atuais já serviram para decidir.
 
 ## Ferramentas novas (plano combinado; cada uma medida com perguntas novas)
 
-1. **`calcular`: reprovada no teste às cegas com o Qwen 0,5B.** Foram 12 de 40 contas certas com ela e 11 de 40 sem
-   ela. O modelo escreve a fórmula errada, e o programa calcula exatamente a conta errada. O código está no ramo
-   `feat/calcular`. Reavaliar quando o Phi-4-mini tiver ferramentas ([DECISIONS.md](DECISIONS.md), iteração 7).
+1. **`calcular`: no `main` por decisão do usuário, mas empatada no teste às cegas com o Qwen 0,5B.** Foram 12 de 40
+   contas certas com ela e 11 de 40 sem ela. O modelo escreve a fórmula errada, e o programa calcula exatamente a
+   conta errada. Reavaliar quando o Phi-4-mini tiver ferramentas ([DECISIONS.md](DECISIONS.md), iteração 7).
 2. **Ajudante de comandos para bash e PowerShell.** O modelo sugere um comando completo. No Windows o padrão é
    PowerShell; bash onde existir (Linux, macOS, Git Bash, WSL).
    - **Primeiro a hipótese, às cegas.** Antes de construir as conferências e a confirmação, medir num conjunto novo o

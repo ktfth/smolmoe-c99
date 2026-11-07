@@ -456,14 +456,12 @@ em 1038.
   de Q/K, atenção local de 512 tokens, duas frequências de RoPE, cabeça de tamanho próprio) e um tokenizer
   SentencePiece de 262 mil peças.
 
-## Iteração 7: a calculadora não passou no teste às cegas
+## Iteração 7: a calculadora não passou no teste às cegas, e entrou por decisão do usuário
 
 **Pedido:** ferramentas novas, começando por `calcular`. Motivo: na iteração 6, o Qwen 0,5B respondeu "030" para
 "15% de 230" e 50 para um desconto de 25% em 80.
 
 ### O que foi construído
-
-O código está no ramo `feat/calcular` e não entrou no `main`:
 
 - **Avaliador de expressões em C**, em double. Entende símbolos e palavras ("mais", "vezes", "15% de 230"), número no
   formato brasileiro, e devolve o resultado formatado do mesmo jeito ("1.126,83").
@@ -515,7 +513,13 @@ e o ganho esperado é pequeno pelo mesmo motivo: a fórmula continuaria sendo do
 
 ### Decisão
 
-- `calcular` fica fora do `main`. O código e os testes estão no ramo `feat/calcular`.
+- A recomendação técnica era deixar `calcular` fora do `main`. **O usuário decidiu incluí-la**, e ela vem ligada por
+  padrão, junto com `data_atual` e `dias_ate`. O resultado às cegas continua valendo: com o Qwen 0,5B ela não melhora
+  o placar e faz errar contas que o modelo acertava sozinho. `--no-tools` desliga todas as ferramentas.
+- **Ver a conta que o modelo escreveu:** o aviso `[ferramenta] calcular: ...` (no stderr) mostra a expressão e o
+  resultado. É por ele que se separa erro de fórmula de erro de conta.
+- **Custo:** a declaração da `calcular` soma 118 tokens ao prompt de sistema, que vai a 397. Abrir o chat leva cerca
+  de 5,9 s com as ferramentas e 0,4 s com `--no-tools` (mediana de 3, alternadas).
 - **Reavaliar com um modelo que escreve fórmulas melhor.** Sem ferramenta, o Phi-4-mini já acertou "15% de 230" e o
   desconto (iteração 6), mas antes precisa de ferramentas no chat. O protocolo é o mesmo: conjunto novo às cegas e
   linha de base pareada.
@@ -532,8 +536,9 @@ e o ganho esperado é pequeno pelo mesmo motivo: a fórmula continuaria sendo do
    validado contra o `tokenizers` do Hugging Face em 11 casos.
 4. **Determinismo como contrato testado.** Ele não depende mais de abrir mão de desempenho.
 5. **Português local, de verdade.** A resposta "12" sai em 0,86 s no Windows nativo, num notebook.
-6. **Ferramenta só entra se passar às cegas.** Ela é medida num conjunto escrito sem ver o código e comparada, pergunta
-   a pergunta, com o modelo sem ela. A calculadora não passou (iteração 7) e ficou de fora.
+6. **Toda ferramenta é medida às cegas.** Ela é medida num conjunto escrito sem ver o código e comparada, pergunta a
+   pergunta, com o modelo sem ela, e o resultado fica registrado mesmo quando é ruim. A calculadora empatou (iteração
+   7) e entrou por decisão do usuário, com o número publicado.
 
 ## Próximas demolições candidatas
 
