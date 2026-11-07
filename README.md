@@ -21,7 +21,7 @@ O mesmo motor de conversa roda em três interfaces, e nenhuma manda texto para f
 
 | Caminho | Como começar | Guia |
 |---|---|---|
-| **Janela** | Windows: `qwen-pt-gui-windows-x64.exe` do Release (a partir da primeira versão depois da 0.3.1), com dois cliques. Linux e macOS: `make gui`. | [DESKTOP.md](docs/DESKTOP.md) |
+| **Janela** | Windows: `qwen-pt-gui-windows-x64.exe` do Release (desde a v0.4.0), com dois cliques. Linux e macOS: `make gui`. | [DESKTOP.md](docs/DESKTOP.md) |
 | **Chat no terminal** | `qwen-pt-<sistema>` do Release: Windows, Linux, macOS e Termux. | [INSTALL.md](docs/INSTALL.md) |
 | **Navegador, local** | `make ZIG=... web` e `bun scripts/serve-web.ts`. Depois abra o `.smoe` na página. | [WEB.md](docs/WEB.md) |
 | **Outro modelo** | `smolmoe-<sistema> --model phi-4-mini-instruct.smoe` (ou o Q5) | [INSTALL.md](docs/INSTALL.md) |
@@ -262,7 +262,7 @@ models/     pesos locais (fora do git)
 - O roteamento MoE é testado só com checkpoints sintéticos. **Nenhum modelo MoE treinado é suportado ainda**; os modelos
   incluídos são densos, representados como um expert sempre ativo.
 - Não é compatível com Kimi K3 nem com GGUF, e ainda não há servidor HTTP (está no [roadmap](docs/ROADMAP.md)).
-- A janela vem pronta só para Windows, a partir da primeira versão depois da 0.3.1. No Linux e no macOS, ela compila no CI, mas ainda não foi aberta à mão
+- A janela vem pronta só para Windows, desde a v0.4.0. No Linux e no macOS, ela compila no CI, mas ainda não foi aberta à mão
   ([DESKTOP.md](docs/DESKTOP.md)).
 - O Qwen 0.5B é pequeno: às vezes mistura idiomas ou ignora o formato pedido. Revise as respostas.
 - O checkpoint precisa ficar imutável durante a execução. No Windows o arquivo é aberto sem permitir escrita; no

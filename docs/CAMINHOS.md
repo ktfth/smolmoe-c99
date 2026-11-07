@@ -8,7 +8,7 @@ indicados.
 
 | Você quer... | Caminho | Sistemas |
 |---|---|---|
-| Clicar e conversar | [Janela com o modelo dentro](#1-janela) | Windows (no Release a partir da próxima versão); Linux e macOS compilando |
+| Clicar e conversar | [Janela com o modelo dentro](#1-janela) | Windows (no Release desde a v0.4.0); Linux e macOS compilando |
 | Conversar no terminal, sem instalar nada | [Chat no terminal, arquivo único](#2-chat-no-terminal-arquivo-único) | Windows, Linux, macOS, Termux |
 | Usar outro modelo (Phi-4-mini, Q5) | [Programa e modelo separados](#3-programa-e-modelo-separados) | Todos |
 | Uma resposta para um script | [Uma resposta e sai](#4-uma-resposta-e-sai-scripts) | Todos |
@@ -42,7 +42,7 @@ O chat numa janela, com a resposta chegando aos poucos, botão de parar e as fer
 - **macOS:** `brew install glfw`, `make gui` e depois `build/smolmoe-gui modelo.smoe`.
 - **Termux:** não tem; use o chat no terminal.
 
-A janela entra no Release a partir da primeira versão depois da 0.3.1.
+A janela está no Release desde a v0.4.0.
 
 ## 2. Chat no terminal, arquivo único
 

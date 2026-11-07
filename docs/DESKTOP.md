@@ -11,7 +11,7 @@ do computador.
 
 | Sistema | Como |
 |---|---|
-| **Windows** | Baixe `qwen-pt-gui-windows-x64.exe` do Release e dê dois cliques: o programa e o Qwen estão no mesmo arquivo. Também há o `smolmoe-gui-windows-x64.exe` só com o programa, que abre um `.smoe` (veja abaixo). Os dois entram no Release a partir da primeira versão depois da 0.3.1; até lá, compile com `make gui` no MSYS2. |
+| **Windows** | Baixe `qwen-pt-gui-windows-x64.exe` do Release e dê dois cliques: o programa e o Qwen estão no mesmo arquivo. Também há o `smolmoe-gui-windows-x64.exe` só com o programa, que abre um `.smoe` (veja abaixo). Os dois estão no Release desde a v0.4.0. |
 | **Linux** | Compile: `sudo apt install g++ make pkg-config libglfw3-dev` (ou os pacotes equivalentes da sua distribuição) e depois `make gui`. |
 | **macOS** | Compile: `brew install glfw` e depois `make gui`. |
 
