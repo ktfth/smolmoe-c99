@@ -169,7 +169,22 @@ $(WASI)/smolmoe.wasm: $(WASI_OBJ)
 $(WASI)/test-kernels.wasm: $(WASI)/tests/test_kernels.o $(WASI_LIB)
 	$(WASI_CC) $^ $(WASI_LINK) -o $@
 
-wasi: $(WASI)/smolmoe.wasm $(WASI)/test-kernels.wasm
+# The same with threads: shared memory imported from the host, which starts
+# worker instances on it (src/threadpool.c). zig 0.13 reads --max-memory as
+# hexadecimal: 7FFF0000 is 2 GiB - 64 KiB.
+WASI_MT_FLAGS = $(WASI_FLAGS) -mcpu=generic+atomics+bulk_memory+simd128
+WASI_MT_LINK := $(WASI_LINK) -Wl,--shared-memory -Wl,--import-memory -Wl,--max-memory=7FFF0000 \
+	-Wl,--export=__stack_pointer
+WASI_MT_OBJ  := $(SOURCES:%=$(WASI)/mt/%.o)
+
+$(WASI)/mt/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(WASI_CC) $(WASI_MT_FLAGS) -c $< -o $@
+
+$(WASI)/smolmoe-mt.wasm: $(WASI_MT_OBJ)
+	$(WASI_CC) -mcpu=generic+atomics+bulk_memory+simd128 $^ $(WASI_MT_LINK) -o $@
+
+wasi: $(WASI)/smolmoe.wasm $(WASI)/smolmoe-mt.wasm $(WASI)/test-kernels.wasm
 
 bench: $(BIN)
 	bun scripts/bench.ts
@@ -178,4 +193,4 @@ clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
 -include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
-	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI)/tests/test_kernels.d
+	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/tests/test_kernels.d

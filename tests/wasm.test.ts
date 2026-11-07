@@ -15,19 +15,20 @@ import { guestArgs } from "./support/wasi-run";
 const WASI_DIR = join(ROOT, "build", "wasi");
 const RUNTIME = join(WASI_DIR, "smolmoe.wasm");
 const KERNEL_TESTS = join(WASI_DIR, "test-kernels.wasm");
+const THREADED = join(WASI_DIR, "smolmoe-mt.wasm"); /* shared memory, worker instances (the browser build) */
 const RUNNER = join(ROOT, "tests", "support", "wasi-run.ts");
-const built = existsSync(RUNTIME) && existsSync(KERNEL_TESTS);
+const built = existsSync(RUNTIME) && existsSync(KERNEL_TESTS) && existsSync(THREADED);
 const qwen = bundledModel("qwen2.5-0.5b-instruct", "tokenizer.qbp");
 const stories = bundledModel("tinystories-15m", "tokenizer.spb");
 const SLOW = Number(process.env.SMOLMOE_SLOW_MS ?? 180_000);
 
-/* Runs a module through the WASI host, like a native binary. */
+/* Runs a module through the WASI host, like a native binary (4 worker instances for a threaded one). */
 function wasm(module: string, args: readonly (string | number)[], input = ""): RunResult {
   const proc = Bun.spawnSync([process.execPath, RUNNER, module, ...args.map(String)], {
     stdin: new TextEncoder().encode(input),
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, SM_EXPECT_SIMD: "1" },
+    env: { ...process.env, SM_EXPECT_SIMD: "1", SMOLMOE_WASM_THREADS: "4" },
   });
   return { code: proc.exitCode ?? -1, stdout: Buffer.from(proc.stdout), stderr: proc.stderr.toString() };
 }
@@ -73,17 +74,29 @@ describe.skipIf(!built)("WebAssembly build", () => {
     expect(scalar.logits_hash).toBe(native.logits_hash);
   }, SLOW);
 
+  test.skipIf(!stories)("TinyStories: the threaded module gives the same logits with 1, 2 and 4 threads", () => {
+    const args = [...modelArgs(stories!), "--prompt", "Once upon a time", "--tokens", 32, "--hash-logits"];
+    const native = stats(runWithInput(args, "", BINARY)).logits_hash;
+    for (const threads of [1, 2, 4]) {
+      const s = stats(wasm(THREADED, [...args, "--threads", threads]));
+      expect(s.threads).toBe(threads);
+      expect(s.logits_hash).toBe(native);
+    }
+  }, SLOW);
+
   test.skipIf(!qwen)("Qwen: the same logits as the native build", () => {
     const args = [...modelArgs(qwen!), "--chat", "--prompt", "Qual é a capital do Brasil?", "--tokens", 8,
       "--hash-logits"];
-    expect(stats(wasm(RUNTIME, args)).logits_hash).toBe(stats(runWithInput(args, "", BINARY)).logits_hash);
+    const native = stats(runWithInput(args, "", BINARY)).logits_hash;
+    expect(stats(wasm(RUNTIME, args)).logits_hash).toBe(native);
+    expect(stats(wasm(THREADED, [...args, "--threads", 4])).logits_hash).toBe(native);
   }, SLOW);
 
-  test.skipIf(!qwen)("Qwen chat with a tool call: the same reply and notices as the native build", () => {
+  test.skipIf(!qwen)("Qwen chat with a tool call, threaded module: the same reply and notices as the native build", () => {
     const args = [...modelArgs(qwen!), "-i", "--now", "2026-11-06T10:30", "--tokens", 48];
     const input = "Quanto é 15% de 230?\n/sair\n";
     const native = runWithInput(args, input, BINARY);
-    const web = wasm(RUNTIME, args, input);
+    const web = wasm(THREADED, [...args, "--threads", 4], input);
     expect(web.code).toBe(0);
     expect(native.stderr).toContain("[ferramenta] calcular");
     expect(web.stdout.toString()).toBe(native.stdout.toString());

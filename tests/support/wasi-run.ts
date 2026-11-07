@@ -50,5 +50,7 @@ if (import.meta.main) {
   const stdin = new Uint8Array(await Bun.stdin.arrayBuffer());
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (k.startsWith("SM_") && v !== undefined) env[k] = v;
-  process.exitCode = new Wasi({ args: ["smolmoe", ...args], preopens, env, stdin }).run(module);
+  /* Worker instances for a threaded module (smolmoe-mt.wasm); its --threads picks how many it uses. */
+  const threads = Number(process.env.SMOLMOE_WASM_THREADS ?? 4);
+  process.exit(await new Wasi({ args: ["smolmoe", ...args], preopens, env, stdin }).run(module, threads));
 }

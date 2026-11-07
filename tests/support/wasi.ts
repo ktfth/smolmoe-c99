@@ -1,9 +1,11 @@
 /* Minimal WASI (preview1) host for running the WebAssembly build under bun.
  * Bun's own node:wasi fails on Windows, and the tests need only a small part
  * of WASI: arguments, stdio, files under preopened directories, clocks and
- * random bytes. Anything else answers ENOSYS. */
+ * random bytes, and worker instances for a threaded module. Anything else
+ * answers ENOSYS. */
 import { closeSync, constants, fstatSync, openSync, readSync, statSync, writeSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { Worker } from "node:worker_threads";
 
 const OK = 0;
 const EACCES = 2;
@@ -64,6 +66,20 @@ function writeAll(fd: number, data: Uint8Array, position: number | null): void {
   }
 }
 
+/* Starts one worker instance in pool slot `slot` and waits until it is in. A
+ * worker that fails would leave the pool waiting forever: the run stops. */
+function startWorker(module: WebAssembly.Module, memory: WebAssembly.Memory, slot: number): Promise<Worker> {
+  return new Promise((done, fail) => {
+    const worker = new Worker(new URL("./wasi-worker.ts", import.meta.url), { workerData: { module, memory, slot } });
+    worker.once("message", () => done(worker));
+    worker.on("error", (error) => {
+      process.stderr.write(`wasi worker ${slot}: ${String(error)}\n`);
+      fail(error);
+      process.exit(70);
+    });
+  });
+}
+
 /* Thrown by proc_exit to unwind out of the module. */
 class Exit {
   constructor(readonly code: number) {}
@@ -92,11 +108,24 @@ export class Wasi {
     this.nextFd = fd;
   }
 
-  /* Runs the module's _start; returns its exit code. */
-  run(module: WebAssembly.Module): number {
-    const instance = new WebAssembly.Instance(module, { wasi_snapshot_preview1: this.imports() });
-    this.memory = instance.exports.memory as WebAssembly.Memory;
+  /* Runs the module's _start; returns its exit code. A threaded module
+   * imports shared memory: `threads - 1` worker instances start on it first
+   * (tests/support/wasi-worker.ts), and the module's pool may use them. */
+  async run(module: WebAssembly.Module, threads = 1): Promise<number> {
+    const shared = WebAssembly.Module.imports(module).find((i) => i.kind === "memory") as
+      | { type?: { minimum: number; maximum?: number } }
+      | undefined;
+    const memory = shared
+      ? new WebAssembly.Memory({ initial: shared.type?.minimum ?? 1024, maximum: shared.type?.maximum ?? 32767, shared: true })
+      : undefined;
+    const workers = memory ? await Promise.all(Array.from({ length: Math.max(0, threads - 1) }, (_, slot) => startWorker(module, memory, slot))) : [];
     try {
+      const instance = new WebAssembly.Instance(module, {
+        ...(memory ? { env: { memory } } : {}),
+        wasi_snapshot_preview1: this.imports(),
+        smolmoe: { workers: () => workers.length },
+      });
+      this.memory = memory ?? (instance.exports.memory as WebAssembly.Memory);
       (instance.exports._start as () => void)();
       return 0;
     } catch (e) {
@@ -104,6 +133,12 @@ export class Wasi {
       throw e;
     } finally {
       for (const entry of this.fds.values()) if (entry.kind === "file") closeSync(entry.fd);
+      /* Workers wait inside the module (memory.atomic.wait), where bun's
+       * terminate() does not reach them: they must not keep the process alive. */
+      for (const worker of workers) {
+        worker.unref();
+        void worker.terminate();
+      }
     }
   }
 
