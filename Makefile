@@ -84,7 +84,7 @@ $(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
 $(TEST_TOK): $(BUILD)/tests/test_tokenizer.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-# Row converter used by tools/import_qwen2.py (POSIX only: Linux, macOS, WSL).
+# Q8 row converter of the old Python Qwen importer; kept as the reference for tests/goldens/convert-q8.json (POSIX only).
 $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm

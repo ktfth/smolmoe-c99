@@ -390,6 +390,72 @@ kernel. Ela continua:
 **Critério de exceção:** se uma medição mostrar que a regra bloqueia um ganho acima de 15%, a regra cai de propósito e
 o efeito na qualidade é medido (perplexidade e conjuntos de perguntas) antes de aceitar.
 
+## Iteração 6: Phi-4-mini, o primeiro modelo fora da família Qwen
+
+**Pedido:** suporte a Gemma e Phi. **Decisões do usuário:** começar pelo Phi-4-mini, validar sem referência externa
+(nem Python, nem llama.cpp) e obter o Gemma pelo aceite dos termos no Hugging Face (pendente).
+
+### O que o motor ganhou
+
+- **Rotação parcial e fator do RoPE**, como chaves opcionais da config (`rotary_dim`, `rope_attention_factor`). O
+  Phi-4-mini roda 96 das 128 dimensões de cada cabeça e multiplica cos/sin por √(17/12) ≈ 1,19024. Sem as chaves, o
+  resultado é idêntico bit a bit ao anterior (testado).
+- **Tokenizer do GPT-4o (`o200k`)** e **template de chat do Phi**, com o formato `.qbp` v2. O v1 continua valendo: as
+  11 referências do Qwen e um corpus adversarial de 403 casos ficaram idênticos.
+- **Tabela de classes Unicode no 16.0**, a mesma versão do motor de regex que o Hugging Face usa. O gerador foi
+  portado para TypeScript, com os arquivos da Unicode fixados por SHA-256.
+- **Orçamento de memória padrão** = 512 MiB + o cache de atenção de até 2048 posições. Com 2048 posições, o cache
+  do Phi sozinho ocupa 512 MiB; antes era preciso passar `--memory-mib` à mão. O teto de 2048 vem da revisão: sem
+  ele, um `--context` enorme pediria dezenas de GB sem a mensagem que orienta o usuário.
+- **Conversor em TypeScript** (`scripts/convert.ts`) no lugar do Python. Ele reproduz os 5 arquivos do Qwen **byte a
+  byte** (inclusive os hashes do Release) e converte o Phi em cerca de 40 s.
+
+### Como validamos sem referência externa
+
+1. **Especificação a partir do código oficial.** Toda fórmula foi citada com arquivo e linha do `modeling_phi3.py` e
+   do `modeling_rope_utils.py`.
+2. **Implementação de referência independente**, em TypeScript e em double. Ela lê os pesos bf16 originais e segue a
+   semântica do Hugging Face (meia rotação, pesos fundidos, IDs originais). Não usa nada do conversor nem do runtime,
+   e tem 57 testes com valores calculados à mão. Para "Qual é a capital do Brasil?", ela continua com "A capital do
+   Brasil é Brasília." Um erro sutil de implementação dificilmente produziria português correto.
+3. **Tokenizer:** 42 casos comparados com o `js-tiktoken` (`o200k_base`), mais 300 mil textos aleatórios na regra de
+   divisão. Dois agentes escreveram, cada um por conta própria, o gerador do `.qbp` do Phi, e os arquivos saíram
+   idênticos byte a byte.
+4. **Motor contra a referência, posição por posição:**
+
+| Texto | Mesma escolha (top-1) | KL típica | Onde diverge |
+|---|---|---|---|
+| Chat de 18 tokens | 18/18 | 10⁻³ a 10⁻² | — |
+| Português corrido, 67 tokens | 64/67 | 10⁻³ a 5×10⁻³ | 3 quase empates na referência (margens 0,006, 0,034, 0,087) |
+
+A diferença **não cresce com a posição**; um erro de RoPE cresceria. O maior desvio fica na posição 0 (KL 0,08 a
+0,2), onde a rotação é a identidade e a atenção vê um único token. A hipótese, não medida, é o arredondamento para
+8 bits das ativações grandes do primeiro token.
+
+### Resultado
+
+| | Qwen2.5-0.5B | Phi-4-mini (3,8B) |
+|---|---|---|
+| Bits por byte no texto em português (menor é melhor) | 0,985 | **0,818** (−17%) |
+| Escrita / leitura neste notebook | ~17–21 / ~55 tok/s | ~3,9 / ~12 tok/s |
+| Memória | 0,55 GB | 4,4 GB |
+| 15% de 230; desconto de 25% em 80; 10 milhas em km | "030", 50, 1,61 | **34,5, 60, 16,093** |
+| Comando PowerShell para renomear um arquivo | nome errado | **certo** |
+
+A perplexidade bruta (11,4 contra 12,0) não serve para comparar: o Phi divide o mesmo texto em 843 tokens, e o Qwen
+em 1038.
+
+### O que ficou de fora
+
+- **Ferramentas no chat do Phi:** as fontes divergem sobre o formato de chamada de função. O chat do Phi roda sem
+  ferramentas até que isso seja testado no próprio modelo.
+- **Contexto acima de 4096:** exigiria os fatores longos do "longrope", que mudam a partir da posição 4096. O
+  conversor declara `max_context=4096`.
+- **Release:** 4,3 GB passa do limite de 2 GB por arquivo do GitHub, então o Phi é obtido pela conversão.
+- **Gemma:** aguarda o aceite dos termos. Exige mais peças no motor (GELU, 4 normalizações por camada, normalização
+  de Q/K, atenção local de 512 tokens, duas frequências de RoPE, cabeça de tamanho próprio) e um tokenizer
+  SentencePiece de 262 mil peças.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.

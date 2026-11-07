@@ -36,6 +36,7 @@ typedef struct Options {
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
     int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock, profile;
+    int memory_given; /* --memory-mib: otherwise the KV cache is added to the default budget */
     ToolClock clock; /* --now */
 } Options;
 
@@ -79,7 +80,7 @@ static void usage(FILE *out) {
           "  --context N          KV cache positions (default min(config, 2048))\n"
           "  --threads N          worker threads (default: physical cores)\n"
           "  --batch N            prompt tokens per forward pass (default 32)\n"
-          "  --memory-mib N       heap ceiling, excluding mapped weights (default 512)\n"
+          "  --memory-mib N       heap ceiling, excluding mapped weights (default 512 plus the KV cache of up to 2048 positions)\n"
           "  --scalar             disable SIMD kernels\n"
           "diagnostics\n"
           "  --stats FILE         JSON statistics (always printed to stderr)\n"
@@ -110,7 +111,10 @@ static void parse_value(Options *o, const char *opt, const char *value) {
         o->tokens = parse_u32(value, MAX_CONTEXT, "tokens");
         o->tokens_given = 1;
     } else if (!strcmp(opt, "--context")) o->context = parse_u32(value, MAX_CONTEXT, "context");
-    else if (!strcmp(opt, "--memory-mib")) o->memory_mib = parse_u32(value, 1048576, "memory-mib");
+    else if (!strcmp(opt, "--memory-mib")) {
+        o->memory_mib = parse_u32(value, 1048576, "memory-mib");
+        o->memory_given = 1;
+    }
     else if (!strcmp(opt, "--seed")) o->seed = parse_u32(value, UINT32_MAX, "seed");
     else if (!strcmp(opt, "--threads")) o->threads = parse_u32(value, MAX_THREADS, "threads");
     else if (!strcmp(opt, "--batch")) o->batch = parse_u32(value, MAX_BATCH, "batch");
@@ -491,6 +495,11 @@ int main(int argc, char **argv) {
     c = load_config(&o, &src);
     context = o.context ? o.context : (c.max_context < DEFAULT_CONTEXT ? c.max_context : DEFAULT_CONTEXT);
     if (context > c.max_context) die("--context exceeds the model's max_context (%u)", c.max_context);
+    /* The KV cache grows with the model and the context; the default budget
+     * covers it up to the default context, so a 4B model opens without
+     * --memory-mib while a huge --context still needs an explicit budget. */
+    if (!o.memory_given)
+        mem.limit = add_size(mem.limit, kv_cache_bytes(&c, context < DEFAULT_CONTEXT ? context : DEFAULT_CONTEXT));
 
     run.o = &o;
     run.st = &st;

@@ -41,6 +41,30 @@ rodar**: os dois atuais já serviram para decidir.
 3. **Lacunas do portão e do `dias_ate`.** Falta "ano" na lista de palavras, e falta entender dia da semana
    ("até sexta").
 4. **Ferramentas do usuário** (`tools` no estilo OpenAI) junto com o servidor local.
+5. **Ferramentas no chat do Phi-4-mini.** As fontes divergem sobre o formato de chamada (`<|tool_call|>` ou
+   `functools[...]`); medir no próprio modelo antes de ligar.
+
+## Ferramentas novas (plano combinado; cada uma medida com perguntas novas)
+
+1. **`calcular`:** contas, porcentagens, divisões e potências feitas pelo programa, e não pelo modelo. Medido: o
+   Qwen 0,5B errou "15% de 230" ("030") e um desconto de 25% em 80 (50).
+2. **Ajudante de comandos para bash e PowerShell.** O modelo sugere um comando completo. No Windows o padrão é
+   PowerShell; bash onde existir (Linux, macOS, Git Bash, WSL).
+   - **Livro de exemplos fora do contexto** (tldr-pages em português, CC BY 4.0, mais receitas de PowerShell). Para
+     cada pedido entram só os 3 exemplos mais parecidos, em cerca de 60 tokens, e eles saem do histórico depois.
+   - **Primeira palavra restrita** aos comandos dos exemplos.
+   - **Conferências antes de mostrar:**
+     - marcador que sobrou;
+     - arquivos citados que existem ou aparecem no pedido;
+     - sintaxe verificada sem executar.
+
+     Se nada passar, a resposta é "não consegui".
+   - **Nada roda sem confirmação.** Comandos que apagam, movem ou usam a rede pedem "sim" por extenso e mostram antes
+     os arquivos afetados. A função vem desligada por padrão (`--shell`).
+   - Medido sem exemplos: o Qwen 0,5B acertou 1 de 9 comandos bash e 1 de 4 PowerShell; com 3 exemplos, 6 de 9. O
+     Phi-4-mini acertou de primeira um `Rename-Item` que o Qwen errava.
+3. **Calendário estendido:** dia da semana de qualquer data, "daqui a N dias" e a diferença entre datas.
+4. **`converter`** (unidades) e **`contar`** (letras e palavras).
 
 ## Rumo ao "llamafile": um executável que já é o modelo
 
@@ -80,12 +104,27 @@ programas, como o llamafile faz.
 
 ## Capacidade de modelo
 
-1. **Um MoE treinado de verdade.** Candidatos pequenos: OLMoE-1B-7B (64 experts, top-8, softmax) e Qwen1.5-MoE-A2.7B.
-   Isso exige roteamento softmax (hoje é só sigmoide), qk-norm (OLMoE) e um importador. Sem esse item, o "MoE" do nome
-   continua sem prova.
-2. **Conversores em TypeScript/Bun.** Substituem os scripts Python e o `q8pack.c` (só POSIX). Leitura de safetensors
-   em TS é direta (cabeçalho JSON e bytes crus).
-3. **Qwen2.5-1.5B/3B.** Maior qualidade em português, ao custo de 3× a 6× a memória. Com Q5, o 1,5B cabe em ~1,05 GB.
+Feito: **Phi-4-mini** (iteração 6) e o **conversor em TypeScript** para Qwen2 e Phi-3. Falta portar o do TinyStories
+(`tools/import_llama2c.py`).
+
+1. **Gemma 3 (1B e 270M).** Aguarda o aceite dos termos no Hugging Face (`HF_TOKEN`). Exige no motor:
+   - ativação GELU;
+   - 4 normalizações por camada;
+   - normalização de Q/K;
+   - atenção local de 512 tokens em 5 de cada 6 camadas;
+   - duas frequências de RoPE;
+   - tamanho de cabeça desacoplado da largura.
+
+   Exige também um tokenizer SentencePiece de 262 mil peças e o template de chat do Gemma.
+2. **Um MoE treinado de verdade.** O candidato mais leve é o Granite 3.1 1B-A400M (IBM, Apache-2.0: 32 experts, 8
+   ativos, cerca de 400M parâmetros ativos). Também OLMoE-1B-7B. Exigem roteamento softmax (hoje é só sigmoide),
+   fatores de escala e tokenizer próprio. Sem esse item, o "MoE" do nome continua sem prova.
+3. **Importador de GGUF** (o formato do llama.cpp). O Q8 de lá é quase o nosso (escala em 16 bits em vez de 32, sem
+   perda) e o arquivo traz tokenizer e template. Abre milhares de modelos já publicados, para as arquiteturas que o
+   motor já implementa.
+4. **Qwen2.5-1.5B e Coder-1.5B.** O conversor só precisa liberar o tamanho, porque a arquitetura é a mesma. Com Q5, o
+   1,5B cabe em ~1,05 GB.
+5. **Phi-4-mini com contexto acima de 4096**, com os fatores longos do "longrope".
 
 ## Operação
 

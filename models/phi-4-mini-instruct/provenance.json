@@ -1,0 +1,26 @@
+{
+  "model": "microsoft/Phi-4-mini-instruct",
+  "revision": "cfbefacb99257ffa30c83adab238a50856ac3083",
+  "converter": "smolmoe scripts/convert.ts 1.0.0",
+  "source_sha256": {
+    "model-00001-of-00002.safetensors": "bc703090b63eda16f639fa4de7ac54635c23105ab1da2f6ec4d3403151d38ee6",
+    "model-00002-of-00002.safetensors": "7ff79b9d2d31076bac2663393451f6530f4fc8ca49b09002116c92c373dba983"
+  },
+  "config_sha256": "ac65d86061d3d0d704ee2511fd0eb8713ef19eb6eedba17c3080a4165d5b933b",
+  "tokenizer_sha256": "382cc235b56c725945e149cc25f191da667c836655efd0857b004320e90e91ea",
+  "index_sha256": "613a98d5e5716ca96fa75931abedc9c5a5d95f488ce4d62df71e639fe3ac6c59",
+  "quantization": "lossy Q8 block32",
+  "qk_permutation": "split-half rotary to adjacent-pair within the first 96 of 128 dims per head; pass-through dims, V and O unchanged",
+  "rope": {
+    "rotary_dim": 96,
+    "theta": 10000,
+    "attention_factor": 1.1902380714238083,
+    "scaling": "longrope with all-1.0 short_factor (plain RoPE); long_factor unused",
+    "max_context": 4096,
+    "source_max_position_embeddings": 131072
+  },
+  "token_remapping": "runtime ids: bytes 0..255, <|endoftext|> -> 256, <|end|> -> 257, all other ids ascending; embedding rows follow",
+  "tied_lm_head": true,
+  "dense_mapping": "one expert with a zero router",
+  "full_kimi_compatible": false
+}

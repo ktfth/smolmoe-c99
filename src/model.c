@@ -130,9 +130,12 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     m->scores = (float *)buffer(mem, threads, context, sizeof(float));
 }
 
-size_t model_kv_bytes(const Model *m) {
-    return mul_size(mul_size(mul_size(m->c.layers, m->context), m->kv_dim), 2 * sizeof(float));
+size_t kv_cache_bytes(const Config *c, uint32_t context) {
+    size_t kv_dim = (size_t)c->kv_heads * (c->dim / c->heads);
+    return mul_size(mul_size(mul_size(c->layers, context), kv_dim), 2 * sizeof(float));
 }
+
+size_t model_kv_bytes(const Model *m) { return kv_cache_bytes(&m->c, m->context); }
 
 /* ---- parallel matrix-vector products ----------------------------------- */
 

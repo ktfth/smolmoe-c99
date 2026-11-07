@@ -34,6 +34,7 @@ typedef struct Memory {
 void *mem_alloc(Memory *m, size_t count, size_t size);
 void mem_release(Memory *m);
 size_t mul_size(size_t a, size_t b);
+size_t add_size(size_t a, size_t b);
 
 static inline uint32_t rd_u32(const unsigned char *p) {
     return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;

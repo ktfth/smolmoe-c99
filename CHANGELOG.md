@@ -23,7 +23,19 @@
   - `--save` e `--compare` contra uma base, e `--ab` para comparar dois binários alternados na mesma sessão;
   - sai com erro se alguma métrica piorar.
 
+- **Phi-4-mini-instruct (Microsoft, 3,8B)**, o primeiro modelo fora da família Qwen: 17% melhor em português (bits
+  por byte) e certo em contas e comandos em que o Qwen 0,5B errava; cerca de 4 tokens/s neste notebook. Detalhes
+  e validação em [DECISIONS.md](docs/DECISIONS.md), iteração 6.
+  - Chaves opcionais `rotary_dim` e `rope_attention_factor` na config (RoPE parcial e escalado).
+  - Tokenizer `o200k` (o do GPT-4o), `.qbp` v2 e template de chat do Phi; o v1 do Qwen segue idêntico.
+- `scripts/convert.ts`: conversor em TypeScript (Qwen2 e Phi-3), no lugar do Python. Reproduz os arquivos do Qwen
+  byte a byte. `fetch-qwen2` e `fetch-phi3` baixam os originais fixados e conferem o SHA-256.
+- `scripts/ref/`: implementação de referência do Phi-4-mini em TypeScript (double), para validar o runtime.
+- `scripts/gen-unicode.ts`: gerador das tabelas Unicode em TypeScript (classes no Unicode 16.0, NFC no 15.0).
+
 ### Alterado
+- O limite de memória padrão passou a ser 512 MiB mais o cache de atenção de até 2048 posições, então modelos
+  maiores abrem sem `--memory-mib`. Com a opção, o limite é exatamente o pedido.
 - **Leitura do prompt de 21% a 39% mais rápida**, e primeiro token de 17% a 26% mais cedo, em duas medições A/B.
   Quantização, ativação e normalização passaram a usar AVX2 e todas as threads; antes eram 23% do tempo numa thread só.
   Detalhes em [DECISIONS.md](docs/DECISIONS.md), iteração 5.

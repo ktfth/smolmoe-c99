@@ -8,6 +8,7 @@ pesos (`model.smoe`), o tokenizer, a `config.ini` e a `provenance.json`. Os dois
 |---|---|---|---|
 | `models/qwen2.5-0.5b-instruct` | Qwen2.5-0.5B-Instruct, Q8 | Chat em português (`--chat`) | 531 MiB |
 | `models/tinystories-15m` | TinyStories 15M (llama2.c), Q8 | Histórias curtas em inglês; testes rápidos | 26 MiB |
+| `models/phi-4-mini-instruct` | Phi-4-mini-instruct (Microsoft), Q8 | Chat de mais qualidade, mais lento; só por conversão (opção 2) | 4,0 GiB |
 
 ## Opção 1: baixar os pesos já convertidos
 
@@ -39,18 +40,42 @@ Get-FileHash models\*\model.smoe -Algorithm SHA256                      # PowerS
 
 ## Opção 2: converter a partir dos originais
 
-Os conversores ainda estão em Python e usam só a biblioteca padrão, sem PyTorch e sem NumPy. A conversão de linhas
-usa `tools/q8pack.c`, que é POSIX: rode no Linux, no macOS ou no WSL. A migração para TypeScript está no roadmap.
+O conversor é `scripts/convert.ts` (TypeScript/Bun) e roda em qualquer sistema, inclusive no Windows nativo. Cada
+modelo tem a revisão do Hugging Face e o SHA-256 dos originais fixados no código: um original diferente é recusado.
 
 ```sh
-make tools                                   # compila tools/q8pack
-python3 tools/import_qwen2.py downloads/qwen2.5-0.5b models/qwen2.5-0.5b-instruct --fetch
-python3 tools/import_llama2c.py downloads/stories15M.bin downloads/tokenizer.bin models/tinystories-15m --fetch-tiny15m
+bun scripts/convert.ts fetch-qwen2 downloads/qwen2.5-0.5b-instruct-src
+bun scripts/convert.ts qwen2 downloads/qwen2.5-0.5b-instruct-src models/qwen2.5-0.5b-instruct
+
+bun scripts/convert.ts fetch-phi3 downloads/phi-4-mini-instruct      # 7,7 GB
+bun scripts/convert.ts phi3 downloads/phi-4-mini-instruct models/phi-4-mini-instruct
 ```
 
-`--fetch` baixa a revisão fixada no Hugging Face e confere o SHA-256 do original antes de converter. A conversão é com
-perda (Q8 com escala F32 por bloco de 32) e permuta as linhas de Q/K para o RoPE de pares adjacentes. Os detalhes de
-cada modelo ficam na sua `provenance.json`, e o formato está em [FORMAT.md](FORMAT.md).
+- **Qwen:** a saída é idêntica byte a byte aos arquivos do Release (os hashes da tabela acima). Leva cerca de 9 s.
+- **Phi-4-mini:** leva cerca de 40 s com 8 threads e gera 4,3 GB. O Release não o hospeda, porque o GitHub limita
+  cada arquivo a 2 GB. A saída é determinística: `model.smoe` tem SHA-256
+  `83c24b62192add141c230cf30d92d5c0a14d0f36b4642b3249801277419d3468` e `tokenizer.qbp`,
+  `773973f89c1882343167260c0ef227da4237ecf448d19b34ae3821843780d36f`.
+- `--container v3` gera um arquivo único, com config e tokenizer embutidos. `bun scripts/convert.ts check MODELO`
+  confere um modelo com as mesmas regras do carregador em C.
+
+A conversão é com perda (Q8 com escala F32 por bloco de 32). Ela permuta as linhas de Q/K para o RoPE de pares
+adjacentes e reordena os IDs dos tokens para a convenção do runtime. Os detalhes de cada modelo ficam na sua
+`provenance.json`, e o formato está em [FORMAT.md](FORMAT.md).
+
+O TinyStories ainda usa o conversor antigo em Python (`tools/import_llama2c.py`); a migração está no roadmap.
+
+## Phi-4-mini-instruct (Microsoft, 3,8B)
+
+```sh
+build/smolmoe --model models/phi-4-mini-instruct/model.smoe --config models/phi-4-mini-instruct/config.ini \
+  --tokenizer models/phi-4-mini-instruct/tokenizer.qbp
+```
+
+- **Contexto:** até 4096 tokens. É o limite em que o modelo não precisa da escala de contexto longo.
+- **Memória:** cerca de 4,4 GB, quase todos pesos mapeados.
+- **Velocidade neste notebook:** cerca de 4 tokens/s escrevendo e 12 tokens/s lendo.
+- **Ferramentas:** o chat roda sem elas, porque o formato de chamada de função do Phi ainda não foi validado.
 
 ## Variante Q5 (menos memória)
 
@@ -64,6 +89,7 @@ Use `--model .../model-q5.smoe` com a mesma `config.ini` e o mesmo tokenizer. Cu
 ## Licenças
 
 - Qwen2.5-0.5B-Instruct: Apache-2.0 (`models/qwen2.5-0.5b-instruct/LICENSE-Qwen.txt`).
+- Phi-4-mini-instruct: MIT (`models/phi-4-mini-instruct/LICENSE-Phi.txt`).
 - TinyStories 15M e o tokenizer do llama2.c: MIT (`licenses/llama2.c-MIT.txt`).
 
 Ver também [THIRD_PARTY.md](../THIRD_PARTY.md).

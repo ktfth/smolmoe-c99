@@ -1,0 +1,36 @@
+{
+  "generator": "bf16Patterns (LCG 1664525/1013904223)",
+  "reference": "tools/q8pack.c inner loop, gcc -O3 -ffp-contract=off",
+  "cases": [
+    {
+      "rows": 600,
+      "cols": 4871,
+      "seed": 12345,
+      "bytes": 3304800,
+      "sha256": "48629d8524699524d57011a5ea07d2289458f37a29ea1fe2ea18d968b64e3658"
+    },
+    {
+      "rows": 60,
+      "cols": 7,
+      "seed": 7,
+      "bytes": 2160,
+      "sha256": "774fc442b983dbc866e4196962f9c91c58c229b99b7066d66ea32fee6a32264d",
+      "firstRowHex": "f8fb7d3dff007f0000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "rows": 60,
+      "cols": 33,
+      "seed": 33,
+      "bytes": 4320,
+      "sha256": "0ccbfb441d4930ef0fea08e6b9ead75282c5df39f896136edd5b033bd936ea6d",
+      "firstRowHex": "30188c76000000001d00000000000000ed000000007f0000000000000000000002000000b55a2d7a7f00000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "rows": 12,
+      "cols": 3072,
+      "seed": 99,
+      "bytes": 41472,
+      "sha256": "f795ff1f3482e8fa4899fba29f8e74093817a61d0a60648f1e8dcedfa169008e"
+    }
+  ]
+}

@@ -53,6 +53,16 @@ build/smolmoe --model models/qwen2.5-0.5b-instruct/model.smoe \
 Os pesos não ficam no git: baixe com `bun scripts/fetch-models.ts` (ou `make models`), que confere o SHA-256 de cada
 arquivo. Detalhes e conversão a partir dos originais em [docs/MODELS.md](docs/MODELS.md).
 
+**Modelo maior: Phi-4-mini (Microsoft, 3,8B).** É 17% melhor em português e acerta contas em que o Qwen 0,5B erra,
+mas escreve a cerca de 4 tokens/s neste notebook e usa 4,4 GB. Ele é obtido pela conversão:
+
+```sh
+bun scripts/convert.ts fetch-phi3 downloads/phi-4-mini-instruct     # 7,7 GB, SHA-256 conferido
+bun scripts/convert.ts phi3 downloads/phi-4-mini-instruct models/phi-4-mini-instruct
+build/smolmoe --model models/phi-4-mini-instruct/model.smoe --config models/phi-4-mini-instruct/config.ini \
+  --tokenizer models/phi-4-mini-instruct/tokenizer.qbp
+```
+
 O texto gerado vai para o stdout, em streaming. As estatísticas saem no stderr como uma linha JSON.
 Saída real, sem edição:
 
@@ -76,7 +86,7 @@ Saída real, sem edição:
 | `--threads N` | núcleos físicos | Threads de trabalho |
 | `--batch N` | 32 | Tokens do prompt por passada (prefill) |
 | `--context N` | min(modelo, 2048) | Posições do cache KV |
-| `--memory-mib N` | 512 | Teto do heap; pesos mapeados não contam |
+| `--memory-mib N` | 512 + cache KV (até 2048 posições) | Teto do heap; pesos mapeados não contam |
 | `--perplexity` | — | Mede a perplexidade do prompt (sem gerar) |
 | `--stats`, `--trace`, `--hash-logits`, `--token-ids` | — | Diagnóstico e regressão |
 
@@ -163,8 +173,10 @@ models/     pesos locais (fora do git)
 
 ## Escopo honesto
 
-- Arquiteturas suportadas: `smolmoe_v1` (GQA, RoPE, RMSNorm, SwiGLU, roteamento top-k sigmoide, experts
-  compartilhados) e `smolmoe_qwen2` (com viés em QKV). Qualquer outra é recusada explicitamente.
+- Arquiteturas suportadas: `smolmoe_v1` (GQA, RoPE com rotação parcial opcional, RMSNorm, SwiGLU, roteamento top-k
+  sigmoide, experts compartilhados) e `smolmoe_qwen2` (com viés em QKV). Qualquer outra é recusada explicitamente.
+- Modelos convertidos e validados: Qwen2.5-0.5B-Instruct, Phi-4-mini-instruct (até 4096 tokens de contexto, chat
+  sem ferramentas) e TinyStories. O Gemma está no [roadmap](docs/ROADMAP.md).
 - O roteamento MoE é testado só com checkpoints sintéticos. **Nenhum modelo MoE treinado é suportado ainda**; os modelos
   incluídos são densos, representados como um expert sempre ativo.
 - Não é compatível com Kimi K3 nem com GGUF, e ainda não há servidor HTTP (está no [roadmap](docs/ROADMAP.md)).
@@ -173,5 +185,5 @@ models/     pesos locais (fora do git)
   Linux/macOS, truncar ou reescrever o `.smoe` enquanto ele roda derruba o processo (`SIGBUS`), como em qualquer
   programa que usa `mmap`.
 
-Licença MIT. Os pesos convertidos mantêm suas licenças originais (Apache-2.0 para Qwen, MIT para TinyStories); ver
+Licença MIT. Os pesos convertidos mantêm suas licenças originais (Apache-2.0 para Qwen, MIT para Phi e TinyStories); ver
 [THIRD_PARTY.md](THIRD_PARTY.md).

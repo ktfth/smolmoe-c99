@@ -78,4 +78,7 @@ void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, 
 
 size_t model_kv_bytes(const Model *m);
 
+/* Bytes of the F32 keys and values for `context` positions. */
+size_t kv_cache_bytes(const Config *c, uint32_t context);
+
 #endif

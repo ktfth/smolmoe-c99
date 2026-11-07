@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { type Fixture, type ModelConfig, configText, writeFixture } from "./support/fixture";
-import { BINARY, SCALAR_BINARY, runOk, tempDir } from "./support/run";
+import { BINARY, SCALAR_BINARY, runFails, runOk, tempDir } from "./support/run";
 
 const work = tempDir("runtime");
 let small: Fixture;
@@ -142,6 +142,23 @@ describe("statistics", () => {
     const total = seconds.reduce((a, b) => a + b, 0);
     expect(total).toBeGreaterThan(0);
     expect(total).toBeLessThanOrEqual(stats.prefill_seconds + stats.decode_seconds + 0.05);
+  });
+
+  test("without --memory-mib the heap budget is 512 MiB plus the KV cache; with it, exactly what was asked", () => {
+    const base = ["--model", small.model, "--config", small.config, "--tokenizer", small.tokenizer, "--prompt", "Hi!",
+      "--tokens", 2, "--context", 256];
+    const auto = runOk(base).stats;
+    expect(auto.budget_bytes).toBe(512 * 1048576 + auto.kv_bytes);
+    expect(runOk([...base, "--memory-mib", 8]).stats.budget_bytes).toBe(8 * 1048576);
+  });
+
+  test("the default budget covers the KV cache only up to 2048 positions; a huge --context still fails cleanly", () => {
+    /* medium: 2 layers x kv_dim 32 x 8 bytes = 512 B per position, so 2^20 positions need 512 MiB of KV alone */
+    const config = join(work.path, "huge-context.ini");
+    writeFileSync(config, configText({ ...medium.settings, max_context: 1048576 }));
+    const stderr = runFails(["--model", medium.model, "--config", config, "--tokenizer", medium.tokenizer,
+      "--prompt", "Hi!", "--tokens", 2, "--context", 1048576]);
+    expect(stderr).toMatch(/memory budget too small/);
   });
 
   test("token-id file holds BOS, prompt and generated IDs", () => {

@@ -37,6 +37,21 @@ The Qwen model/tokenizer are Apache-2.0; the upstream license is retained in
 representation, token ID ordering and rotary row order; the provenance JSON
 records the transformation. The upstream inference code is not included.
 
+## Phi-4-mini model
+
+`models/phi-4-mini-instruct/` is produced locally by `scripts/convert.ts phi3`
+(it is not distributed with this repository): a lossy Q8 conversion of
+microsoft/Phi-4-mini-instruct, revision cfbefacb99257ffa30c83adab238a50856ac3083,
+BF16 shard SHA-256 `bc703090b63eda16f639fa4de7ac54635c23105ab1da2f6ec4d3403151d38ee6`
+and `7ff79b9d2d31076bac2663393451f6530f4fc8ca49b09002116c92c373dba983`. The
+model and tokenizer are MIT; the upstream license is copied to
+`models/phi-4-mini-instruct/LICENSE-Phi.txt`. Conversion changes the weight
+representation, token ID ordering and rotary row order (provenance JSON). The
+validation reference in `scripts/ref/` is an independent reimplementation; no
+upstream inference code is included.
+
+## Unicode data
+
 `src/unicode_class.h` (UnicodeData.txt 16.0.0) and `src/unicode_nfc.h`
 (UnicodeData.txt and CompositionExclusions.txt 15.0.0) are generated from the
 Unicode Character Database by `scripts/gen-unicode.ts`, which pins each file's

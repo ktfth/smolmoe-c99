@@ -163,7 +163,8 @@ missing, invalid, or out-of-range fields are errors. Model context is at most
 1,048,576; D and H at most 65,536; layers at most 1024; E at most 4096; S at most
 16. A divides D, K divides A, and D/A is positive and even. All tensors and
 activations, the KV cache and tokenizer tables must fit `--memory-mib`; mapped
-weights are not counted.
+weights are not counted. Without the option the budget is 512 MiB plus the KV
+cache of min(context, 2048) positions.
 
 Two keys are optional: `rotary_dim` (even, 2 to D/A; default D/A) and
 `rope_attention_factor` (in (0, 1000]; default 1). Omitting them gives results

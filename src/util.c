@@ -28,6 +28,11 @@ size_t mul_size(size_t a, size_t b) {
     return a * b;
 }
 
+size_t add_size(size_t a, size_t b) {
+    if (a > SIZE_MAX - b) die("size overflow");
+    return a + b;
+}
+
 void *mem_alloc(Memory *m, size_t count, size_t size) {
     size_t bytes = mul_size(count, size);
     Allocation *p;
