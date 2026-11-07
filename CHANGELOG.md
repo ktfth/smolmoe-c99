@@ -3,6 +3,13 @@
 ## Não lançado
 
 ### Adicionado
+- **`!comando` no chat:** a linha roda no shell que abriu o smolmoe (PowerShell, pwsh, cmd, Git Bash, bash, zsh) e a
+  saída vai direto para o terminal, sem passar pelo modelo.
+  - `!cd` muda a pasta do chat, e Ctrl+C interrompe só o comando.
+  - `--shell` escolhe o shell; `--no-shell-escape` desliga a função.
+  - Com entrada por pipe, a função fica desligada, a menos que se use `--shell-escape`.
+  - Texto colado com várias linhas vira uma mensagem só, e nenhuma linha dele roda como comando.
+- Texto colado com várias linhas agora vai ao modelo como **uma** mensagem; antes, cada linha virava uma pergunta.
 - **Chamada de funções no chat** (template do Qwen2.5). Há duas ferramentas embutidas: `data_atual` e `dias_ate`, que
   aceita data em texto e feriados brasileiros, inclusive os móveis. O modelo escolhe a ferramenta, e as datas são
   calculadas em C.

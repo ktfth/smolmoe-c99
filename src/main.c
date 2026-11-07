@@ -14,6 +14,7 @@
 #include "modelfile.h"
 #include "output.h"
 #include "platform.h"
+#include "process.h"
 #include "sampler.h"
 #include "threadpool.h"
 #include "tokenizer.h"
@@ -33,9 +34,11 @@
 typedef struct Options {
     const char *model, *config, *tokenizer, *prompt, *prompt_file, *system;
     const char *stats, *trace, *token_ids;
+    const char *shell; /* --shell */
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
     int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock, profile;
+    int shell_escape; /* "!comando": 0 on in a terminal, 1 also on piped input, -1 off */
     int memory_given; /* --memory-mib: otherwise the KV cache is added to the default budget */
     ToolClock clock; /* --now */
 } Options;
@@ -70,6 +73,10 @@ static void usage(FILE *out) {
           "  --system TEXT        chat system message (default: Brazilian Portuguese)\n"
           "  --no-tools           chat without the built-in tools (date, days until a date)\n"
           "  --now YYYY-MM-DDTHH:MM  fixed local time for the tools (default: the clock)\n"
+          "  --shell NAME|PATH    shell for \"!command\" lines in the chat: pwsh, powershell, cmd, bash, sh...\n"
+          "                       (default: the shell that started smolmoe, else the system's)\n"
+          "  --no-shell-escape    \"!command\" lines are plain messages\n"
+          "  --shell-escape       also run them when input is piped (off there by default)\n"
           "generation\n"
           "  --tokens N           max new tokens (default 64; 512 per reply in chat)\n"
           "  --temperature X      0 = greedy (default), positive = sample\n"
@@ -103,6 +110,7 @@ static void parse_value(Options *o, const char *opt, const char *value) {
     else if (!strcmp(opt, "--stats")) o->stats = value;
     else if (!strcmp(opt, "--trace")) o->trace = value;
     else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
+    else if (!strcmp(opt, "--shell")) o->shell = value;
     else if (!strcmp(opt, "--now")) {
         if (!tool_clock_parse(value, &o->clock)) die("--now must be a local date and time as YYYY-MM-DDTHH:MM");
         o->fixed_clock = 1;
@@ -153,6 +161,8 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--tokenize-only")) { o->tokenize_only = 1; continue; }
         if (!strcmp(opt, "--perplexity")) { o->perplexity = 1; continue; }
         if (!strcmp(opt, "--no-tools")) { o->no_tools = 1; continue; }
+        if (!strcmp(opt, "--shell-escape")) { o->shell_escape = 1; continue; }
+        if (!strcmp(opt, "--no-shell-escape")) { o->shell_escape = -1; continue; }
         if (!strcmp(opt, "--profile")) { o->profile = 1; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         parse_value(o, opt, argv[++a]);
@@ -409,9 +419,24 @@ static void run_prompt(const Run *r) {
     st->ended = now_seconds();
 }
 
+/* "!comando" runs in a terminal; for piped input only with --shell-escape, so a
+ * file fed to the chat cannot run anything. An unknown --shell is an error. */
+static const Shell *chat_shell(const Options *o, int terminal, Shell *shell) {
+    char parent[SHELL_PATH_MAX], err[SHELL_PATH_MAX + 128];
+    int on = o->shell_escape > 0 || (!o->shell_escape && terminal);
+    if (!o->shell && !on) return NULL;
+    if (!shell_choose(o->shell, parent_executable(parent, sizeof(parent)) ? parent : NULL, shell, err, sizeof(err))) {
+        if (o->shell) die("--shell: %s", err);
+        fprintf(stderr, "(comandos com ! desativados: %s)\n", err);
+        return NULL;
+    }
+    return on ? shell : NULL;
+}
+
 static void run_chat(const Run *r) {
     ChatContext cc;
     ChatStats cs;
+    Shell shell;
     Stats *st = r->st;
     cc.model = r->model;
     cc.tok = r->tok;
@@ -428,6 +453,8 @@ static void run_chat(const Run *r) {
     cc.fixed_clock = r->o->fixed_clock ? &r->o->clock : NULL;
     cc.banned = r->banned;
     cc.max_reply = r->o->tokens;
+    cc.terminal = stdin_is_terminal();
+    cc.shell = chat_shell(r->o, cc.terminal, &shell);
     st->loaded = now_seconds();
     chat_run(&cc, &cs);
     /* Stats count time spent computing, not time spent waiting for the user. */
@@ -557,6 +584,7 @@ int main(int argc, char **argv) {
     run.model = &model;
     run.sampler = &sampler;
     run.trace = open_output(o.trace);
+    stats_out = open_output(o.stats); /* before the chat: "!cd" moves relative paths */
 
     if (o.interactive) run_chat(&run);
     else run_prompt(&run);
@@ -564,7 +592,6 @@ int main(int argc, char **argv) {
     close_output(run.trace, "trace");
     close_output(run.ids_out, "token ID output");
     print_stats(stderr, backend, &o, &model, &mem, src.mf.size, &st);
-    stats_out = open_output(o.stats);
     if (stats_out) {
         print_stats(stats_out, backend, &o, &model, &mem, src.mf.size, &st);
         close_output(stats_out, "stats");

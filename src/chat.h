@@ -10,6 +10,7 @@
 #include "model.h"
 #include "output.h"
 #include "sampler.h"
+#include "shell.h"
 #include "tokenizer.h"
 #include "tools.h"
 
@@ -28,6 +29,8 @@ typedef struct ChatContext {
     uint32_t tool_open, tool_close;
     unsigned char *banned;  /* the sampler's ban list: the markers are allowed per turn */
     const ToolClock *fixed_clock; /* NULL: the tools read the local clock at each call */
+    const Shell *shell;     /* where a typed "!comando" line runs; NULL: "!" is plain text */
+    int terminal;           /* stdin is a terminal: lines pasted together form one message */
 } ChatContext;
 
 typedef struct ChatStats {
@@ -36,7 +39,8 @@ typedef struct ChatStats {
 } ChatStats;
 
 /* Runs until EOF or "/sair". "/limpar" restarts the conversation, keeping the
- * already-processed system prompt. */
+ * already-processed system prompt. A line typed on its own as "!comando" runs
+ * in c->shell and never reaches the model. */
 void chat_run(const ChatContext *c, ChatStats *st);
 
 #endif

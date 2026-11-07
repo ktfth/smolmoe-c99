@@ -14,7 +14,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools chat main
+SOURCES := util platform process threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -22,6 +22,8 @@ ifeq ($(OS),Windows_NT)
   SYSLIBS    := -lshell32 -lpsapi
   PLATFORM   := -D_WIN32_WINNT=0x0601 -D__USE_MINGW_ANSI_STDIO=1
   STATIC     := -static
+  # Test helper that types into a real console (tests/shell.test.ts)
+  CONSOLE_INPUT := $(BUILD)/console-input.exe
 else
   EXE        :=
   SYSLIBS    := -lpthread
@@ -38,6 +40,7 @@ TEST_KERN  := $(BUILD)/test-kernels$(EXE)
 TEST_TOOLS := $(BUILD)/test-tools$(EXE)
 TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 TEST_CALC  := $(BUILD)/test-calc$(EXE)
+TEST_SHELL := $(BUILD)/test-shell$(EXE)
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
@@ -88,22 +91,30 @@ $(TEST_TOK): $(BUILD)/tests/test_tokenizer.o $(OBJ_LIB)
 $(TEST_CALC): $(BUILD)/tests/test_calc.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_SHELL): $(BUILD)/tests/test_shell.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+$(BUILD)/console-input.exe: tests/support/console_input.c
+	@mkdir -p $(dir $@)
+	$(CC) $(OPT) $(STD) $(PLATFORM) $< -o $@
+
 # Q8 row converter of the old Python Qwen importer; kept as the reference for tests/goldens/convert-q8.json (POSIX only).
 $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
+	$(TEST_SHELL)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
 SLOW_TEST_MS ?= 180000
 
-test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE)
+test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE) $(CONSOLE_INPUT)
 	SMOLMOE_BUILD=$(BUILD) SMOLMOE_SLOW_MS=$(SLOW_TEST_MS) bun test --timeout $(TEST_TIMEOUT_MS)
 
 test: test-unit test-integration

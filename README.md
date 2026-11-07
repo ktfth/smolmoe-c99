@@ -79,6 +79,8 @@ Saída real, sem edição:
 | `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno com `--prompt` |
 | `--no-tools` | ferramentas ligadas no chat | Chat sem as funções de data e de conta (abre cerca de 5,5 s mais rápido) |
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa a hora que as ferramentas usam (execuções reproduzíveis) |
+| `--shell NOME\|CAMINHO` | o shell que abriu o smolmoe | Onde roda um `!comando` do chat: `pwsh`, `powershell`, `cmd`, `bash`, `sh`... |
+| `--no-shell-escape` / `--shell-escape` | ligado só no terminal | Desliga o `!comando`, ou o liga também com entrada por pipe |
 | `--tokens N` | 64 (512 no chat) | Máximo de tokens novos; para no EOS |
 | `--temperature X` | 0 (guloso) | Amostragem quando > 0 |
 | `--top-k N` / `--top-p X` | 40 / 0,95 | Truncamento da amostragem |
@@ -118,6 +120,37 @@ usou a data da própria pergunta ("natal"). Para isso existe o aterramento.
   - Às vezes escreve "atrás" em vez de "faltam".
 
   Os detalhes estão em [docs/DECISIONS.md](docs/DECISIONS.md), iteração 4.
+
+### Comandos do shell no chat: `!`
+
+Uma linha que começa com `!` roda no shell, e a saída aparece direto no terminal. O modelo não vê o comando nem a saída.
+
+```text
+> !git status --short
+ M README.md
+(código de saída 0)
+> !cd src
+(pasta atual: C:\Users\voce\smolmoe-c99\src)
+```
+
+- **Qual shell:** o mesmo que abriu o smolmoe (PowerShell, pwsh, cmd, Git Bash, bash ou zsh). Se você abriu com duplo
+  clique, ele usa o PowerShell 7, o Windows PowerShell ou o cmd, nessa ordem; fora do Windows, o `$SHELL`. O banner
+  mostra a escolha, e `--shell` passa por cima dela. O perfil do PowerShell não é carregado.
+- **`!cd PASTA`** muda a pasta do próprio chat, e os próximos comandos rodam lá. Ele aceita um caminho, com `~`, mas
+  não variáveis (`cd $HOME`). Cada `!` é um processo novo, então variáveis de ambiente definidas num comando não
+  passam para o seguinte.
+- **Ctrl+C** interrompe o comando, não o chat.
+- **Segurança:**
+  - só roda o que você digita; nada que o modelo escreve vira comando;
+  - **texto colado vira uma mensagem para o modelo**, e nenhuma linha dele roda, nem as que começam com `!`. Isso
+    protege contra texto copiado de sites com linhas escondidas. O chat reconhece a colagem de três jeitos:
+    - pelas marcas que o terminal põe em volta do texto colado (Linux, macOS e Termux);
+    - por linhas que chegam juntas, mais rápido do que alguém digita;
+    - por texto que já estava esperando quando o prompt apareceu;
+  - com entrada por pipe (`type arquivo.txt | qwen-pt.exe`), `!` é texto comum, a menos que se use `--shell-escape`;
+  - um comando cortado por ser longo demais não roda.
+- **Limite honesto (só no console do Windows):** lá o terminal não marca o texto colado, então colar **uma única
+  linha** que já termina com Enter é igual a digitá-la, como seria colá-la direto no PowerShell.
 
 ### Função no chat: contas (`calcular`)
 

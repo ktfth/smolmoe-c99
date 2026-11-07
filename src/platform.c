@@ -305,6 +305,10 @@ static void restore_console(void) {
     if (original_output_cp) SetConsoleOutputCP(original_output_cp);
 }
 
+unsigned console_original_codepage(void) {
+    return original_output_cp != CP_UTF8 ? (unsigned)original_output_cp : 0;
+}
+
 void platform_init(int *argc, char ***argv) {
     int n, i;
     LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &n);
@@ -441,6 +445,10 @@ int read_line_utf8(char *buf, size_t cap, int *truncated) {
 void platform_init(int *argc, char ***argv) {
     (void)argc;
     (void)argv;
+}
+
+unsigned console_original_codepage(void) {
+    return 0;
 }
 
 #endif

@@ -1,5 +1,5 @@
 /* Operating-system layer: Linux/macOS (POSIX) and Windows (Win32).
- * Everything outside platform.c and threadpool.c is portable C99. */
+ * Everything outside platform.c, process.c and threadpool.c is portable C99. */
 #ifndef SMOLMOE_PLATFORM_H
 #define SMOLMOE_PLATFORM_H
 
@@ -43,5 +43,9 @@ int read_line_utf8(char *buf, size_t cap, int *truncated);
 
 /* Converts argv to UTF-8 and sets stdout to binary/UTF-8 on Windows. */
 void platform_init(int *argc, char ***argv);
+/* Windows: the console output code page before platform_init switched it to
+ * UTF-8, so a child program can run with the user's own; 0 when nothing was
+ * switched (and always 0 elsewhere). */
+unsigned console_original_codepage(void);
 
 #endif

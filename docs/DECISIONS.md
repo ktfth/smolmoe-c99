@@ -527,6 +527,49 @@ e o ganho esperado é pequeno pelo mesmo motivo: a fórmula continuaria sendo do
   hipótese central às cegas. No ajudante de comandos, primeiro se mede às cegas o modelo com os exemplos recuperados,
   contra o modelo sem eles. A maquinaria de segurança só é construída se esse ganho aparecer.
 
+## Iteração 8: `!comando` no chat
+
+**Pedido:** uma linha que começa com `!` roda no shell em que o chat está, e só quando o usuário digita. **Decisões do
+usuário:** a saída fica só na tela (o modelo não a vê) e o perfil do PowerShell não é carregado.
+
+### O que a implementação ensinou
+
+- **Qual shell:** o processo que abriu o chat (`pwsh.exe`, `powershell.exe`, `cmd.exe`, `bash.exe`). Com duplo
+  clique quem abre é o Explorer, e vale o shell do sistema. O caminho completo do processo pai distingue o bash do
+  Git do bash da WSL. Um nome passado em `--shell` é procurado só nas pastas do PATH, nunca na pasta atual.
+- **Cada shell recebe a linha de um jeito:**
+  - cmd: `/d /s /c "linha"`, que ele lê como se tivesse sido digitada;
+  - PowerShell: `-Command` com as aspas do `CommandLineToArgvW`. A primeira versão usava `-EncodedCommand`, que
+    dispensa aspas, mas o Windows PowerShell 5.1 escreve os erros em XML (`#< CLIXML`) sempre que a saída é
+    redirecionada. Medido: com `-Command` os códigos de saída são os mesmos do terminal (1 quando o último comando
+    falha);
+  - bash no Windows: o comando vai numa variável de ambiente, e a linha é constante
+    (`-c "eval \"$SMOLMOE_SHELL_COMMAND\""`). O runtime do MSYS separa argumentos com regras próprias para barras
+    antes de aspas, então nenhuma regra de aspas serviria às duas pontas. A variável também entra no `WSLENV`, para o
+    bash da WSL vê-la.
+- **Texto colado.** Um aviso apontou o risco de "pastejacking": colar um texto com uma linha escondida começando com
+  `!` a rodaria. O texto colado vira **uma** mensagem para o modelo, e nada dele roda. Isso também corrigiu um defeito
+  antigo: um parágrafo colado virava várias perguntas. A colagem é reconhecida de três jeitos:
+  1. **Marcas do terminal** (bracketed paste) no Linux, macOS e Termux. O chat pede ao terminal que envolva cada
+     colagem em `ESC[200~ ... ESC[201~` e desliga o eco de caracteres de controle, para as marcas não aparecerem.
+     Isso reconhece até uma linha só, colada com o Enter. O terminal volta ao normal na saída, no Ctrl+C e enquanto
+     um comando roda.
+  2. **Tempo:** depois de ler uma linha, o chat espera 100 ms. Se chegar mais texto nesse intervalo, foi colagem.
+  3. **Texto que já esperava quando o prompt apareceu**, que não foi digitado em resposta a ele. A revisão de código
+     mostrou o furo que isso fecha: uma colagem grande, numa conexão lenta, chega em pedaços, e uma lacuna maior que
+     a janela de tempo faria a linha seguinte parecer digitada. O pedaço seguinte chega enquanto o modelo responde ao
+     primeiro.
+  - **Testado num console de verdade** com um injetor de teclas (`tests/support/console_input.c`), e num pty Linux
+    com o `script`. A linha digitada roda. Não rodam: um bloco colado com o `!` na primeira linha, um `!` escondido
+    no meio, uma colagem em dois pedaços e, no Linux, uma linha só colada com as marcas.
+  - **Limite honesto, só no console do Windows:** ele não tem as marcas na leitura por linha, então colar uma única
+    linha que já termina com Enter é indistinguível de digitá-la, como seria colá-la direto no PowerShell.
+  - **Efeito colateral:** o que se digita antes de o chat ficar pronto, ou enquanto ele responde, também conta como
+    colado. Na dúvida, o chat não executa, avisa, e o comando é digitado de novo.
+- **O console volta como estava.** Um comando pode mudar o modo do console ou a página de código (`chcp 850`) e não
+  restaurá-los; o chat salva e restaura os dois a cada `!`. O caminho do `--stats` é aberto antes da conversa, para
+  um `!cd` não mudar onde o arquivo é gravado.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar.

@@ -11,6 +11,8 @@ export const BINARY = join(BUILD, `smolmoe${EXE}`);
 export const SCALAR_BINARY = join(BUILD, `smolmoe-scalar${EXE}`);
 export const QUANTIZE_BINARY = join(BUILD, `smolmoe-quantize${EXE}`);
 export const BUNDLE_BINARY = join(BUILD, `smolmoe-bundle${EXE}`);
+/** Windows only: types into a program in its own console (tests/support/console_input.c). */
+export const CONSOLE_INPUT_BINARY = join(BUILD, `console-input${EXE}`);
 export const EXE_SUFFIX = EXE;
 
 export interface Stats {
@@ -47,12 +49,14 @@ export function run(args: readonly (string | number)[], binary: string = BINARY)
   };
 }
 
-/** Runs with bytes piped to stdin (interactive chat). */
-export function runWithInput(args: readonly (string | number)[], input: string, binary: string = BINARY): RunResult {
+/** Runs with bytes piped to stdin (interactive chat), optionally in another directory. */
+export function runWithInput(args: readonly (string | number)[], input: string, binary: string = BINARY,
+  cwd?: string): RunResult {
   const proc = Bun.spawnSync([binary, ...args.map(String)], {
     stdin: new TextEncoder().encode(input),
     stdout: "pipe",
     stderr: "pipe",
+    cwd,
   });
   return { code: proc.exitCode ?? -1, stdout: Buffer.from(proc.stdout), stderr: proc.stderr.toString() };
 }

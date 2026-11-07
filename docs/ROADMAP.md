@@ -50,7 +50,8 @@ rodar**: os dois atuais já serviram para decidir.
    contas certas com ela e 11 de 40 sem ela. O modelo escreve a fórmula errada, e o programa calcula exatamente a
    conta errada. Reavaliar quando o Phi-4-mini tiver ferramentas ([DECISIONS.md](DECISIONS.md), iteração 7).
 2. **Ajudante de comandos para bash e PowerShell.** O modelo sugere um comando completo. No Windows o padrão é
-   PowerShell; bash onde existir (Linux, macOS, Git Bash, WSL).
+   PowerShell; bash onde existir (Linux, macOS, Git Bash, WSL). A execução já existe: o usuário roda a sugestão
+   com `!` ([DECISIONS.md](DECISIONS.md), iteração 8), e nada roda sem ele digitar.
    - **Primeiro a hipótese, às cegas.** Antes de construir as conferências e a confirmação, medir num conjunto novo o
      modelo com os 3 exemplos recuperados contra o modelo sem eles, pergunta a pergunta. Sem ganho claro, a ideia cai
      como caiu a calculadora.
