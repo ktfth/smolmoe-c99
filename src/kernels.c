@@ -11,6 +11,9 @@
 #if defined(SM_HAVE_NEON)
 #  include <arm_neon.h>
 #endif
+#if defined(SM_HAVE_WASM_SIMD)
+#  include <wasm_simd128.h>
+#endif
 
 DotQ8 dot_q8 = dot_q8_scalar, dot_q5 = dot_q5_scalar;
 DotQ8x4 dot_q8_x4 = dot_q8_scalar_x4, dot_q5_x4 = dot_q5_scalar_x4;
@@ -340,6 +343,130 @@ void dot_q5_neon_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
 }
 #endif
 
+#if defined(SM_HAVE_WASM_SIMD)
+/* Same structure as the NEON kernels: the 8 lanes of the scalar kernel as two
+ * vectors, lanes 0-3 and 4-7, reduced as reduce8: (lo + hi) holds l0+l4 ..
+ * l3+l7, then (s0+s2) + (s1+s3). */
+static float reduce_wasm(v128_t lo, v128_t hi) {
+    const v128_t s = wasm_f32x4_add(lo, hi);
+    const v128_t t = wasm_f32x4_add(s, wasm_i32x4_shuffle(s, s, 2, 3, 0, 1));
+    return wasm_f32x4_extract_lane(t, 0) + wasm_f32x4_extract_lane(t, 1);
+}
+
+/* 16 weights (sign-extended to 16 bits: wl elements 0-7, wh 8-15) against 16
+ * activations: lane l gets the exact integer sum of products 4l..4l+3. The
+ * 16-bit dot gives pairs in element order; even plus odd pairs give quads. */
+static v128_t quad_sums(v128_t wl, v128_t wh, v128_t x) {
+    const v128_t lo = wasm_i32x4_dot_i16x8(wl, wasm_i16x8_extend_low_i8x16(x));
+    const v128_t hi = wasm_i32x4_dot_i16x8(wh, wasm_i16x8_extend_high_i8x16(x));
+    return wasm_i32x4_add(wasm_i32x4_shuffle(lo, hi, 0, 2, 4, 6), wasm_i32x4_shuffle(lo, hi, 1, 3, 5, 7));
+}
+
+/* acc += d * (float)sum: the scalar kernel's two roundings (SIMD128 has no
+ * fused multiply-add). */
+static v128_t accumulate_wasm(v128_t acc, float d, v128_t sums) {
+    return wasm_f32x4_add(acc, wasm_f32x4_mul(wasm_f32x4_splat(d), wasm_f32x4_convert_i32x4(sums)));
+}
+
+/* One weight block, sign-extended once: elements 0-7, 8-15, 16-23, 24-31. */
+typedef struct WideBlock {
+    v128_t w[4];
+} WideBlock;
+
+static WideBlock widen(v128_t w0, v128_t w1) {
+    WideBlock b;
+    b.w[0] = wasm_i16x8_extend_low_i8x16(w0);
+    b.w[1] = wasm_i16x8_extend_high_i8x16(w0);
+    b.w[2] = wasm_i16x8_extend_low_i8x16(w1);
+    b.w[3] = wasm_i16x8_extend_high_i8x16(w1);
+    return b;
+}
+
+/* lo/hi += d * the block's lane sums against activations x[0..32). */
+static void block_wasm(v128_t *lo, v128_t *hi, float d, const WideBlock *w, const int8_t *x) {
+    *lo = accumulate_wasm(*lo, d, quad_sums(w->w[0], w->w[1], wasm_v128_load(x)));
+    *hi = accumulate_wasm(*hi, d, quad_sums(w->w[2], w->w[3], wasm_v128_load(x + 16)));
+}
+
+/* Block body -> elements 0-15 (*e0) and 16-31 (*e1), minus 16. Byte k of the
+ * u32 holds the high bits of elements 8k..8k+7; a byte compare against its
+ * bit turns each into 0xFF. */
+static void unpack_q5_wasm(const unsigned char *body, v128_t *e0, v128_t *e1) {
+    const v128_t low = wasm_v128_load(body + 4), high = wasm_i32x4_splat((int32_t)rd_u32(body));
+    const v128_t bit = wasm_u8x16_const(1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128);
+    const v128_t sixteen = wasm_u8x16_splat(16);
+    const v128_t p0 = wasm_i8x16_shuffle(high, high, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1);
+    const v128_t p1 = wasm_i8x16_shuffle(high, high, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3);
+    const v128_t h0 = wasm_v128_and(wasm_i8x16_eq(wasm_v128_and(p0, bit), bit), sixteen);
+    const v128_t h1 = wasm_v128_and(wasm_i8x16_eq(wasm_v128_and(p1, bit), bit), sixteen);
+    *e0 = wasm_i8x16_sub(wasm_v128_or(wasm_v128_and(low, wasm_u8x16_splat(15)), h0), sixteen);
+    *e1 = wasm_i8x16_sub(wasm_v128_or(wasm_u8x16_shr(low, 4), h1), sixteen);
+}
+
+static WideBlock q8_block(const unsigned char *w) {
+    return widen(wasm_v128_load(w + 4), wasm_v128_load(w + 20));
+}
+
+static WideBlock q5_block(const unsigned char *w) {
+    v128_t e0, e1;
+    unpack_q5_wasm(w + 2, &e0, &e1);
+    return widen(e0, e1);
+}
+
+float dot_q8_wasm(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    v128_t lo = wasm_f32x4_splat(0.0f), hi = lo;
+    uint32_t b;
+    for (b = 0; b < nb; ++b, w += Q8_BLOCK_BYTES, xq += QK) {
+        const WideBlock wb = q8_block(w);
+        block_wasm(&lo, &hi, rd_f32(w) * xd[b], &wb, xq);
+    }
+    return reduce_wasm(lo, hi);
+}
+
+float dot_q5_wasm(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    v128_t lo = wasm_f32x4_splat(0.0f), hi = lo;
+    uint32_t b;
+    for (b = 0; b < nb; ++b, w += Q5_BLOCK_BYTES, xq += QK) {
+        const WideBlock wb = q5_block(w);
+        block_wasm(&lo, &hi, f16_to_f32(rd_u16(w)) * xd[b], &wb, xq);
+    }
+    return reduce_wasm(lo, hi);
+}
+
+/* Shared body of the 4-row kernels: one weight block (scale ws), widened
+ * once, against four activation rows. */
+static void x4_block_wasm(v128_t lo[4], v128_t hi[4], float ws, const WideBlock *wb, const float *xd,
+                          const int8_t *xq, uint32_t stride) {
+    const size_t qs = (size_t)stride * QK;
+    uint32_t t;
+    for (t = 0; t < 4; ++t) block_wasm(&lo[t], &hi[t], ws * xd[(size_t)t * stride], wb, xq + t * qs);
+}
+
+void dot_q8_wasm_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]) {
+    v128_t lo[4], hi[4];
+    uint32_t b, t;
+    for (t = 0; t < 4; ++t) lo[t] = hi[t] = wasm_f32x4_splat(0.0f);
+    for (b = 0; b < nb; ++b, w += Q8_BLOCK_BYTES, xq += QK, ++xd) {
+        const WideBlock wb = q8_block(w);
+        x4_block_wasm(lo, hi, rd_f32(w), &wb, xd, xq, stride);
+    }
+    for (t = 0; t < 4; ++t) out[t] = reduce_wasm(lo[t], hi[t]);
+}
+
+void dot_q5_wasm_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]) {
+    v128_t lo[4], hi[4];
+    uint32_t b, t;
+    for (t = 0; t < 4; ++t) lo[t] = hi[t] = wasm_f32x4_splat(0.0f);
+    for (b = 0; b < nb; ++b, w += Q5_BLOCK_BYTES, xq += QK, ++xd) {
+        const WideBlock wb = q5_block(w);
+        x4_block_wasm(lo, hi, f16_to_f32(rd_u16(w)), &wb, xd, xq, stride);
+    }
+    for (t = 0; t < 4; ++t) out[t] = reduce_wasm(lo[t], hi[t]);
+}
+#endif
+
 const char *kernels_select(int force_scalar) {
     dot_q8 = dot_q8_scalar;
     dot_q8_x4 = dot_q8_scalar_x4;
@@ -367,6 +494,16 @@ const char *kernels_select(int force_scalar) {
         quantize_q8 = quantize_q8_neon;
         vecmath_select(1);
         return "neon";
+    }
+#elif defined(SM_HAVE_WASM_SIMD)
+    if (!force_scalar) {
+        dot_q8 = dot_q8_wasm;
+        dot_q8_x4 = dot_q8_wasm_x4;
+        dot_q5 = dot_q5_wasm;
+        dot_q5_x4 = dot_q5_wasm_x4;
+        quantize_q8 = quantize_q8_wasm;
+        vecmath_select(1);
+        return "simd128";
     }
 #else
     (void)force_scalar;
@@ -467,6 +604,42 @@ int quantize_q8_neon(const float *x, uint32_t n, float *d, int8_t *q) {
                                 vqmovn_s32(vcvtnq_s32_f32(vmulq_f32(v[2 * k + 1], inv))));
         vst1q_s8(q, vcombine_s8(vqmovn_s16(h[0]), vqmovn_s16(h[1])));
         vst1q_s8(q + 16, vcombine_s8(vqmovn_s16(h[2]), vqmovn_s16(h[3])));
+    }
+    return full * QK < n ? quantize_q8_scalar(x, n - full * QK, d + full, q) : 0;
+}
+#endif
+
+#if defined(SM_HAVE_WASM_SIMD)
+/* Rounds to nearest even, as lrintf; the value is already integral when truncated. */
+static v128_t to_int_wasm(v128_t v, v128_t inv) {
+    return wasm_i32x4_trunc_sat_f32x4(wasm_f32x4_nearest(wasm_f32x4_mul(v, inv)));
+}
+
+/* quantize_q8_scalar() 32 values at a time; a partial last block goes to it.
+ * pmax(m, a) is "m < a ? a : m", the scalar update; |x * inv| stays within
+ * 127, so the saturating narrows never clip. */
+int quantize_q8_wasm(const float *x, uint32_t n, float *d, int8_t *q) {
+    const v128_t big = wasm_f32x4_splat(FLT_MAX);
+    uint32_t b, k, full = n / QK;
+    for (b = 0; b < full; ++b, x += QK, q += QK) {
+        v128_t v[8], h[4], amax = wasm_f32x4_splat(0.0f), ok = wasm_i32x4_splat(-1), inv;
+        float scale;
+        for (k = 0; k < 8; ++k) {
+            v128_t a;
+            v[k] = wasm_v128_load(x + 4 * k);
+            a = wasm_f32x4_abs(v[k]);
+            ok = wasm_v128_and(ok, wasm_f32x4_le(a, big)); /* false for inf and NaN */
+            amax = wasm_f32x4_pmax(amax, a);
+        }
+        if (!wasm_i32x4_all_true(ok)) return -1;
+        amax = wasm_f32x4_pmax(amax, wasm_i32x4_shuffle(amax, amax, 2, 3, 0, 1));
+        amax = wasm_f32x4_pmax(amax, wasm_i32x4_shuffle(amax, amax, 1, 0, 3, 2));
+        scale = wasm_f32x4_extract_lane(amax, 0) / 127.0f;
+        d[b] = scale;
+        inv = wasm_f32x4_splat(inverse_scale(scale));
+        for (k = 0; k < 4; ++k) h[k] = wasm_i16x8_narrow_i32x4(to_int_wasm(v[2 * k], inv), to_int_wasm(v[2 * k + 1], inv));
+        wasm_v128_store(q, wasm_i8x16_narrow_i16x8(h[0], h[1]));
+        wasm_v128_store(q + 16, wasm_i8x16_narrow_i16x8(h[2], h[3]));
     }
     return full * QK < n ? quantize_q8_scalar(x, n - full * QK, d + full, q) : 0;
 }

@@ -1,8 +1,9 @@
 /* Deterministic elementwise math for the forward pass.
  *
- * The scalar and SIMD (AVX2, NEON) paths execute the same operations in the same
- * order (no FMA, no libm), so their results are bit-identical, and unlike the
- * C library's expf they do not change between operating systems. */
+ * The scalar and SIMD (AVX2, NEON, WebAssembly SIMD128) paths execute the
+ * same operations in the same order (no FMA, no libm), so their results are
+ * bit-identical, and unlike the C library's expf they do not change between
+ * operating systems. */
 #ifndef SMOLMOE_VECMATH_H
 #define SMOLMOE_VECMATH_H
 
@@ -27,8 +28,11 @@ void silu_mul_avx2(float *up, const float *gate, size_t n);
 #if defined(SM_HAVE_NEON)
 void silu_mul_neon(float *up, const float *gate, size_t n);
 #endif
+#if defined(SM_HAVE_WASM_SIMD)
+void silu_mul_wasm(float *up, const float *gate, size_t n);
+#endif
 
-/* Points silu_mul at the SIMD (AVX2 or NEON) or the scalar version (called by kernels_select). */
+/* Points silu_mul at the SIMD (AVX2, NEON or SIMD128) or the scalar version (called by kernels_select). */
 void vecmath_select(int simd);
 
 #endif

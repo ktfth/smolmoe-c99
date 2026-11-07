@@ -47,8 +47,18 @@ jobs:
         run: bun scripts/fetch-models.ts
         env:
           GH_TOKEN: ${{ github.token }}
+      # The WebAssembly build: its kernels, logits and chat against the native ones (tests/wasm.test.ts).
+      - uses: mlugg/setup-zig@v2
+        if: matrix.cc == 'gcc'
+        with:
+          version: 0.13.0
+      - name: wasm
+        if: matrix.cc == 'gcc'
+        run: make -j4 wasi
       - name: test
         run: make CC=${{ matrix.cc }} test
+        env:
+          SM_EXPECT_WASM: ${{ matrix.cc == 'gcc' && '1' || '' }}
       - name: sanitize
         run: make CC=${{ matrix.cc }} sanitize
 

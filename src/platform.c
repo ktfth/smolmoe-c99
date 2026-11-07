@@ -24,7 +24,9 @@
 #else
 #  include <fcntl.h>
 #  include <sys/mman.h>
-#  include <sys/resource.h>
+#  if !defined(__wasm__)
+#    include <sys/resource.h>
+#  endif
 #  include <sys/stat.h>
 #  include <time.h>
 #  include <unistd.h>
@@ -331,6 +333,13 @@ void platform_init(int *argc, char ***argv) {
 
 #else /* POSIX */
 
+/* WebAssembly has no shared mappings: its mmap reads a private copy. */
+#if defined(__wasm__)
+#  define MAP_MODE MAP_PRIVATE
+#else
+#  define MAP_MODE MAP_SHARED
+#endif
+
 int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
     int fd = open(path, O_RDONLY);
     struct stat st;
@@ -344,7 +353,7 @@ int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
         snprintf(err, errlen, "not a readable non-empty regular file: %s", path);
     else if ((uint64_t)st.st_size > (uint64_t)SIZE_MAX)
         snprintf(err, errlen, "file too large to map on this platform: %s", path);
-    else if ((p = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED)
+    else if ((p = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_MODE, fd, 0)) == MAP_FAILED)
         snprintf(err, errlen, "cannot map %s: %s", path, strerror(errno));
     close(fd);
     if (p == MAP_FAILED) return 0;
@@ -379,6 +388,9 @@ const char *self_executable_path(void) {
     uint32_t size = sizeof(path);
     if (path[0]) return path;
     return _NSGetExecutablePath(path, &size) == 0 ? path : NULL;
+#elif defined(__wasm__)
+    (void)path; /* a WebAssembly module is not a file the runtime can reopen */
+    return NULL;
 #else
     ssize_t n;
     if (path[0]) return path;
@@ -390,7 +402,11 @@ const char *self_executable_path(void) {
 }
 
 void make_executable(const char *path) {
+#if defined(__wasm__)
+    (void)path; /* no file modes */
+#else
     if (chmod(path, 0755)) die("cannot make %s executable: %s", path, strerror(errno));
+#endif
 }
 
 double now_seconds(void) {
@@ -400,12 +416,17 @@ double now_seconds(void) {
 }
 
 uint64_t rss_peak_bytes(void) {
+#if defined(__wasm__)
+    /* Linear memory only grows: its size is the peak. */
+    return (uint64_t)__builtin_wasm_memory_size(0) * 65536u;
+#else
     struct rusage r;
     if (getrusage(RUSAGE_SELF, &r)) return 0;
-#if defined(__APPLE__)
+#  if defined(__APPLE__)
     return (uint64_t)r.ru_maxrss;
-#else
+#  else
     return (uint64_t)r.ru_maxrss * 1024;
+#  endif
 #endif
 }
 

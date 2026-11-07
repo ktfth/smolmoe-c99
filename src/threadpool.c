@@ -4,6 +4,36 @@
 
 #include "threadpool.h"
 
+/* WebAssembly without threads (the WASI build the tests run): the caller does
+ * all the work. Results are the same for any thread count. */
+#if defined(__wasm__) && !defined(__wasm_atomics__)
+
+struct Pool {
+    uint32_t threads;
+};
+
+Pool *pool_create(uint32_t threads, Memory *mem) {
+    Pool *p = (Pool *)mem_alloc(mem, 1, sizeof(*p));
+    (void)threads;
+    p->threads = 1;
+    return p;
+}
+
+void pool_run(Pool *p, PoolTask task, void *ctx) {
+    (void)p;
+    task(ctx, 0, 1);
+}
+
+uint32_t pool_threads(const Pool *p) {
+    return p->threads;
+}
+
+void pool_destroy(Pool *p) {
+    (void)p;
+}
+
+#else
+
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -171,3 +201,5 @@ void pool_destroy(Pool *p) {
     cond_free(&p->wake);
     mutex_free(&p->lock);
 }
+
+#endif

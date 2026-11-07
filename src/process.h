@@ -1,5 +1,6 @@
 /* Child processes and the user's terminal, for "!comando" in the chat. Like
- * platform.c, this is the operating-system layer: Win32 and POSIX. */
+ * platform.c, this is the operating-system layer: Win32 and POSIX (WebAssembly
+ * has neither processes nor terminal control: "!" is refused there). */
 #ifndef SMOLMOE_PROCESS_H
 #define SMOLMOE_PROCESS_H
 

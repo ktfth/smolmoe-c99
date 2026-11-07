@@ -4,6 +4,7 @@
 #   make sanitize        ASan/UBSan build and tests (Linux/macOS)
 #   make release         stripped, statically linked where supported
 #   make qwen-pt         dist/qwen-pt[.exe]: runtime + Qwen weights in one file
+#   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
 
 CC      ?= cc
 OPT     ?= -O3
@@ -49,7 +50,7 @@ OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
 OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
-.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt
+.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt wasi
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -143,6 +144,33 @@ qwen-pt: release
 	build/release/smolmoe-bundle$(EXE) --model $(QWEN)/model.smoe --config $(QWEN)/config.ini \
 		--tokenizer $(QWEN)/tokenizer.qbp --exe build/release/smolmoe$(EXE) --out dist/qwen-pt$(EXE)
 
+# WebAssembly (WASI) build that the tests run under bun (tests/support/wasi-run.ts):
+# the runtime with SIMD128 kernels, and the kernel tests. Needs zig, whose
+# `zig cc` ships the WASI libc. Single-threaded: WASI has no threads.
+ZIG        ?= zig
+WASI       := build/wasi
+WASI_CC     = $(ZIG) cc -target wasm32-wasi
+WASI_FLAGS  = -O3 $(STD) $(FPFLAGS) -msimd128 -D_WASI_EMULATED_MMAN -MMD -MP
+WASI_LINK  := -s -lwasi-emulated-mman -Wl,-z,stack-size=8388608
+WASI_OBJ   := $(SOURCES:%=$(WASI)/obj/%.o)
+WASI_LIB   := $(LIB:%=$(WASI)/obj/%.o)
+
+$(WASI)/obj/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(WASI_CC) $(WASI_FLAGS) -c $< -o $@
+
+$(WASI)/tests/%.o: tests/%.c
+	@mkdir -p $(dir $@)
+	$(WASI_CC) $(WASI_FLAGS) -Isrc -c $< -o $@
+
+$(WASI)/smolmoe.wasm: $(WASI_OBJ)
+	$(WASI_CC) $^ $(WASI_LINK) -o $@
+
+$(WASI)/test-kernels.wasm: $(WASI)/tests/test_kernels.o $(WASI_LIB)
+	$(WASI_CC) $^ $(WASI_LINK) -o $@
+
+wasi: $(WASI)/smolmoe.wasm $(WASI)/test-kernels.wasm
+
 bench: $(BIN)
 	bun scripts/bench.ts
 
@@ -150,4 +178,4 @@ clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
 -include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
-	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d
+	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI)/tests/test_kernels.d

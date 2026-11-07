@@ -30,6 +30,13 @@
 #  define SM_HAVE_NEON 1
 #endif
 
+/* WebAssembly SIMD128 is chosen at compile time (-msimd128): a module built
+ * with it loads only where SIMD128 exists, which is every current browser.
+ * Relaxed SIMD is never used: its results vary between machines. */
+#if !defined(SM_NO_SIMD) && defined(__wasm_simd128__)
+#  define SM_HAVE_WASM_SIMD 1
+#endif
+
 #define QK 32u
 #define Q8_BLOCK_BYTES 36u /* f32 scale + 32 x int8 */
 #define Q5_BLOCK_BYTES 22u /* f16 scale, u32 high bits (bit j = element j), 16 bytes of low nibbles (j low, j+16 high); value = q - 16 */
@@ -69,6 +76,14 @@ float dot_q5_neon(const unsigned char *w, const float *xd, const int8_t *xq, uin
 void dot_q5_neon_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                     uint32_t stride, float out[4]);
 #endif
+#if defined(SM_HAVE_WASM_SIMD)
+float dot_q8_wasm(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
+void dot_q8_wasm_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]);
+float dot_q5_wasm(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
+void dot_q5_wasm_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]);
+#endif
 
 /* Quantizes n floats into ceil(n/32) blocks; padding is zero. A block whose
  * scale would be subnormal quantizes to zeros. Returns 0, or -1 if the input
@@ -81,6 +96,9 @@ int quantize_q8_avx2(const float *x, uint32_t n, float *d, int8_t *q);
 #endif
 #if defined(SM_HAVE_NEON)
 int quantize_q8_neon(const float *x, uint32_t n, float *d, int8_t *q);
+#endif
+#if defined(SM_HAVE_WASM_SIMD)
+int quantize_q8_wasm(const float *x, uint32_t n, float *d, int8_t *q);
 #endif
 
 /* Expands one Q8 row of `cols` values. */
