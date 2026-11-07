@@ -434,37 +434,40 @@ static const Shell *chat_shell(const Options *o, int terminal, Shell *shell) {
 }
 
 static void run_chat(const Run *r) {
+    Engine engine;
     ChatContext cc;
-    ChatStats cs;
+    const ChatStats *cs = &engine.stats;
     Shell shell;
     Stats *st = r->st;
-    cc.model = r->model;
-    cc.tok = r->tok;
-    cc.sampler = r->sampler;
+    memset(&engine, 0, sizeof(engine));
+    engine.model = r->model;
+    engine.tok = r->tok;
+    engine.sampler = r->sampler;
+    engine.ids = r->ids;
+    engine.piece = r->piece;
+    engine.system = r->system;
+    engine.tools = r->tools;
+    engine.tool_open = r->tool_open;
+    engine.tool_close = r->tool_close;
+    engine.fixed_clock = r->o->fixed_clock ? &r->o->clock : NULL;
+    engine.banned = r->banned;
+    engine.max_reply = r->o->tokens;
+    cc.engine = &engine;
     cc.out = r->out;
-    cc.ids = r->ids;
     cc.line = (char *)r->prompt;
     cc.line_cap = r->prompt_cap;
-    cc.piece = r->piece;
-    cc.system = r->system;
-    cc.tools = r->tools;
-    cc.tool_open = r->tool_open;
-    cc.tool_close = r->tool_close;
-    cc.fixed_clock = r->o->fixed_clock ? &r->o->clock : NULL;
-    cc.banned = r->banned;
-    cc.max_reply = r->o->tokens;
     cc.terminal = stdin_is_terminal();
     cc.shell = chat_shell(r->o, cc.terminal, &shell);
     st->loaded = now_seconds();
-    chat_run(&cc, &cs);
+    chat_run(&cc);
     /* Stats count time spent computing, not time spent waiting for the user. */
-    st->prompt_tokens = cs.prompt_tokens;
-    st->generated = cs.generated;
-    st->processed = cs.prompt_tokens + cs.generated;
-    st->prefill_end = st->loaded + cs.prefill_seconds;
-    st->ended = st->prefill_end + cs.decode_seconds;
-    st->first = cs.generated ? st->loaded + cs.first_token_seconds : 0;
-    st->tool_calls = cs.tool_calls;
+    st->prompt_tokens = cs->prompt_tokens;
+    st->generated = cs->generated;
+    st->processed = cs->prompt_tokens + cs->generated;
+    st->prefill_end = st->loaded + cs->prefill_seconds;
+    st->ended = st->prefill_end + cs->decode_seconds;
+    st->first = cs->generated ? st->loaded + cs->first_token_seconds : 0;
+    st->tool_calls = cs->tool_calls;
 }
 
 /* Chat tools are on when the vocabulary has the call markers, --no-tools is
