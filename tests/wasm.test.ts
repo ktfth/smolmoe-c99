@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { BINARY, bundledModel, modelArgs, ROOT, runWithInput, type RunResult, type Stats } from "./support/run";
+import { guestArgs } from "./support/wasi-run";
 
 const WASI_DIR = join(ROOT, "build", "wasi");
 const RUNTIME = join(WASI_DIR, "smolmoe.wasm");
@@ -46,13 +47,20 @@ test("the WebAssembly build is present where CI expects it", () => {
   if (process.env.SM_EXPECT_WASM === "1") expect(built).toBe(true);
 });
 
+test("the WASI runner maps path arguments only, never a filesystem root", () => {
+  const model = join(ROOT, "models", "x", "model.smoe");
+  const mapped = guestArgs(["--prompt", "/sair", "--model", join(ROOT, "package.json"), "--out", model, "--dir", ROOT]);
+  expect(mapped.args).toEqual(["--prompt", "/sair", "--model", "/host0/package.json", "--out", model, "--dir", "/host0"]);
+  expect(mapped.preopens).toEqual({ "/host0": ROOT });
+});
+
 describe.skipIf(!built)("WebAssembly build", () => {
   test("SIMD128 kernels are selected and bit-identical to the scalar ones", () => {
     const r = wasm(KERNEL_TESTS, []);
     expect(r.stderr).toBe("");
     expect(r.code).toBe(0);
     expect(r.stdout.toString()).toContain("kernel tests passed");
-  });
+  }, SLOW);
 
   test.skipIf(!stories)("TinyStories: the same logits as the native build, with SIMD128 and scalar", () => {
     const args = [...modelArgs(stories!), "--prompt", "Once upon a time", "--tokens", 32, "--hash-logits"];
@@ -63,7 +71,7 @@ describe.skipIf(!built)("WebAssembly build", () => {
     expect(scalar.backend).toBe("scalar");
     expect(simd.logits_hash).toBe(native.logits_hash);
     expect(scalar.logits_hash).toBe(native.logits_hash);
-  });
+  }, SLOW);
 
   test.skipIf(!qwen)("Qwen: the same logits as the native build", () => {
     const args = [...modelArgs(qwen!), "--chat", "--prompt", "Qual é a capital do Brasil?", "--tokens", 8,

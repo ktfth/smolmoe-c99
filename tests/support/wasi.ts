@@ -2,10 +2,14 @@
  * Bun's own node:wasi fails on Windows, and the tests need only a small part
  * of WASI: arguments, stdio, files under preopened directories, clocks and
  * random bytes. Anything else answers ENOSYS. */
-import { closeSync, fstatSync, openSync, readSync, statSync, writeSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { closeSync, constants, fstatSync, openSync, readSync, statSync, writeSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const OK = 0;
+const EACCES = 2;
+const EEXIST = 20;
+const EISDIR = 31;
+const ENOTDIR = 54;
 const EBADF = 8;
 const EINVAL = 28;
 const EIO = 29;
@@ -41,6 +45,24 @@ export type WasiOptions = {
 
 /* A WASI function: numbers in, an errno out (never[] accepts any parameter list). */
 type WasiCall = (...args: never[]) => number;
+
+/* The WASI errno for a failed host file operation. */
+function errnoOf(error: unknown): number {
+  const code = (error as { code?: string }).code;
+  return code === "ENOENT" ? ENOENT : code === "EEXIST" ? EEXIST : code === "EISDIR" ? EISDIR
+    : code === "ENOTDIR" ? ENOTDIR : code === "EACCES" || code === "EPERM" ? EACCES : EIO;
+}
+
+/* writeSync may write less than asked (a pipe); retries until done. */
+function writeAll(fd: number, data: Uint8Array, position: number | null): void {
+  for (let done = 0; done < data.length;) {
+    try {
+      done += writeSync(fd, data, done, data.length - done, position === null ? null : position + done);
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EAGAIN") throw error;
+    }
+  }
+}
 
 /* Thrown by proc_exit to unwind out of the module. */
 class Exit {
@@ -129,7 +151,7 @@ export class Wasi {
     const host = resolve(join(dir.host, this.string(ptr, len)));
     /* Nothing outside the preopened directory. */
     const inside = relative(dir.host, host);
-    return inside.startsWith("..") || isAbsolute(inside) ? undefined : host;
+    return inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside) ? undefined : host;
   }
 
   private filestat(buf: number, type: number, size: number): number {
@@ -168,7 +190,8 @@ export class Wasi {
         return OK;
       },
       random_get: (buf: number, len: number) => {
-        crypto.getRandomValues(this.bytes(buf, len));
+        /* getRandomValues fills at most 65536 bytes per call. */
+        for (let at = 0; at < len; at += 65536) crypto.getRandomValues(this.bytes(buf + at, Math.min(65536, len - at)));
         return OK;
       },
       proc_exit: (code: number) => {
@@ -234,11 +257,15 @@ export class Wasi {
         } else {
           const write = (BigInt(rights) & RIGHT_FD_WRITE) !== 0n || (oflags & (OFLAGS_CREAT | OFLAGS_TRUNC)) !== 0;
           const append = (fdflags & FDFLAGS_APPEND) !== 0;
-          const flags = !write ? "r" : oflags & OFLAGS_TRUNC ? (oflags & OFLAGS_EXCL ? "wx" : "w") : append ? "a" : oflags & OFLAGS_CREAT ? "a+" : "r+";
+          let flags = write ? constants.O_RDWR : constants.O_RDONLY;
+          if (oflags & OFLAGS_CREAT) flags |= constants.O_CREAT;
+          if (oflags & OFLAGS_EXCL) flags |= constants.O_EXCL;
+          if (oflags & OFLAGS_TRUNC) flags |= constants.O_TRUNC;
+          if (append) flags |= constants.O_APPEND;
           try {
             this.fds.set(fd, { kind: "file", host, fd: openSync(host, flags), pos: 0, append });
-          } catch {
-            return ENOENT;
+          } catch (error) {
+            return errnoOf(error);
           }
         }
         this.view().setUint32(out, fd, true);
@@ -286,14 +313,11 @@ export class Wasi {
         for (const [ptr, len] of this.iovecs(iovs, count)) {
           const data = this.bytes(ptr, len);
           try {
-            if (e.kind === "out") writeSync(e.fd, data);
-            else {
-              writeSync(e.fd, data, 0, len, e.append ? null : e.pos);
-              e.pos += len;
-            }
+            writeAll(e.fd, data, e.kind === "file" && !e.append ? e.pos : null);
           } catch {
             return EIO;
           }
+          if (e.kind === "file") e.pos += len;
           total += len;
         }
         this.view().setUint32(nwritten, total, true);
@@ -319,6 +343,16 @@ export class Wasi {
       fd_sync: () => OK,
       fd_datasync: () => OK,
     };
-    return new Proxy(calls, { get: (target, name: string) => target[name] ?? (() => ENOSYS) });
+    /* A host error (a failed stat or read) becomes EIO instead of unwinding
+     * through the module; only proc_exit unwinds. */
+    const guarded = (call: WasiCall): WasiCall => (...args) => {
+      try {
+        return call(...args);
+      } catch (error) {
+        if (error instanceof Exit) throw error;
+        return EIO;
+      }
+    };
+    return new Proxy(calls, { get: (target, name: string) => (target[name] ? guarded(target[name]) : () => ENOSYS) });
   }
 }
