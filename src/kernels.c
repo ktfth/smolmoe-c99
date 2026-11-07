@@ -8,6 +8,9 @@
 #if defined(SM_HAVE_AVX2)
 #  include <immintrin.h>
 #endif
+#if defined(SM_HAVE_NEON)
+#  include <arm_neon.h>
+#endif
 
 DotQ8 dot_q8 = dot_q8_scalar, dot_q5 = dot_q5_scalar;
 DotQ8x4 dot_q8_x4 = dot_q8_scalar_x4, dot_q5_x4 = dot_q5_scalar_x4;
@@ -226,6 +229,117 @@ void dot_q5_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
 }
 #endif
 
+#if defined(SM_HAVE_NEON)
+/* The 8 lanes of the scalar kernel as two vectors: lanes 0-3 and 4-7. The
+ * reduction is reduce8: (lo + hi) holds l0+l4 .. l3+l7, then (s0+s2) + (s1+s3). */
+static float reduce_neon(float32x4_t lo, float32x4_t hi) {
+    float32x4_t s = vaddq_f32(lo, hi);
+    float32x2_t t = vadd_f32(vget_low_f32(s), vget_high_f32(s));
+    return vget_lane_f32(t, 0) + vget_lane_f32(t, 1);
+}
+
+/* One block: lane l gets the exact integer sum of products 4l..4l+3. Pairwise
+ * adds of the 16-bit products give pairs, then quads, in element order. */
+static void block_sums(int8x16_t w0, int8x16_t w1, int8x16_t x0, int8x16_t x1, int32x4_t *lo, int32x4_t *hi) {
+    *lo = vpaddq_s32(vpaddlq_s16(vmull_s8(vget_low_s8(w0), vget_low_s8(x0))), vpaddlq_s16(vmull_high_s8(w0, x0)));
+    *hi = vpaddq_s32(vpaddlq_s16(vmull_s8(vget_low_s8(w1), vget_low_s8(x1))), vpaddlq_s16(vmull_high_s8(w1, x1)));
+}
+
+/* acc += d * (float)sum: the scalar kernel's two roundings (no fused multiply-add). */
+static float32x4_t accumulate_neon(float32x4_t acc, float d, int32x4_t sums) {
+    return vaddq_f32(acc, vmulq_f32(vdupq_n_f32(d), vcvtq_f32_s32(sums)));
+}
+
+/* Block body -> elements 0-15 (*e0) and 16-31 (*e1), minus 16. Byte k of the
+ * u32 holds the high bits of elements 8k..8k+7; vtst turns each into 0xFF. */
+static void unpack_q5_neon(const unsigned char *body, int8x16_t *e0, int8x16_t *e1) {
+    static const uint8_t BIT[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    static const uint8_t PICK0[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
+    static const uint8_t PICK1[16] = {2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3};
+    const uint8x16_t low = vld1q_u8(body + 4), high = vreinterpretq_u8_u32(vdupq_n_u32(rd_u32(body)));
+    const uint8x16_t bit = vld1q_u8(BIT), sixteen = vdupq_n_u8(16);
+    const uint8x16_t h0 = vandq_u8(vtstq_u8(vqtbl1q_u8(high, vld1q_u8(PICK0)), bit), sixteen);
+    const uint8x16_t h1 = vandq_u8(vtstq_u8(vqtbl1q_u8(high, vld1q_u8(PICK1)), bit), sixteen);
+    *e0 = vreinterpretq_s8_u8(vsubq_u8(vorrq_u8(vandq_u8(low, vdupq_n_u8(15)), h0), sixteen));
+    *e1 = vreinterpretq_s8_u8(vsubq_u8(vorrq_u8(vshrq_n_u8(low, 4), h1), sixteen));
+}
+
+float dot_q8_neon(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    float32x4_t lo = vdupq_n_f32(0.0f), hi = lo;
+    uint32_t b;
+    for (b = 0; b < nb; ++b, w += Q8_BLOCK_BYTES, xq += QK) {
+        const int8_t *wq = (const int8_t *)(w + 4);
+        const float d = rd_f32(w) * xd[b];
+        int32x4_t slo, shi;
+        block_sums(vld1q_s8(wq), vld1q_s8(wq + 16), vld1q_s8(xq), vld1q_s8(xq + 16), &slo, &shi);
+        lo = accumulate_neon(lo, d, slo);
+        hi = accumulate_neon(hi, d, shi);
+    }
+    return reduce_neon(lo, hi);
+}
+
+float dot_q5_neon(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    float32x4_t lo = vdupq_n_f32(0.0f), hi = lo;
+    uint32_t b;
+    for (b = 0; b < nb; ++b, w += Q5_BLOCK_BYTES, xq += QK) {
+        const float d = f16_to_f32(rd_u16(w)) * xd[b];
+        int8x16_t w0, w1;
+        int32x4_t slo, shi;
+        unpack_q5_neon(w + 2, &w0, &w1);
+        block_sums(w0, w1, vld1q_s8(xq), vld1q_s8(xq + 16), &slo, &shi);
+        lo = accumulate_neon(lo, d, slo);
+        hi = accumulate_neon(hi, d, shi);
+    }
+    return reduce_neon(lo, hi);
+}
+
+/* Shared body of the 4-row kernels: one weight block (scale ws), four activation rows. */
+static void x4_block(float32x4_t lo[4], float32x4_t hi[4], float ws, int8x16_t w0, int8x16_t w1, const float *xd,
+                     const int8_t *xq, uint32_t stride) {
+    const size_t qs = (size_t)stride * QK;
+    uint32_t t;
+    for (t = 0; t < 4; ++t) {
+        const int8_t *x = xq + t * qs;
+        const float d = ws * xd[(size_t)t * stride];
+        int32x4_t slo, shi;
+        block_sums(w0, w1, vld1q_s8(x), vld1q_s8(x + 16), &slo, &shi);
+        lo[t] = accumulate_neon(lo[t], d, slo);
+        hi[t] = accumulate_neon(hi[t], d, shi);
+    }
+}
+
+#define X4_NEON_INIT(lo, hi)                              \
+    do {                                                  \
+        uint32_t t_;                                      \
+        for (t_ = 0; t_ < 4; ++t_) lo[t_] = hi[t_] = vdupq_n_f32(0.0f); \
+    } while (0)
+
+void dot_q8_neon_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]) {
+    float32x4_t lo[4], hi[4];
+    uint32_t b, t;
+    X4_NEON_INIT(lo, hi);
+    for (b = 0; b < nb; ++b, w += Q8_BLOCK_BYTES, xq += QK, ++xd) {
+        const int8_t *wq = (const int8_t *)(w + 4);
+        x4_block(lo, hi, rd_f32(w), vld1q_s8(wq), vld1q_s8(wq + 16), xd, xq, stride);
+    }
+    for (t = 0; t < 4; ++t) out[t] = reduce_neon(lo[t], hi[t]);
+}
+
+void dot_q5_neon_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
+                    uint32_t stride, float out[4]) {
+    float32x4_t lo[4], hi[4];
+    uint32_t b, t;
+    X4_NEON_INIT(lo, hi);
+    for (b = 0; b < nb; ++b, w += Q5_BLOCK_BYTES, xq += QK, ++xd) {
+        int8x16_t w0, w1;
+        unpack_q5_neon(w + 2, &w0, &w1);
+        x4_block(lo, hi, f16_to_f32(rd_u16(w)), w0, w1, xd, xq, stride);
+    }
+    for (t = 0; t < 4; ++t) out[t] = reduce_neon(lo[t], hi[t]);
+}
+#endif
+
 const char *kernels_select(int force_scalar) {
     dot_q8 = dot_q8_scalar;
     dot_q8_x4 = dot_q8_scalar_x4;
@@ -243,6 +357,16 @@ const char *kernels_select(int force_scalar) {
         quantize_q8 = quantize_q8_avx2;
         vecmath_select(1);
         return "avx2";
+    }
+#elif defined(SM_HAVE_NEON)
+    if (!force_scalar) {
+        dot_q8 = dot_q8_neon;
+        dot_q8_x4 = dot_q8_neon_x4;
+        dot_q5 = dot_q5_neon;
+        dot_q5_x4 = dot_q5_neon_x4;
+        quantize_q8 = quantize_q8_neon;
+        vecmath_select(1);
+        return "neon";
     }
 #else
     (void)force_scalar;
@@ -310,6 +434,39 @@ int quantize_q8_avx2(const float *x, uint32_t n, float *d, int8_t *q) {
         i01 = _mm256_packs_epi32(TO_INT(v0, inv), TO_INT(v1, inv));
         i23 = _mm256_packs_epi32(TO_INT(v2, inv), TO_INT(v3, inv));
         _mm256_storeu_si256((__m256i *)(void *)q, _mm256_permutevar8x32_epi32(_mm256_packs_epi16(i01, i23), order));
+    }
+    return full * QK < n ? quantize_q8_scalar(x, n - full * QK, d + full, q) : 0;
+}
+#endif
+
+#if defined(SM_HAVE_NEON)
+/* quantize_q8_scalar() 32 values at a time; a partial last block goes to it.
+ * vcvtnq rounds to nearest even, as lrintf; |x * inv| stays within 127, so the
+ * saturating narrows never clip. */
+int quantize_q8_neon(const float *x, uint32_t n, float *d, int8_t *q) {
+    const float32x4_t big = vdupq_n_f32(FLT_MAX);
+    uint32_t b, k, full = n / QK;
+    for (b = 0; b < full; ++b, x += QK, q += QK) {
+        float32x4_t v[8], amax = vdupq_n_f32(0.0f), inv;
+        uint32x4_t finite = vdupq_n_u32(0xFFFFFFFFu);
+        int16x8_t h[4];
+        float scale;
+        for (k = 0; k < 8; ++k) {
+            float32x4_t a;
+            v[k] = vld1q_f32(x + 4 * k);
+            a = vabsq_f32(v[k]);
+            finite = vandq_u32(finite, vcleq_f32(a, big)); /* false for inf and NaN */
+            amax = vmaxq_f32(amax, a);
+        }
+        if (vminvq_u32(finite) == 0) return -1;
+        scale = vmaxvq_f32(amax) / 127.0f;
+        d[b] = scale;
+        inv = vdupq_n_f32(inverse_scale(scale));
+        for (k = 0; k < 4; ++k)
+            h[k] = vcombine_s16(vqmovn_s32(vcvtnq_s32_f32(vmulq_f32(v[2 * k], inv))),
+                                vqmovn_s32(vcvtnq_s32_f32(vmulq_f32(v[2 * k + 1], inv))));
+        vst1q_s8(q, vcombine_s8(vqmovn_s16(h[0]), vqmovn_s16(h[1])));
+        vst1q_s8(q + 16, vcombine_s8(vqmovn_s16(h[2]), vqmovn_s16(h[3])));
     }
     return full * QK < n ? quantize_q8_scalar(x, n - full * QK, d + full, q) : 0;
 }

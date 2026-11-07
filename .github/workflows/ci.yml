@@ -51,6 +51,11 @@ jobs:
           bun-version: 1.2.15
       - name: build
         run: make -j4 all scalar
+      # Real-model tests on Windows too: the chat tools and "!" in a real console.
+      - name: models
+        run: bun scripts/fetch-models.ts qwen2.5-0.5b-instruct tinystories-15m
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: test
         run: make test
       - name: release binary
@@ -70,5 +75,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.15
+      # Apple Silicon: NEON. The real-model tests check that NEON, --scalar and the scalar build give
+      # identical logits; the A/B bench reports the speed against the scalar build (and fails if slower).
+      - name: models
+        run: bun scripts/fetch-models.ts qwen2.5-0.5b-instruct tinystories-15m
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: build and test
         run: make -j4 CC=clang test
+      - name: NEON against scalar
+        run: bun scripts/bench.ts --runs 3 --ab build/smolmoe-scalar
