@@ -3,7 +3,9 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { changelogSection, exeSuffix, partNames, sha256File, splitFile, sumsText } from "../scripts/release";
+import {
+  absoluteLinks, changelogSection, exeSuffix, partNames, sha256File, splitFile, sumsText,
+} from "../scripts/release";
 import { tempDir } from "./support/run";
 
 const work = tempDir("release");
@@ -39,6 +41,12 @@ describe("release files", () => {
     expect(changelogSection(changelog, "v0.3.0-rc1")).toBe("### Adicionado\n- !comando\n");
     expect(changelogSection(changelog, "0.2.0")).toBe("- old\n");
     expect(() => changelogSection(changelog, "9.9.9")).toThrow("no \"## 9.9.9\" section");
+  });
+
+  test("relative links point at the tagged files on the release page", () => {
+    const text = "Ver [INSTALL](docs/INSTALL.md), [site](https://x.org) e [acima](#uso).";
+    expect(absoluteLinks(text, "dono/repo", "v0.3.0")).toBe(
+      "Ver [INSTALL](https://github.com/dono/repo/blob/v0.3.0/docs/INSTALL.md), [site](https://x.org) e [acima](#uso).");
   });
 
   test("only Windows executables end in .exe", () => {

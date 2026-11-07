@@ -105,6 +105,11 @@ export function changelogSection(text: string, version: string): string {
   return lines.slice(start + 1, end < 0 ? undefined : end).join("\n").trim() + "\n";
 }
 
+/** Relative links of the repository's Markdown ("](docs/x.md)") made absolute for the release page. */
+export function absoluteLinks(text: string, repo: string, ref: string): string {
+  return text.replace(/\]\((?!https?:|#)([^)]+)\)/g, (_, path: string) => `](https://github.com/${repo}/blob/${ref}/${path})`);
+}
+
 const modelFiles = (dir: string, tokenizer: string) => {
   const base = join(MODELS, dir);
   return ["--model", join(base, "model.smoe"), "--config", join(base, "config.ini"), "--tokenizer", join(base, tokenizer)];
@@ -218,8 +223,10 @@ function main(argv: readonly string[]): void {
     if (!dir || !name) throw new Error("usage: sums DIR NAME [--extra FILE]");
     sums(dir, name, extra);
   } else if (command === "notes") {
-    if (!rest[0]) throw new Error("usage: notes VERSION");
-    process.stdout.write(changelogSection(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), rest[0]));
+    const repo = process.env.GH_REPO;
+    if (!rest[0] || !repo) throw new Error("usage: GH_REPO=owner/name notes VERSION");
+    process.stdout.write(absoluteLinks(changelogSection(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"), rest[0]),
+      repo, rest[0]));
   } else {
     throw new Error("usage: bun scripts/release.ts package|smoke|models|sums|notes ...");
   }
