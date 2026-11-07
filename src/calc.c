@@ -366,9 +366,10 @@ static void words_in(const char *folded, Numbers *ns) {
     if (active) add_number(ns, total + group);
 }
 
-/* "2 mil", "1,5 milhão": the scale word written after digits, else 1. */
+/* "2 mil", "1,5 milhão": the scale word written after digits, else 1. "milhões" is
+ * spelled in octal: a hex escape would swallow the "e" that follows it. */
 static double scale_after(const char *s) {
-    static const char *const MILLIONS[] = {"milh\xc3\xa3o", "milhao", "milh\xc3\xb5" "es", "milhoes"};
+    static const char *const MILLIONS[] = {"milh\xc3\xa3o", "milhao", "milh\303\265es", "milhoes"};
     size_t i, n;
     while (*s == ' ') ++s;
     for (i = 0; i < 4; ++i) {

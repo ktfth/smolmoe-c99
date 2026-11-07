@@ -155,6 +155,8 @@ static void test_grounded(void) {
     CHECK(!calc_grounded("1 +", "Quanto é 1 + 1?"), "unreadable expression");
     CHECK(calc_grounded("2000 * 3", "quanto é 2 mil vezes 3?"), "digits followed by mil");
     CHECK(calc_grounded("1500000 / 3", "divida 1,5 milhão por 3"), "digits followed by milhão");
+    CHECK(calc_grounded("2000000 / 4", "divida 2 milhões por 4"), "digits followed by milhões");
+    CHECK(calc_grounded("2000000 / 4", "divida 2 milhoes por 4"), "digits followed by milhoes, no accent");
     CHECK(calc_grounded("(1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17) / 17",
                         "média de 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 e 17"), "seventeen numbers");
 }
