@@ -30,6 +30,16 @@ size_t tools_system_prompt(const char *system, char *out, size_t cap);
  * about time. Elsewhere small models call tools they do not need. */
 int tools_relevant(const char *user_text);
 
+/* The one tool a message clearly needs, or NULL: "calcular" for a calculation
+ * that names no date or time. Used when the model's own call was discarded
+ * (it picked a tool that does not fit): the runtime then opens that call. */
+const char *tools_forced_choice(const char *user_text);
+
+/* The call text the model would write after <tool_call> up to the first
+ * argument's value, for a forced choice. Returns its length, or 0 when the
+ * tool has no such prefix or it does not fit in cap. */
+size_t tools_call_prefix(const char *tool, char *out, size_t cap);
+
 /* Whether a call fits the user message it answers: data_atual always does;
  * dias_ate only when the message names a date or holiday. A call that does not
  * (or cannot be read) is discarded and the model answers without tools. */

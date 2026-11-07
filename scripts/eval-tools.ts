@@ -4,8 +4,9 @@
  * clock; checks which tool ran (stderr) and whether the answer (stdout) holds
  * the expected fact. Questions that need no tool must not call one.
  *
- * usage: bun scripts/eval-tools.ts [--set dev|holdout|holdout2] [--session] [--verbose] [--model-dir DIR] [--binary PATH]
+ * usage: bun scripts/eval-tools.ts [--set dev|holdout|holdout2|calcdev|calc] [--session] [--no-tools] [--verbose] [--model-dir DIR] [--binary PATH]
  */
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -15,8 +16,10 @@ const NOW = "2026-11-06T10:30"; /* a Friday; Christmas is 49 days away */
 
 interface Case {
   readonly question: string;
-  readonly tool: "data_atual" | "dias_ate" | null;
+  readonly tool: "data_atual" | "dias_ate" | "calcular" | null;
   readonly answer?: string; /* expected substring, case-insensitive */
+  readonly value?: number; /* expected number somewhere in the reply, within tolerance */
+  readonly tolerance?: number;
 }
 
 /* A future date described as past ("49 dias atrás") is a wrong answer even with the right number. */
@@ -36,7 +39,7 @@ const CASES: readonly Case[] = [
   { question: "Que horas são?", tool: "data_atual", answer: "10:30" },
   { question: "Estamos em que mês?", tool: "data_atual", answer: "novembro" },
   { question: "Qual é a capital da França?", tool: null, answer: "Paris" },
-  { question: "Quanto é 7 mais 5?", tool: null, answer: "12" },
+  { question: "Quanto é 7 mais 5?", tool: "calcular", answer: "12" }, /* since the calculator (iteration 7) */
   { question: "Quem escreveu Dom Casmurro?", tool: null, answer: "Machado" },
   { question: "Me dê uma dica curta para estudar melhor.", tool: null },
   { question: "Olá, tudo bem?", tool: null },
@@ -91,18 +94,77 @@ const { values } = parseArgs({
     binary: { type: "string", default: join(ROOT, "build", `smolmoe${EXE}`) },
     verbose: { type: "boolean", default: false },
     session: { type: "boolean", default: false },
-    set: { type: "string", default: "dev" }, /* dev: design set; holdout, holdout2: new questions */
+    "no-tools": { type: "boolean", default: false }, /* baseline: the model alone */
+    set: { type: "string", default: "dev" }, /* dev: design set; holdout, holdout2: new questions; calc */
   },
 });
 
-const SETS: Record<string, readonly Case[]> = { dev: CASES, holdout: HOLDOUT, holdout2: HOLDOUT2 };
-if (!SETS[values.set!]) throw new Error("--set must be dev, holdout or holdout2");
-const SET = SETS[values.set!]!;
+interface CalcItem {
+  readonly id: string;
+  readonly kind: "calc" | "control";
+  readonly question: string;
+  readonly answer?: number;
+  readonly tolerance?: number;
+}
+
+/* tests/goldens/eval-calc.json: written blind (by an agent that saw no code) and committed before the
+ * calculator was finished. Calculations must use "calcular"; controls must call no tool. */
+function calcSet(): Case[] {
+  const items = JSON.parse(readFileSync(join(ROOT, "tests", "goldens", "eval-calc.json"), "utf8")) as CalcItem[];
+  return items.map((q) => q.kind === "calc"
+    ? { question: q.question, tool: "calcular", value: q.answer, tolerance: q.tolerance }
+    : { question: q.question, tool: null });
+}
+
+/* Design set for the calculator: the questions of the earlier diagnosis (iteration 6). Iterate here; the
+ * blind "calc" set is run once, at the end. */
+const CALC_DEV: readonly Case[] = [
+  { question: "Quanto é 15% de 230?", tool: "calcular", value: 34.5, tolerance: 0.01 },
+  { question: "Um produto de 80 reais com 25% de desconto sai por quanto?", tool: "calcular", value: 60, tolerance: 0.01 },
+  { question: "Se eu dividir 100 reais entre 3 pessoas, quanto fica para cada uma?", tool: "calcular", value: 33.333, tolerance: 0.01 },
+  { question: "Quanto é 37 vezes 48?", tool: "calcular", value: 1776, tolerance: 0.001 },
+  { question: "Quanto rende 1000 reais a 1% ao mês durante 12 meses, com juros compostos?", tool: "calcular", value: 1126.825, tolerance: 0.01 },
+  { question: "Qual é a raiz quadrada de 144?", tool: "calcular", value: 12, tolerance: 0.001 },
+  { question: "quanto é sete mais cinco?", tool: "calcular", value: 12, tolerance: 0.001 },
+  { question: "Qual é a capital da França?", tool: null },
+  { question: "Me dê 3 dicas para estudar melhor.", tool: null },
+  { question: "Em que ano o Brasil foi descoberto?", tool: null },
+];
+
+const SETS: Record<string, () => readonly Case[]> = {
+  dev: () => CASES, holdout: () => HOLDOUT, holdout2: () => HOLDOUT2, calcdev: () => CALC_DEV, calc: calcSet,
+};
+if (!SETS[values.set!]) throw new Error("--set must be dev, holdout, holdout2, calcdev or calc");
+const SET = SETS[values.set!]!();
+
+/* Every number in a reply, in each reading its shape allows: Brazilian (1.126,83; 34,5), US thousands
+ * (1,126.83) or a plain decimal point (36.47). A "-" is a sign only after a space or "(" ("10-5" is not -5). */
+function numbersIn(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(/\d+(?:[.,]\d+)*/g)) {
+    const s = m[0], at = m.index ?? 0;
+    const signed = at > 0 && text[at - 1] === "-" && (at === 1 || /[\s(]/.test(text[at - 2]!));
+    const readings = new Set<number>();
+    if (/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(s) || /^\d+(,\d+)?$/.test(s)) readings.add(Number(s.replace(/\./g, "").replace(",", ".")));
+    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) readings.add(Number(s.replace(/,/g, "")));
+    if (/^\d+\.\d+$/.test(s)) readings.add(Number(s));
+    for (const v of readings) out.push(signed ? -v : v);
+  }
+  return out;
+}
+
+/* Wilson 95% interval for k successes in n, in percent. */
+function wilson(k: number, n: number): string {
+  if (!n) return "—";
+  const z = 1.96, p = k / n, d = 1 + z * z / n, c = (p + z * z / (2 * n)) / d;
+  const h = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d;
+  return `${Math.round(100 * (c - h))}–${Math.round(100 * (c + h))}%`;
+}
 
 function chat(questions: readonly string[]): { stdout: string; stderr: string } {
   const dir = values["model-dir"]!;
   const proc = Bun.spawnSync([values.binary!, "--model", join(dir, "model.smoe"), "--config", join(dir, "config.ini"),
-    "--tokenizer", join(dir, "tokenizer.qbp"), "--now", NOW, "--tokens", "96"], {
+    "--tokenizer", join(dir, "tokenizer.qbp"), "--now", NOW, "--tokens", "96", ...(values["no-tools"] ? ["--no-tools"] : [])], {
     stdin: new TextEncoder().encode(`${questions.join("\n")}\n/sair\n`), stdout: "pipe", stderr: "pipe",
   });
   if (proc.exitCode !== 0) throw new Error(`exit ${proc.exitCode}\n${proc.stderr.toString()}`);
@@ -134,17 +196,23 @@ function sessionTurns(): { tools: string[]; answer: string }[] {
 }
 
 const turns = values.session ? sessionTurns() : SET.map(ask);
-let toolOk = 0, answerOk = 0, bothOk = 0, answerCases = 0;
+let toolOk = 0, answerOk = 0, bothOk = 0, answerCases = 0, controls = 0, falseCalls = 0;
 const rows: string[] = [];
 for (const [i, c] of SET.entries()) {
   const { tools, answer } = turns[i]!;
   const rightTool = c.tool ? tools.includes(c.tool) : tools.length === 0;
-  const rightAnswer = (c.answer === undefined || answer.toLowerCase().includes(c.answer.toLowerCase())) &&
+  const rightNumber = c.value === undefined ||
+    numbersIn(answer).some((v) => Math.abs(v - c.value!) <= (c.tolerance ?? 0.01));
+  const rightAnswer = rightNumber && (c.answer === undefined || answer.toLowerCase().includes(c.answer.toLowerCase())) &&
     !(c.tool === "dias_ate" && PAST.test(answer));
   toolOk += Number(rightTool);
-  if (c.answer !== undefined) {
+  if (c.answer !== undefined || c.value !== undefined) {
     answerCases += 1;
     answerOk += Number(rightAnswer);
+  }
+  if (!c.tool) {
+    controls += 1;
+    falseCalls += Number(tools.length > 0);
   }
   bothOk += Number(rightTool && rightAnswer);
   rows.push(`| ${c.question} | ${c.tool ?? "—"} | ${tools.join(", ") || "—"} | ${rightTool && rightAnswer ? "ok" : "FALHA"} |`);
@@ -153,5 +221,6 @@ for (const [i, c] of SET.entries()) {
 
 console.log("| Pergunta | Ferramenta esperada | Chamada | Resultado |\n|---|---|---|---|");
 console.log(rows.join("\n"));
-console.log(`\n${values.session ? "sessão única" : "chats novos"}: ferramenta certa: ${toolOk}/${SET.length}; ` +
-  `resposta certa: ${answerOk}/${answerCases}; ambos: ${bothOk}/${SET.length}`);
+console.log(`\n${values.session ? "sessão única" : "chats novos"}${values["no-tools"] ? " (sem ferramentas)" : ""}: ` +
+  `ferramenta certa: ${toolOk}/${SET.length}; resposta certa: ${answerOk}/${answerCases} (IC 95% ${wilson(answerOk, answerCases)}); ` +
+  `ambos: ${bothOk}/${SET.length}; chamadas indevidas nos controles: ${falseCalls}/${controls}`);

@@ -223,11 +223,13 @@ static void test_relevance(void) {
                                       "Quanto falta para o carnaval?", "Quantos dias faltam para 25/12?",
                                       "Em que dia da semana estamos?", "falta quanto pro meu aniversário?",
                                       "Qual é a data de hoje?", "QUE HORAS SAO"};
-    static const char *const no[] = {"Qual é a capital da França?", "Quanto é 7 mais 5?",
+    static const char *const calc[] = {"Quanto é 7 mais 5?", "Quanto é 15% de 230?", "Divida 100 reais entre 3"};
+    static const char *const no[] = {"Qual é a capital da França?", "Tenho 2 gatos e 1 cachorro.",
                                      "Quem escreveu Dom Casmurro?", "Me dê uma dica curta para estudar melhor.",
                                      "Olá, tudo bem?", "Dias melhores virão é uma música?", ""};
     size_t i;
     for (i = 0; i < sizeof(yes) / sizeof(yes[0]); ++i) CHECK(tools_relevant(yes[i]), "relevant: %s", yes[i]);
+    for (i = 0; i < sizeof(calc) / sizeof(calc[0]); ++i) CHECK(tools_relevant(calc[i]), "calculation: %s", calc[i]);
     for (i = 0; i < sizeof(no) / sizeof(no[0]); ++i) CHECK(!tools_relevant(no[i]), "not relevant: %s", no[i]);
 }
 
@@ -240,6 +242,12 @@ static void test_call_grounded(void) {
     CHECK(!tool_call_grounded(days, strlen(days), "Quantas horas tem um dia?"), "no date: dias_ate discarded");
     CHECK(!tool_call_grounded(days, strlen(days), "O que é um feriado?"), "the word feriado is not a date");
     CHECK(tool_call_grounded(now, strlen(now), "Que horas são?"), "data_atual needs no date");
+    {
+        const char *calc = "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"230 * 15 / 100\"}}";
+        CHECK(tool_call_grounded(calc, strlen(calc), "Quanto é 15% de 230?"), "operands from the message");
+        CHECK(!tool_call_grounded(calc, strlen(calc), "Quanto é 20% de 230?"), "invented operand: discarded");
+        CHECK(!tool_call_grounded(calc, strlen(calc), "Que horas são?"), "calculation unrelated to the message");
+    }
     CHECK(!tool_call_grounded("{\"name\": \"x\"}", 13, "Que horas são?"), "unknown tool");
     CHECK(!tool_call_grounded("{\"name\": ", 9, "Que horas são?"), "unreadable call");
 }
@@ -293,6 +301,47 @@ static void test_result_is_valid_json(void) {
                 "{\"erro\": \"função desconhecida: a\\\"b\\\\c\"}");
 }
 
+/* calcular: the runtime does the arithmetic and phrases the result. */
+static void test_calculate(void) {
+    const char *now = "2026-11-06T10:30";
+    expect_grounded(now, "Quanto é 15% de 230?",
+                    "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"230 * 15 / 100\"}}", "calcular", 1,
+                    "{\"resumo\": \"O resultado é 34,5.\", \"expressao\": \"230 * 15 / 100\", \"resultado\": \"34,5\"}");
+    expect_grounded(now, "Comprei por R$ 1.500 em 2 vezes, quanto fica cada parcela?",
+                    "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"1.500 / 2\"}}", "calcular", 1,
+                    "{\"resumo\": \"O resultado é 750.\", \"expressao\": \"1.500 / 2\", \"resultado\": \"750\"}");
+    expect_grounded(now, "Quanto é 2 dividido por 0?",
+                    "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"2 / 0\"}}", "calcular", 0,
+                    "{\"erro\": \"não consegui calcular: divisão por zero\"}");
+    expect_grounded(now, "Quanto é 2 mais 2?", "{\"name\": \"calcular\", \"arguments\": {}}", "calcular", 0, NULL);
+    expect_grounded(now, "Quanto é 2 × 3?",
+                    "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"2 × (\"}}", "calcular", 0, NULL);
+}
+
+/* When the model's own call was discarded, the runtime may open the one call the message clearly needs. */
+static void test_forced_choice(void) {
+    char prefix[128];
+    CHECK(tools_forced_choice("Um produto de 80 reais com 25% de desconto sai por quanto?") != NULL &&
+              !strcmp(tools_forced_choice("Um produto de 80 reais com 25% de desconto sai por quanto?"), "calcular"),
+          "a calculation only: calcular");
+    CHECK(tools_forced_choice("Quantos dias faltam para 25/12?") == NULL, "a date: no forced choice");
+    CHECK(tools_forced_choice("Que horas são? E quanto é 2 + 2?") == NULL, "date and calculation: ambiguous");
+    CHECK(tools_forced_choice("Qual é a capital da França?") == NULL, "no tool fits");
+    /* A bare n/m is a fraction unless the message also talks about dates. */
+    CHECK(tools_forced_choice("Quanto é 3/4 de 200?") != NULL, "3/4 de 200 is a fraction: calcular");
+    CHECK(tools_forced_choice("Quantos dias até 25/01?") == NULL, "dias até 25/01 is a date");
+    {
+        const char *days = "{\"name\": \"dias_ate\", \"arguments\": {\"data\": \"3/4\"}}";
+        CHECK(!tool_call_grounded(days, strlen(days), "Quanto é 3/4 de 200?"), "dias_ate for a fraction: discarded");
+        CHECK(tool_call_grounded(days, strlen(days), "Quantos dias faltam para 3/4?"), "dias_ate for a date");
+        CHECK(tool_call_grounded(days, strlen(days), "Quanto falta para o dia 3/4?"), "dia 3/4 is a date");
+    }
+    CHECK(tools_call_prefix("calcular", prefix, sizeof(prefix)) > 0 &&
+              !strcmp(prefix, "\n{\"name\": \"calcular\", \"arguments\": {\"expressao\": \""),
+          "the call is opened up to the expression");
+    CHECK(tools_call_prefix("calcular", prefix, 8) == 0, "too small a buffer is refused");
+}
+
 static void test_system_prompt(void) {
     char out[4096];
     size_t n = tools_system_prompt("Seja breve.", out, sizeof(out));
@@ -301,6 +350,8 @@ static void test_system_prompt(void) {
     CHECK(strstr(out, "<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"data_atual\"") != NULL,
           "declares data_atual first");
     CHECK(strstr(out, "\"name\": \"dias_ate\"") != NULL, "declares dias_ate");
+    CHECK(strstr(out, "\"name\": \"calcular\"") != NULL, "declares calcular");
+    CHECK(strstr(out, "230") == NULL, "no example numbers the model could copy");
     CHECK(n > 12 && !strcmp(out + n - 12, "</tool_call>"), "ends with the call format");
     CHECK(tools_system_prompt("Seja breve.", out, 64) == 0, "too small a buffer is refused");
 }
@@ -317,6 +368,8 @@ int main(void) {
     test_lenient_arguments();
     test_invalid_calls();
     test_result_is_valid_json();
+    test_calculate();
+    test_forced_choice();
     test_system_prompt();
     if (failures) {
         fprintf(stderr, "%d tool test(s) failed\n", failures);

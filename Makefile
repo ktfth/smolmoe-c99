@@ -14,7 +14,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output calendar tools chat main
+SOURCES := util platform threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -37,6 +37,7 @@ BIN_SCALAR := $(BUILD)/smolmoe-scalar$(EXE)
 TEST_KERN  := $(BUILD)/test-kernels$(EXE)
 TEST_TOOLS := $(BUILD)/test-tools$(EXE)
 TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
+TEST_CALC  := $(BUILD)/test-calc$(EXE)
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
@@ -84,15 +85,19 @@ $(TEST_KERN): $(BUILD)/tests/test_kernels.o $(OBJ_LIB)
 $(TEST_TOK): $(BUILD)/tests/test_tokenizer.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_CALC): $(BUILD)/tests/test_calc.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 # Q8 row converter of the old Python Qwen importer; kept as the reference for tests/goldens/convert-q8.json (POSIX only).
 $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
+	$(TEST_CALC)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
@@ -129,5 +134,5 @@ bench: $(BIN)
 clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
--include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d \
+-include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
 	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d
