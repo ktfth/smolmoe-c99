@@ -9,6 +9,9 @@
 #if defined(SM_HAVE_NEON)
 #  include <arm_neon.h>
 #endif
+#if defined(SM_HAVE_WASM_SIMD)
+#  include <wasm_simd128.h>
+#endif
 
 SiluMul silu_mul = silu_mul_scalar;
 
@@ -154,11 +157,52 @@ void silu_mul_neon(float *up, const float *gate, size_t n) {
 }
 #endif
 
+#if defined(SM_HAVE_WASM_SIMD)
+/* exp_det() on 2 clamped, finite lanes, operation for operation, before the
+ * final rounding to binary32. The table is read per lane, as in NEON. */
+static v128_t exp_f64x2_wasm(v128_t x) {
+    const v128_t shift = wasm_f64x2_splat(SHIFT);
+    v128_t z = wasm_f64x2_mul(wasm_f64x2_splat(INV_LN2_N), x), kd = wasm_f64x2_add(z, shift), r, p;
+    const uint64_t k0 = (uint64_t)wasm_i64x2_extract_lane(kd, 0), k1 = (uint64_t)wasm_i64x2_extract_lane(kd, 1);
+    kd = wasm_f64x2_sub(kd, shift);
+    r = wasm_f64x2_sub(z, kd);
+    p = wasm_f64x2_add(wasm_f64x2_mul(wasm_f64x2_splat(C4), r), wasm_f64x2_splat(C3));
+    p = wasm_f64x2_add(wasm_f64x2_mul(p, r), wasm_f64x2_splat(C2));
+    p = wasm_f64x2_add(wasm_f64x2_mul(p, r), wasm_f64x2_splat(C1));
+    p = wasm_f64x2_add(wasm_f64x2_mul(p, r), wasm_f64x2_splat(1.0));
+    return wasm_f64x2_mul(p, wasm_i64x2_make((int64_t)(EXP2_TABLE[k0 & 31u] + (k0 << 47)),
+                                             (int64_t)(EXP2_TABLE[k1 & 31u] + (k1 << 47))));
+}
+
+/* The clamp uses pmin/pmax ("b < a ? b : a"), the scalar comparisons exactly. */
+static v128_t exp_wasm(v128_t x) {
+    const v128_t c = wasm_f32x4_pmin(wasm_f32x4_pmax(x, wasm_f32x4_splat(EXP_LO)), wasm_f32x4_splat(EXP_HI));
+    const v128_t lo = wasm_f32x4_demote_f64x2_zero(exp_f64x2_wasm(wasm_f64x2_promote_low_f32x4(c)));
+    const v128_t hi = wasm_f32x4_demote_f64x2_zero(
+        exp_f64x2_wasm(wasm_f64x2_promote_low_f32x4(wasm_i32x4_shuffle(c, c, 2, 3, 0, 1))));
+    const v128_t e = wasm_i32x4_shuffle(lo, hi, 0, 1, 4, 5);
+    return wasm_v128_bitselect(e, x, wasm_f32x4_eq(x, x)); /* a NaN lane stays NaN, as in exp_det */
+}
+
+void silu_mul_wasm(float *up, const float *gate, size_t n) {
+    const v128_t one = wasm_f32x4_splat(1.0f);
+    size_t i;
+    for (i = 0; i + 4 <= n; i += 4) {
+        const v128_t g = wasm_v128_load(gate + i);
+        const v128_t s = wasm_f32x4_div(g, wasm_f32x4_add(one, exp_wasm(wasm_f32x4_neg(g))));
+        wasm_v128_store(up + i, wasm_f32x4_mul(wasm_v128_load(up + i), s));
+    }
+    silu_mul_scalar(up + i, gate + i, n - i);
+}
+#endif
+
 void vecmath_select(int simd) {
 #if defined(SM_HAVE_AVX2)
     silu_mul = simd ? silu_mul_avx2 : silu_mul_scalar;
 #elif defined(SM_HAVE_NEON)
     silu_mul = simd ? silu_mul_neon : silu_mul_scalar;
+#elif defined(SM_HAVE_WASM_SIMD)
+    silu_mul = simd ? silu_mul_wasm : silu_mul_scalar;
 #else
     (void)simd;
     silu_mul = silu_mul_scalar;

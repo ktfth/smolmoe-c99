@@ -164,7 +164,7 @@ static void test_x4_q5(DotQ8x4 fn, const char *name) {
     }
 }
 
-/* The SIMD backend this machine selects (AVX2 or NEON), reached through the
+/* The SIMD backend this machine selects (AVX2, NEON or SIMD128), reached through the
  * dispatch pointers; NULL when only the scalar code runs here, which fails
  * under SM_EXPECT_SIMD=1 (CI) so the comparisons cannot vanish silently. */
 static const char *simd_backend(void) {
@@ -182,6 +182,10 @@ static const char *simd_backend(void) {
 #elif defined(SM_HAVE_NEON)
     CHECK(dot_q8 == dot_q8_neon && dot_q8_x4 == dot_q8_neon_x4 && dot_q5 == dot_q5_neon &&
           dot_q5_x4 == dot_q5_neon_x4 && quantize_q8 == quantize_q8_neon && silu_mul == silu_mul_neon,
+          "%s: a dispatch pointer does not reach the SIMD code", name);
+#elif defined(SM_HAVE_WASM_SIMD)
+    CHECK(dot_q8 == dot_q8_wasm && dot_q8_x4 == dot_q8_wasm_x4 && dot_q5 == dot_q5_wasm &&
+          dot_q5_x4 == dot_q5_wasm_x4 && quantize_q8 == quantize_q8_wasm && silu_mul == silu_mul_wasm,
           "%s: a dispatch pointer does not reach the SIMD code", name);
 #endif
     return name;

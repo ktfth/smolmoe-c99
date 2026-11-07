@@ -4,6 +4,8 @@
 #   make sanitize        ASan/UBSan build and tests (Linux/macOS)
 #   make release         stripped, statically linked where supported
 #   make qwen-pt         dist/qwen-pt[.exe]: runtime + Qwen weights in one file
+#   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
+#   make web             build/web: the browser page (needs zig and bun)
 
 CC      ?= cc
 OPT     ?= -O3
@@ -14,7 +16,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform process threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell chat main
+SOURCES := util platform process threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell engine chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -49,7 +51,7 @@ OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
 OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
-.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt
+.PHONY: all scalar tools test test-unit test-integration sanitize release clean bench models qwen-pt wasi web
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -143,6 +145,65 @@ qwen-pt: release
 	build/release/smolmoe-bundle$(EXE) --model $(QWEN)/model.smoe --config $(QWEN)/config.ini \
 		--tokenizer $(QWEN)/tokenizer.qbp --exe build/release/smolmoe$(EXE) --out dist/qwen-pt$(EXE)
 
+# WebAssembly (WASI) build that the tests run under bun (tests/support/wasi-run.ts):
+# the runtime with SIMD128 kernels, and the kernel tests. Needs zig, whose
+# `zig cc` ships the WASI libc. Single-threaded: WASI has no threads.
+ZIG        ?= zig
+WASI       := build/wasi
+WASI_CC     = $(ZIG) cc -target wasm32-wasi
+WASI_FLAGS  = -O3 $(STD) $(FPFLAGS) -msimd128 -D_WASI_EMULATED_MMAN -MMD -MP
+WASI_LINK  := -s -lwasi-emulated-mman -Wl,-z,stack-size=8388608
+WASI_OBJ   := $(SOURCES:%=$(WASI)/obj/%.o)
+WASI_LIB   := $(LIB:%=$(WASI)/obj/%.o)
+
+$(WASI)/obj/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(WASI_CC) $(WASI_FLAGS) -c $< -o $@
+
+$(WASI)/tests/%.o: tests/%.c
+	@mkdir -p $(dir $@)
+	$(WASI_CC) $(WASI_FLAGS) -Isrc -c $< -o $@
+
+$(WASI)/smolmoe.wasm: $(WASI_OBJ)
+	$(WASI_CC) $^ $(WASI_LINK) -o $@
+
+$(WASI)/test-kernels.wasm: $(WASI)/tests/test_kernels.o $(WASI_LIB)
+	$(WASI_CC) $^ $(WASI_LINK) -o $@
+
+# The same with threads: shared memory imported from the host, which starts
+# worker instances on it (src/threadpool.c). zig 0.13 reads --max-memory as
+# hexadecimal: 7FFF0000 is 2 GiB - 64 KiB.
+WASI_MT_FLAGS = $(WASI_FLAGS) -mcpu=generic+atomics+bulk_memory+simd128
+WASI_MT_LINK := $(WASI_LINK) -Wl,--shared-memory -Wl,--import-memory -Wl,--max-memory=7FFF0000 \
+	-Wl,--export=__stack_pointer
+WASI_MT_OBJ  := $(SOURCES:%=$(WASI)/mt/%.o)
+
+$(WASI)/mt/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(WASI_CC) $(WASI_MT_FLAGS) -c $< -o $@
+
+$(WASI)/smolmoe-mt.wasm: $(WASI_MT_OBJ)
+	$(WASI_CC) -mcpu=generic+atomics+bulk_memory+simd128 $^ $(WASI_MT_LINK) -o $@
+
+wasi: $(WASI)/smolmoe.wasm $(WASI)/smolmoe-mt.wasm $(WASI)/test-kernels.wasm
+
+# The browser page (web/): the threaded objects with src/web.c instead of
+# main, as a reactor (exported functions, no _start), plus the page's
+# TypeScript bundled by bun. Serve build/web with `bun scripts/serve-web.ts`.
+WEB        := build/web
+WEB_OBJ    := $(LIB:%=$(WASI)/mt/%.o) $(WASI)/mt/web.o
+WEB_TS     := $(wildcard web/*.ts)
+
+$(WEB)/smolmoe.wasm: $(WEB_OBJ)
+	@mkdir -p $(dir $@)
+	$(WASI_CC) -mcpu=generic+atomics+bulk_memory+simd128 -mexec-model=reactor $^ $(WASI_MT_LINK) -o $@
+
+$(WEB)/app.js: $(WEB_TS)
+	bun build web/app.ts web/engine-worker.ts web/pool-worker.ts --outdir $(WEB) --target browser --minify
+
+web: $(WEB)/smolmoe.wasm $(WEB)/app.js web/index.html web/vercel.json web/models.json
+	cp web/index.html web/vercel.json web/models.json $(WEB)/
+
 bench: $(BIN)
 	bun scripts/bench.ts
 
@@ -150,4 +211,4 @@ clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
 
 -include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
-	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d
+	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/mt/web.d $(WASI)/tests/test_kernels.d

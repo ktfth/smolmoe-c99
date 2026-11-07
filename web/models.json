@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Qwen 2.5 0.5B Instruct (Q8)",
+    "file": "qwen2.5-0.5b-instruct-q8.smoe",
+    "bytes": 560052800,
+    "sha256": "c681ed90ad9e7d708dd89605ea0a461f9f60f8f51a08401058c2134ad12d4e48",
+    "url": ""
+  }
+]

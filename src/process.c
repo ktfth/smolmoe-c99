@@ -19,6 +19,8 @@
 #  endif
 #  include <windows.h>
 #  include <tlhelp32.h>
+#elif defined(__wasm__)
+#  include <unistd.h>
 #else
 #  include <fcntl.h>
 #  include <poll.h>
@@ -366,6 +368,43 @@ void terminal_input_unbuffered(void) {
     if (stdin_is_terminal()) setvbuf(stdin, NULL, _IONBF, 0);
 }
 
+#if defined(__wasm__)
+
+/* WebAssembly (the browser build, and WASI for the tests): no child processes
+ * and no terminal control. */
+int input_pending(unsigned ms) {
+    (void)ms;
+    return 0;
+}
+
+int bracketed_paste_start(void) { return 0; }
+
+int parent_executable(char *out, size_t cap) {
+    (void)out;
+    (void)cap;
+    return 0;
+}
+
+int find_program(const char *name, char *out, size_t cap) {
+    (void)name;
+    (void)out;
+    (void)cap;
+    return 0;
+}
+
+int run_program(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                int null_stdin, int *status, char *err, size_t errlen) {
+    (void)command_line;
+    (void)env_name;
+    (void)env_value;
+    (void)null_stdin;
+    (void)status;
+    snprintf(err, errlen, "não consegui iniciar %s: o WebAssembly não cria processos", argv[0]);
+    return 0;
+}
+
+#else
+
 int input_pending(unsigned ms) {
     struct pollfd p;
     int n;
@@ -461,6 +500,8 @@ int find_program(const char *name, char *out, size_t cap) {
     return 0;
 }
 
+#endif
+
 int home_directory(char *out, size_t cap) {
     const char *home = getenv("HOME");
     if (!home || !*home || strlen(home) >= cap) return 0;
@@ -478,6 +519,7 @@ int change_directory(const char *path, char *err, size_t errlen) {
     return 0;
 }
 
+#if !defined(__wasm__)
 int run_program(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
                 int null_stdin, int *status, char *err, size_t errlen) {
     posix_spawn_file_actions_t actions;
@@ -528,5 +570,6 @@ int run_program(const char *const *argv, const char *command_line, const char *e
     *status = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
     return 1;
 }
+#endif
 
 #endif

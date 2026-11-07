@@ -19,6 +19,13 @@ Os números, o método e o que foi descartado no caminho estão em [docs/DECISIO
 Cada versão tem binários para Windows, Linux (inclusive ARM e Termux) e macOS, executáveis de arquivo único e os
 modelos, na página de Releases. Como baixar e rodar em cada sistema: [docs/INSTALL.md](docs/INSTALL.md).
 
+## No navegador
+
+A página `web/` roda o mesmo chat inteiro no navegador, em WebAssembly com SIMD e threads. Nada sai do computador,
+e, nos testes, as respostas saem idênticas às do binário nativo. Para rodar localmente, use
+`make ZIG=... web` e depois `bun scripts/serve-web.ts`. Uso, publicação na Vercel e números estão em
+[docs/WEB.md](docs/WEB.md).
+
 ## Um arquivo só: o executável já é o modelo
 
 ```sh
@@ -192,17 +199,17 @@ computação do que a banda economizada. Use-o quando a memória for o limite.
 - **Pesos mapeados em memória** (`mmap` / `MapViewOfFile`): sem cópia, sem cache duplicado, e o SO gerencia as
   páginas. Antes, um cache LRU próprio sobre `pread` mantinha os pesos duas vezes na RAM e era o maior gargalo.
 - **Produto escalar inteiro exato**: as ativações são quantizadas em blocos de 32 (Q8) e a soma de produtos int8 é
-  exata. A acumulação em float segue uma ordem fixa de 8 lanes, que os kernels escalar, AVX2 e NEON reproduzem bit a
-  bit.
+  exata. A acumulação em float segue uma ordem fixa de 8 lanes, que os kernels escalar, AVX2, NEON e SIMD128
+  (WebAssembly) reproduzem bit a bit.
 - **Prefill em lote**: o mesmo código processa N tokens por passada. Cada linha de pesos é lida uma vez para 4 tokens.
 - **Pool de threads com partição estática**: o resultado é o mesmo com qualquer número de threads.
 - **Validação única na carga**: escalas finitas e não negativas, extents e shapes. O laço de inferência não tem checagens
   por acesso.
 
 **Contrato de determinismo:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`,
-`--batch` e kernel (AVX2, NEON ou escalar). A suíte de testes garante isso. A exponencial é própria e idêntica em
+`--batch` e kernel (AVX2, NEON, SIMD128 ou escalar). A suíte de testes garante isso. A exponencial é própria e idêntica em
 todo sistema operacional; entre sistemas ainda não há garantia formal só porque as tabelas de RoPE usam `cos`/`sin`
-da libm local.
+da libm local (na prática, Windows, Linux e WebAssembly já dão o mesmo hash nos modelos testados).
 
 ## Desenvolvimento
 
@@ -210,6 +217,7 @@ da libm local.
 make test        # testes unitários em C + suíte de integração (bun test)
 make sanitize    # ASan/UBSan (Linux/macOS)
 make release     # binário otimizado e enxuto (estático no Windows)
+make ZIG=zig wasi web   # WebAssembly: módulos WASI para os testes e a página do navegador (precisa do zig 0.13)
 bun scripts/bench.ts                                    # medianas de leitura/escrita e tempo por fase
 bun scripts/bench.ts --ab build/smolmoe-base.exe        # A/B alternado contra um binário anterior
 ```

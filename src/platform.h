@@ -1,4 +1,5 @@
-/* Operating-system layer: Linux/macOS (POSIX) and Windows (Win32).
+/* Operating-system layer: Linux/macOS (POSIX), Windows (Win32) and WebAssembly
+ * (POSIX through WASI or Emscripten, without processes or a terminal).
  * Everything outside platform.c, process.c and threadpool.c is portable C99. */
 #ifndef SMOLMOE_PLATFORM_H
 #define SMOLMOE_PLATFORM_H
