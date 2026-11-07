@@ -50,6 +50,17 @@ representation, token ID ordering and rotary row order (provenance JSON). The
 validation reference in `scripts/ref/` is an independent reimplementation; no
 upstream inference code is included.
 
+## Dear ImGui (desktop window)
+
+`third_party/imgui/` holds Dear ImGui v1.91.9b by Omar Cornut and contributors,
+under the MIT license kept in `third_party/imgui/LICENSE.txt`. Source:
+https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9b.tar.gz, SHA-256
+`8e1bbc76c71d74fef2fb85db7e7ca8eba13d6a86623c54992b60162db554ffdb`. Only the
+core, `misc/cpp/imgui_stdlib` and the Win32, Direct3D 11, GLFW and OpenGL 3
+backends are copied, unmodified. It is compiled only into `smolmoe-gui`; the
+runtime and the terminal chat do not use it. On Linux and macOS the window links
+the system's GLFW (zlib/libpng license), which is not bundled.
+
 ## Unicode data
 
 `src/unicode_class.h` (UnicodeData.txt 16.0.0) and `src/unicode_nfc.h`
