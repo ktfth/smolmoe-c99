@@ -21,6 +21,9 @@ autenticado (`gh auth login`). Sem tag, `gh release download` baixa a versão ma
 No Linux e no macOS, a janela ainda não vem pronta: ela é compilada com `make gui`. O guia `docs/CAMINHOS.md`, no
 repositório, compara todos os jeitos de rodar.
 
+O Gemma 3 não vem nos arquivos do Release: baixe e converta os pesos localmente seguindo [MODELS.md](MODELS.md).
+O acesso ao checkpoint do Hugging Face exige aceitar os termos do Gemma.
+
 ### Janela (Windows)
 
 ```powershell
@@ -90,7 +93,8 @@ Na janela, a última linha vira `smolmoe-gui-windows-x64.exe phi-4-mini-instruct
 dobro do terminal, e por isso o Phi pede cerca de 0,5 GB a mais; `--context 2048` iguala ao terminal. O Phi ainda não
 foi testado na janela.
 
-O chat do Phi ainda não tem as ferramentas (datas e contas).
+O chat do Phi oferece as cinco ferramentas locais: `data_atual`, `dias_ate`, `calcular`, `converter` e `contar`.
+Use `--no-tools` para desativá-las; veja os detalhes no [README](../README.md).
 
 ### Conferir os arquivos
 

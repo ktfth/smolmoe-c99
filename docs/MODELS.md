@@ -9,7 +9,7 @@ pesos (`model.smoe`), o tokenizer, a `config.ini` e a `provenance.json`. Os dois
 | `models/qwen2.5-0.5b-instruct` | Qwen2.5-0.5B-Instruct, Q8 | Chat em português (`--chat`) | 531 MiB |
 | `models/tinystories-15m` | TinyStories 15M (llama2.c), Q8 | Histórias curtas em inglês; testes rápidos | 26 MiB |
 | `models/gemma-3-1b-it` | Gemma 3 1B Instruct (Google), Q8 | Chat equilibrado; por conversão (`make gemma-weights`) | ~1,0 GiB |
-| `models/gemma-3-270m-it` | Gemma 3 270M Instruct (Google), Q8 | Chat ultraleve; por conversão (`convert.ts gemma3`) | ~280 MiB |
+| `models/gemma-3-270m-it` | Gemma 3 270M Instruct (Google), Q8 | Conversão disponível; pesos ainda sem validação ponta a ponta | ~280 MiB |
 | `models/phi-4-mini-instruct` | Phi-4-mini-instruct (Microsoft), Q8 | Chat de mais qualidade, mais lento; só por conversão (opção 2) | 4,0 GiB |
 
 ## Opção 1: baixar os pesos já convertidos

@@ -2,11 +2,13 @@
 
 A página `web/` roda o chat inteiro no navegador de quem a abre, em WebAssembly. O servidor só entrega arquivos
 estáticos (a página, o `.wasm` de 240 KB e os pesos), e nenhuma mensagem sai do computador. É o mesmo código C do
-binário nativo e o mesmo motor de conversa (`src/engine.c`), com as ferramentas de data e de conta.
+binário nativo e o mesmo motor de conversa (`src/engine.c`), com as cinco ferramentas locais: `data_atual`, `dias_ate`,
+`calcular`, `converter` e `contar`.
 
-**Por enquanto, a página é para rodar no seu computador** (decisão de 2026-11-07): `make web`, o servidor local e
-um `.smoe` aberto do disco. A seção sobre publicar fica para quando houver publicação. Os outros jeitos de rodar
-estão em [CAMINHOS.md](CAMINHOS.md).
+**Por enquanto, a página é para rodar no seu computador** (decisão de 2026-11-07): `make run-web` compila e inicia o
+servidor local; o Qwen local fica disponível para abrir na página. Outros modelos podem ser abertos como `.smoe`
+autocontidos. A seção sobre publicar fica para quando houver publicação. Os outros jeitos de rodar estão em
+[CAMINHOS.md](CAMINHOS.md).
 
 ## Usar
 
@@ -14,18 +16,29 @@ estão em [CAMINHOS.md](CAMINHOS.md).
    e threads, mas ainda não foram testados.
 2. Escolha uma das opções:
    - **Abrir arquivo .smoe:** use o `qwen2.5-0.5b-instruct-q8.smoe` (560 MB) da página de releases.
-   - **Baixar e abrir:** aparece quando `web/models.json` tem uma URL pública para os pesos. Depois que o modelo
+   - **Baixar e abrir:** aparece quando o `models.json` servido tem uma URL para os pesos. O servidor de `make run-web`
+     aponta para o Qwen local; numa hospedagem, configure `web/models.json`. Depois que o modelo
      abre, uma cópia vai para o cache do navegador, e só a primeira visita baixa. Uma cópia de tamanho errado, ou
      que o motor recusa, nunca fica no cache. A chave leva o SHA-256 do modelo, então uma versão nova é baixada de
      novo.
-3. A primeira mensagem demora uns 20 s a mais, porque o prompt do sistema, com a declaração das ferramentas (~400
-   tokens), é processado a cada abertura.
+   - **Gemma 3 1B:** o conversor gera por padrão um diretório com `model.smoe`, config e tokenizer separados. Para abrir
+     no navegador, gere um `.smoe` autocontido v3:
+
+     ```sh
+     bun scripts/convert.ts gemma3 downloads/gemma-3-1b-it models/gemma-3-1b-it --container v3
+     ```
+
+     Escolha `models/gemma-3-1b-it/model.smoe` em "Abrir arquivo .smoe". O checkpoint precisa estar baixado e os
+     termos aceitos; veja [MODELS.md](MODELS.md).
+3. A primeira mensagem demora mais porque o prompt do sistema, com as declarações das ferramentas, é processado a cada
+   abertura.
 
 O `!comando` não existe na página: o navegador não tem shell.
 
 ## Construir e testar localmente
 
 ```sh
+make run-web                         # compila e inicia a página em localhost:8080
 make ZIG=/caminho/do/zig web        # build/web: index.html, app.js, workers, smolmoe.wasm, vercel.json
 bun scripts/serve-web.ts            # http://localhost:8080/, com os cabeçalhos COOP/COEP
 ```

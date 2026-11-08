@@ -1,7 +1,8 @@
 # smolmoe numa janela
 
-`smolmoe-gui` é o chat numa janela. Ele usa o mesmo motor de conversa do terminal e da página web (`src/engine.c`),
-os mesmos padrões (menos o contexto, que aqui é 4096) e as mesmas ferramentas de data e de conta. Ela escreve quase
+`smolmoe-gui` é o chat numa janela. Com modelos que oferecem chat, usa o mesmo motor de conversa do terminal e da
+página web (`src/engine.c`), os mesmos padrões (menos o contexto, que aqui é 4096) e as mesmas cinco ferramentas locais:
+`data_atual`, `dias_ate`, `calcular`, `converter` e `contar`. Ela escreve quase
 na velocidade do terminal: 20 a 25 tokens/s com o Qwen no notebook de testes, contra 23 a 27 no terminal. Nada sai
 do computador.
 
@@ -18,6 +19,10 @@ do computador.
 Os passos para baixar do Release (o repositório é privado) estão em [INSTALL.md](INSTALL.md). No Windows, como o
 binário não tem assinatura digital, o SmartScreen pode avisar na primeira vez: "Mais informações" e "Executar assim
 mesmo".
+
+Para abrir diretamente com os pesos locais, `make run-gui` usa o Qwen e `make run-gui gemma` usa o Gemma 3 1B. Na
+primeira execução do Gemma, o Makefile baixa e converte o checkpoint; isso exige `HF_TOKEN` e o aceite dos termos do
+Gemma no Hugging Face.
 
 ### De onde vem o modelo
 

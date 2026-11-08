@@ -37,12 +37,14 @@ make qwen-gui
 
 ### 2. Usando o runtime `smolmoe` direto com a pasta `models/` (ou apelidos)
 
-Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `gemma`, `phi`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
+Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `gemma`, `gemma-270m`, `phi`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
 
 ```sh
 # Atalhos diretos via make:
 make chat              # abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi)
 make run-gui           # abre a janela gráfica (MODEL=qwen|qwen-q5|gemma|phi)
+make chat gemma        # abre o chat no terminal com Gemma 3 1B
+make run-gui gemma     # abre a janela com Gemma 3 1B
 
 # Ou chamando os binários diretamente por apelido ou pasta:
 ./build/smolmoe qwen
@@ -67,7 +69,7 @@ bun scripts/serve-web.ts 3000  # ou escolha a porta diretamente (ex.: http://loc
 | **Qwen2.5-0.5B-Instruct** | 0,5B | Q8_0 | 556 MB | ~0,6 GB | 22–27 tok/s | `qwen` / `make qwen` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **Qwen2.5-0.5B-Instruct** | 0,5B | Q5_0 | 340 MB | ~0,4 GB | 15–18 tok/s | `qwen-q5` / `make qwen-q5` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **Gemma-3-1B-Instruct** | 1,0B | Q8_0 | ~1,0 GB | ~1,2 GB | ~12 tok/s | `gemma` / `make gemma` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
-| **Gemma-3-270M-Instruct** | 0,27B | Q8_0 | ~290 MB | ~0,4 GB | ~35 tok/s | `gemma-270m` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Gemma-3-270M-Instruct** | 0,27B | Q8_0 | ~290 MB | não medido | não medido | CLI: `gemma-270m` | Conversão e uso com esses pesos ainda não validados ponta a ponta |
 | **Phi-4-mini-instruct** | 3,8B | Q8_0 | 4,3 GB | ~4,4 GB | ~4 tok/s | `phi` / `make phi` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **TinyStories-15M** | 15M | Q8_0 | 27 MB | < 0,1 GB | > 200 tok/s | `stories` / `make stories` | Apenas continuação de texto em inglês (sem template de chat) |
 
@@ -99,7 +101,7 @@ Basta executar o binário sem `--prompt`. O cache KV é reaproveitado entre mens
 
 ```text
 $ ./dist/qwen-pt
-smolmoe 0.4.0 - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.
+smolmoe 0.5.0 - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.
 Ferramentas: data_atual, dias_ate, calcular, converter, contar.
 Comandos: !comando roda no pwsh.
 
@@ -122,7 +124,7 @@ Saída:
 
 ```text
 12
-{"version":"0.4.0","backend":"avx2","threads":4,"batch":32,...,"ttft_seconds":0.858,"prefill_tokens_per_second":79.7,...}
+{"version":"0.5.0","backend":"avx2","threads":4,"batch":32,...,"ttft_seconds":0.858,"prefill_tokens_per_second":79.7,...}
 ```
 
 ### Ferramentas nativas no chat (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`)
@@ -249,11 +251,11 @@ docs/         Documentação detalhada de arquitetura, formato binário, modelos
 - **[docs/INSTALL.md](docs/INSTALL.md)** — Download e verificação dos binários prontos do GitHub Releases.
 - **[docs/DESKTOP.md](docs/DESKTOP.md)** — Uso, atalhos e detalhes técnicos da interface gráfica (Dear ImGui).
 - **[docs/WEB.md](docs/WEB.md)** — Como compilar e servir a versão WebAssembly no navegador.
-- **[docs/MODELS.md](docs/MODELS.md)** — Como baixar, verificar ou converter modelos (Qwen2.5, Phi-4-mini, Q5) do Hugging Face.
+- **[docs/MODELS.md](docs/MODELS.md)** — Como baixar, verificar ou converter modelos (Qwen2.5, Gemma 3, Phi-4-mini, Q5) do Hugging Face.
 - **[docs/FORMAT.md](docs/FORMAT.md)** — Especificação binária dos contêineres `SMOEQ8`/`SMOEQ5` (v1, v2, v3), tokenizers (`SMQBP1`, `SMSPB1`) e trailer `SMOEBDL1`.
 - **[docs/DECISIONS.md](docs/DECISIONS.md)** — Histórico de engenharia, benchmarks A/B e experimentos descartados.
 - **[docs/ROADMAP.md](docs/ROADMAP.md)** — Próximos passos de otimização, novos modelos e ferramentas.
 
 ## Licença
 
-Código-fonte sob licença [MIT](LICENSE). Os pesos convertidos mantêm as licenças originais de cada modelo (Apache-2.0 para Qwen2.5, MIT para Phi-4-mini e TinyStories); consulte [THIRD_PARTY.md](THIRD_PARTY.md).
+Código-fonte sob licença [MIT](LICENSE). Os pesos convertidos mantêm as condições de uso do modelo original (Apache-2.0 para Qwen2.5; Gemma Terms of Use para Gemma 3; MIT para Phi-4-mini e TinyStories); consulte [docs/MODELS.md](docs/MODELS.md) e [THIRD_PARTY.md](THIRD_PARTY.md).
