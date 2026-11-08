@@ -46,8 +46,8 @@ rodar**: os dois atuais já serviram para decidir.
 3. **Lacunas do portão e do `dias_ate`.** Falta "ano" na lista de palavras, e falta entender dia da semana
    ("até sexta").
 4. **Ferramentas do usuário** (`tools` no estilo OpenAI) junto com o servidor local.
-5. **Ferramentas no chat do Phi-4-mini.** As fontes divergem sobre o formato de chamada (`<|tool_call|>` ou
-   `functools[...]`); medir no próprio modelo antes de ligar.
+5. **Medir a qualidade das ferramentas no Phi-4-mini.** O runtime passou a reconhecer o formato de chamada do
+   tokenizer Phi na v0.5.0; falta medir o próprio modelo num conjunto novo de perguntas.
 
 ## `!comando` no chat: o que falta testar
 
@@ -64,7 +64,8 @@ rodar**: os dois atuais já serviram para decidir.
 
 1. **`calcular`: no `main` por decisão do usuário, mas empatada no teste às cegas com o Qwen 0,5B.** Foram 12 de 40
    contas certas com ela e 11 de 40 sem ela. O modelo escreve a fórmula errada, e o programa calcula exatamente a
-   conta errada. Reavaliar quando o Phi-4-mini tiver ferramentas ([DECISIONS.md](DECISIONS.md), iteração 7).
+   conta errada. Reavaliar com o Phi-4-mini, que passou a ter as ferramentas no chat na v0.5.0
+   ([DECISIONS.md](DECISIONS.md), iteração 7).
 2. **Ajudante de comandos para bash e PowerShell.** O modelo sugere um comando completo. No Windows o padrão é
    PowerShell; bash onde existir (Linux, macOS, Git Bash, WSL). A execução já existe: o usuário roda a sugestão
    com `!` ([DECISIONS.md](DECISIONS.md), iteração 8), e nada roda sem ele digitar.
@@ -85,7 +86,8 @@ rodar**: os dois atuais já serviram para decidir.
    - Medido sem exemplos: o Qwen 0,5B acertou 1 de 9 comandos bash e 1 de 4 PowerShell; com 3 exemplos, 6 de 9. O
      Phi-4-mini acertou de primeira um `Rename-Item` que o Qwen errava.
 3. **Calendário estendido:** dia da semana de qualquer data, "daqui a N dias" e a diferença entre datas.
-4. **`converter`** (unidades) e **`contar`** (letras e palavras).
+4. **`converter`** (unidades) e **`contar`** (letras e palavras) foram implementadas na v0.5.0; falta medi-las num
+   conjunto novo de perguntas.
 
 ## Rumo ao "llamafile": um executável que já é o modelo
 
@@ -158,18 +160,12 @@ Em aberto:
 
 ## Capacidade de modelo
 
-Feito: **Phi-4-mini** (iteração 6) e o **conversor em TypeScript** para Qwen2 e Phi-3. Falta portar o do TinyStories
+Feito: **Phi-4-mini** (iteração 6), **Gemma 3 1B** (runtime, tokenizer, conversor e uso pelo chat; conferido com
+os pesos locais) e o **conversor em TypeScript** para Qwen2, Phi-3 e Gemma 3. Falta portar o do TinyStories
 (`tools/import_llama2c.py`).
 
-1. **Gemma 3 (1B e 270M).** Aguarda o aceite dos termos no Hugging Face (`HF_TOKEN`). Exige no motor:
-   - ativação GELU;
-   - 4 normalizações por camada;
-   - normalização de Q/K;
-   - atenção local de 512 tokens em 5 de cada 6 camadas;
-   - duas frequências de RoPE;
-   - tamanho de cabeça desacoplado da largura.
-
-   Exige também um tokenizer SentencePiece de 262 mil peças e o template de chat do Gemma.
+1. **Gemma 3 270M.** O suporte à arquitetura foi implementado junto com o 1B; falta validar a conversão e o uso
+   ponta a ponta dos pesos 270M. O comando de download disponível hoje busca o checkpoint 1B.
 2. **Um MoE treinado de verdade.** O candidato mais leve é o Granite 3.1 1B-A400M (IBM, Apache-2.0: 32 experts, 8
    ativos, cerca de 400M parâmetros ativos). Também OLMoE-1B-7B. Exigem roteamento softmax (hoje é só sigmoide),
    fatores de escala e tokenizer próprio. Sem esse item, o "MoE" do nome continua sem prova.

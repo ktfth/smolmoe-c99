@@ -14,6 +14,7 @@ const number = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
 const ui = {
   setup: $("setup"),
   modelName: $("model-name"),
+  modelSelect: $<HTMLSelectElement>("model-select"),
   modelHelp: $("model-help"),
   download: $<HTMLButtonElement>("download"),
   file: $<HTMLInputElement>("file"),
@@ -123,7 +124,7 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
       ui.setup.hidden = true;
       ui.chat.hidden = false;
       showStats(m.stats);
-      addMessage("notice", `Modelo pronto em ${number.format(m.stats.prefillSeconds)} s. Ferramentas: data, dias até uma data e contas.`);
+      addMessage("notice", `Modelo pronto em ${number.format(m.stats.prefillSeconds)} s. Ferramentas: data_atual, dias_ate, calcular, converter, contar.`);
       ui.input.focus();
       break;
     case "text":
@@ -152,26 +153,40 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
 
 async function init(): Promise<void> {
   const problem = unsupported();
-  let model: ModelEntry | undefined;
+  let models: ModelEntry[] = [];
   try {
-    model = ((await (await fetch("./models.json")).json()) as ModelEntry[])[0];
+    models = (await (await fetch("./models.json")).json()) as ModelEntry[];
   } catch {
-    model = undefined;
+    models = [];
   }
-  if (model) {
+  let selected: ModelEntry | undefined = models[0];
+  const renderModel = (model: ModelEntry | undefined) => {
+    selected = model;
+    if (!model) return;
     ui.modelName.textContent = model.name;
     ui.modelHelp.textContent = model.url
-      ? `${number.format(model.bytes / MB)} MB, baixados uma vez e guardados no navegador. Ou abra o arquivo ${model.file} que você já tem.`
-      : `Abra o arquivo ${model.file} (${number.format(model.bytes / MB)} MB), baixado da página de releases do projeto.`;
+      ? `${number.format(model.bytes / MB)} MB, carregados localmente ou guardados no cache do navegador. Ou abra outro arquivo .smoe.`
+      : `Abra o arquivo ${model.file} (${number.format(model.bytes / MB)} MB) convertido ou baixado do Release.`;
     ui.download.hidden = !model.url;
+  };
+  if (models.length > 1) {
+    ui.modelSelect.hidden = false;
+    models.forEach((m, idx) => {
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = m.url ? `${m.name} (disponível)` : m.name;
+      ui.modelSelect.append(opt);
+    });
+    ui.modelSelect.onchange = () => renderModel(models[Number(ui.modelSelect.value)]);
   }
+  renderModel(selected);
   if (problem) {
     setStatus(problem, true);
     ui.download.disabled = true;
     ui.file.disabled = true;
     return;
   }
-  ui.download.onclick = () => start({ type: "open", model, context: DEFAULT_CONTEXT, threads: threads() });
+  ui.download.onclick = () => start({ type: "open", model: selected, context: DEFAULT_CONTEXT, threads: threads() });
   ui.file.onchange = () => {
     const file = ui.file.files?.[0];
     if (file) start({ type: "open", file, context: DEFAULT_CONTEXT, threads: threads() });

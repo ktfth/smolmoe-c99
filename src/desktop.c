@@ -57,6 +57,50 @@ int desktop_has_bundle(void) {
     return 1;
 }
 
+/* `name` in the directory of `path`, allocated from mem; NULL when it does not exist. */
+static char *beside(Desktop *d, const char *path, const char *name) {
+    size_t dir = strlen(path);
+    char *joined;
+    FILE *f;
+    while (dir && path[dir - 1] != '/' && path[dir - 1] != '\\') --dir;
+    joined = (char *)mem_alloc(&d->mem, add_size(dir, strlen(name) + 1), 1);
+    memcpy(joined, path, dir);
+    strcpy(joined + dir, name);
+    f = open_file(joined, "rb");
+    if (!f) return NULL;
+    fclose(f);
+    return joined;
+}
+
+static const char *resolve_desktop_path(Desktop *d, const char *arg) {
+    size_t len;
+    if (!arg) return NULL;
+    if (!strcmp(arg, "qwen") || !strcmp(arg, "qwen-pt")) return "models/qwen2.5-0.5b-instruct/model.smoe";
+    if (!strcmp(arg, "qwen-q5") || !strcmp(arg, "qwen-pt-q5")) return "models/qwen2.5-0.5b-instruct/model-q5.smoe";
+    if (!strcmp(arg, "gemma") || !strcmp(arg, "gemma-3") || !strcmp(arg, "gemma-3-1b"))
+        return "models/gemma-3-1b-it/model.smoe";
+    if (!strcmp(arg, "gemma-270m") || !strcmp(arg, "gemma-3-270m"))
+        return "models/gemma-3-270m-it/model.smoe";
+    if (!strcmp(arg, "phi") || !strcmp(arg, "phi-4") || !strcmp(arg, "phi-4-mini"))
+        return "models/phi-4-mini-instruct/model.smoe";
+    if (!strcmp(arg, "stories") || !strcmp(arg, "tinystories")) return "models/tinystories-15m/model.smoe";
+    len = strlen(arg);
+    if (len < 5 || strcmp(arg + len - 5, ".smoe") != 0) {
+        int sep = len && (arg[len - 1] == '/' || arg[len - 1] == '\\');
+        const char *suffix = sep ? "model.smoe" : "/model.smoe";
+        char *joined = (char *)mem_alloc(&d->mem, add_size(len, strlen(suffix) + 1), 1);
+        FILE *f;
+        memcpy(joined, arg, len);
+        strcpy(joined + len, suffix);
+        f = open_file(joined, "rb");
+        if (f) {
+            fclose(f);
+            return joined;
+        }
+    }
+    return arg;
+}
+
 /* Maps the model and parses its directory; a file that does not even start
  * like a container is refused here instead of by die(). */
 static int map_model(Desktop *d, const char *path, char *err) {
@@ -74,21 +118,6 @@ static int map_model(Desktop *d, const char *path, char *err) {
         return fail(err, "%s", "o arquivo não é um modelo do smolmoe (.smoe)");
     modelfile_parse(&d->mf, data, length, &d->mem);
     return 1;
-}
-
-/* `name` in the directory of `path`, allocated from mem; NULL when it does not exist. */
-static char *beside(Desktop *d, const char *path, const char *name) {
-    size_t dir = strlen(path);
-    char *joined;
-    FILE *f;
-    while (dir && path[dir - 1] != '/' && path[dir - 1] != '\\') --dir;
-    joined = (char *)mem_alloc(&d->mem, add_size(dir, strlen(name) + 1), 1);
-    memcpy(joined, path, dir);
-    strcpy(joined + dir, name);
-    f = open_file(joined, "rb");
-    if (!f) return NULL;
-    fclose(f);
-    return joined;
 }
 
 /* Config and tokenizer: embedded, or beside a .smoe that has none. */
@@ -144,11 +173,13 @@ static void start_engine(Desktop *d, const DesktopOptions *o) {
 
 Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
     Desktop *d = (Desktop *)calloc(1, sizeof(*d));
+    const char *path;
     uint32_t context, threads;
     err[0] = 0;
     if (!d) die("allocation failed");
     d->mem.limit = mul_size(DESKTOP_MEMORY_MIB, 1048576);
-    if (!map_model(d, o->path, err) || !load_metadata(d, o->path, err)) {
+    path = resolve_desktop_path(d, o->path);
+    if (!map_model(d, path, err) || !load_metadata(d, path, err)) {
         desktop_close(d);
         return NULL;
     }

@@ -77,7 +77,8 @@ OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui \
-	qwen qwen-gui qwen-q5 qwen-q5-gui phi phi-gui stories all-models phi-weights help
+	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui stories all-models phi-weights \
+	chat run-gui run-web help
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -175,12 +176,13 @@ models:
 # from the Q8 one; Phi-4-mini is converted only on request (make phi-weights).
 DIST        := dist
 QWEN        := models/qwen2.5-0.5b-instruct
+GEMMA       := models/gemma-3-1b-it
 PHI         := models/phi-4-mini-instruct
 STORIES     := models/tinystories-15m
 REL_CLI     := $(RELEASE_DIR)/smolmoe$(EXE)
 REL_GUI     := $(RELEASE_DIR)/smolmoe-gui$(EXE)
 REL_BUNDLE  := $(RELEASE_DIR)/smolmoe-bundle$(EXE)
-MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui phi phi-gui stories
+MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui phi phi-gui stories
 
 # $(call bundle,OUT,MODEL,MODEL_DIR,TOKENIZER,RUNTIME): DIST/OUT[.exe]
 define bundle
@@ -188,6 +190,16 @@ define bundle
 	$(REL_BUNDLE) --model $(2) --config $(3)/config.ini --tokenizer $(3)/$(4) --exe $(5) --out $(DIST)/$(1)$(EXE)
 endef
 
+MODEL ?= qwen
+ifneq ($(filter chat run-gui,$(firstword $(MAKECMDGOALS))),)
+  CHAT_MODEL_ARG := $(word 2,$(MAKECMDGOALS))
+  ifneq ($(CHAT_MODEL_ARG),)
+    MODEL := $(CHAT_MODEL_ARG)
+    $(eval $(CHAT_MODEL_ARG): ; @:)
+  endif
+endif
+
+ifeq ($(CHAT_MODEL_ARG),)
 qwen qwen-pt: release $(QWEN)/model.smoe $(QWEN)/tokenizer.qbp
 	$(call bundle,qwen-pt,$(QWEN)/model.smoe,$(QWEN),tokenizer.qbp,$(REL_CLI))
 qwen-gui: release-gui $(QWEN)/model.smoe $(QWEN)/tokenizer.qbp
@@ -196,16 +208,22 @@ qwen-q5: release $(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp
 	$(call bundle,qwen-pt-q5,$(QWEN)/model-q5.smoe,$(QWEN),tokenizer.qbp,$(REL_CLI))
 qwen-q5-gui: release-gui $(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp
 	$(call bundle,qwen-pt-q5-gui,$(QWEN)/model-q5.smoe,$(QWEN),tokenizer.qbp,$(REL_GUI))
+gemma: release $(GEMMA)/model.smoe
+	$(call bundle,gemma-3-1b,$(GEMMA)/model.smoe,$(GEMMA),tokenizer.qbp,$(REL_CLI))
+gemma-gui: release-gui $(GEMMA)/model.smoe
+	$(call bundle,gemma-3-1b-gui,$(GEMMA)/model.smoe,$(GEMMA),tokenizer.qbp,$(REL_GUI))
 phi: release $(PHI)/model.smoe
 	$(call bundle,phi-4-mini,$(PHI)/model.smoe,$(PHI),tokenizer.qbp,$(REL_CLI))
 phi-gui: release-gui $(PHI)/model.smoe
 	$(call bundle,phi-4-mini-gui,$(PHI)/model.smoe,$(PHI),tokenizer.qbp,$(REL_GUI))
 stories: release $(STORIES)/model.smoe $(STORIES)/tokenizer.spb
 	$(call bundle,tinystories,$(STORIES)/model.smoe,$(STORIES),tokenizer.spb,$(REL_CLI))
+endif
 
-# Every alias whose weights can be had without a long conversion; Phi-4-mini too
-# once it is in models/.
-all-models: qwen qwen-gui qwen-q5 qwen-q5-gui stories $(if $(wildcard $(PHI)/model.smoe),phi phi-gui)
+# Every alias whose weights can be had without a long conversion; Phi-4-mini and Gemma too
+# once they are in models/.
+all-models: qwen qwen-gui qwen-q5 qwen-q5-gui stories $(if $(wildcard $(GEMMA)/model.smoe),gemma gemma-gui) $(if $(wildcard $(PHI)/model.smoe),phi phi-gui)
+	$(if $(wildcard $(GEMMA)/model.smoe),,$(info Gemma-3-1B ficou de fora: os pesos não estão em $(GEMMA) (make gemma-weights).))
 	$(if $(wildcard $(PHI)/model.smoe),,$(info Phi-4-mini ficou de fora: os pesos não estão em $(PHI) (make phi-weights).))
 	@ls -l $(DIST)
 
@@ -221,6 +239,12 @@ $(STORIES)/tokenizer.spb: | $(STORIES)/model.smoe
 # Q5: 39% smaller, perplexity +1.7% (README).
 $(QWEN)/model-q5.smoe: $(QWEN)/model.smoe | release
 	$(RELEASE_DIR)/smolmoe-quantize$(EXE) --in $< --out $@
+$(GEMMA)/model.smoe:
+	$(info Os pesos do Gemma-3-1B não estão em $(GEMMA); baixando e convertendo automaticamente...)
+	$(MAKE) gemma-weights
+gemma-weights:
+	bun scripts/convert.ts fetch-gemma3 downloads/gemma-3-1b-it
+	bun scripts/convert.ts gemma3 downloads/gemma-3-1b-it $(GEMMA)
 $(PHI)/model.smoe:
 	$(info Os pesos do Phi-4-mini não estão em $(PHI).)
 	$(info Para convertê-los (7,7 GB de download e cerca de 13 GB de disco): make phi-weights)
@@ -238,6 +262,9 @@ help:
 	$(info )
 	$(info $(EMPTY)  make                 programa de terminal: build/smolmoe, smolmoe-bundle, smolmoe-quantize)
 	$(info $(EMPTY)  make gui             janela: build/smolmoe-gui)
+	$(info $(EMPTY)  make chat            abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi))
+	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|gemma|phi))
+	$(info $(EMPTY)  make run-web         abre a interface web em http://localhost:8080)
 	$(info $(EMPTY)  make test            testes (em C e com o bun))
 	$(info )
 	$(info Um executável por modelo, com o programa e os pesos num arquivo só, em $(DIST)/:)
@@ -245,13 +272,24 @@ help:
 	$(info $(EMPTY)  make qwen-gui        $(DIST)/qwen-pt-gui         janela, Qwen Q8)
 	$(info $(EMPTY)  make qwen-q5         $(DIST)/qwen-pt-q5          terminal, Qwen Q5: 340 MB, menos memória)
 	$(info $(EMPTY)  make qwen-q5-gui     $(DIST)/qwen-pt-q5-gui      janela, Qwen Q5)
+	$(info $(EMPTY)  make gemma           $(DIST)/gemma-3-1b          terminal, Gemma 3 1B (pesos: make gemma-weights))
+	$(info $(EMPTY)  make gemma-gui       $(DIST)/gemma-3-1b-gui      janela, Gemma 3 1B)
 	$(info $(EMPTY)  make phi             $(DIST)/phi-4-mini          terminal, Phi-4-mini 3,8B (pesos: make phi-weights))
 	$(info $(EMPTY)  make phi-gui         $(DIST)/phi-4-mini-gui      janela, Phi-4-mini)
 	$(info $(EMPTY)  make stories         $(DIST)/tinystories         historinhas em inglês, para testar)
-	$(info $(EMPTY)  make all-models      todos acima; o Phi só quando os pesos já estão em models/)
+	$(info $(EMPTY)  make all-models      todos acima; Gemma e Phi só quando os pesos já estão em models/)
 	$(info )
 	$(info Os pesos do Qwen e do TinyStories são baixados e conferidos na primeira vez.)
 	@:
+
+chat: $(BIN) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe)
+	$(BIN) $(MODEL)
+
+run-gui: $(GUI) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe)
+	$(GUI) $(MODEL)
+
+run-web: web $(QWEN)/model.smoe $(BUNDLE)
+	bun scripts/serve-web.ts
 
 # WebAssembly (WASI) build that the tests run under bun (tests/support/wasi-run.ts):
 # the runtime with SIMD128 kernels, and the kernel tests. Needs zig, whose
@@ -259,7 +297,7 @@ help:
 ZIG        ?= zig
 WASI       := build/wasi
 WASI_CC     = $(ZIG) cc -target wasm32-wasi
-WASI_FLAGS  = -O3 $(STD) $(FPFLAGS) -msimd128 -D_WASI_EMULATED_MMAN -MMD -MP
+WASI_FLAGS  = -O3 $(STD) $(FPFLAGS) -msimd128 -D_WASI_EMULATED_MMAN -MMD -MP -MT $@ -MF $(@:.o=.d)
 WASI_LINK  := -s -lwasi-emulated-mman -Wl,-z,stack-size=8388608
 WASI_OBJ   := $(SOURCES:%=$(WASI)/obj/%.o)
 WASI_LIB   := $(LIB:%=$(WASI)/obj/%.o)

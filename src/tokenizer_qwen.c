@@ -9,7 +9,8 @@
 
 #define MAX_PIECE 65536u
 #define MAX_PAYLOAD 67108864u
-#define MAX_TRUSTED 2u
+#define MAX_QBP_MERGES 1048576u
+#define MAX_TRUSTED 6u
 #define PHI_ROLES 3u
 
 typedef struct { uint32_t a, b, out; } QwenMerge;
@@ -22,8 +23,6 @@ typedef struct {
     uint32_t id, len; /* id is UINT32_MAX when the vocabulary lacks it */
 } Marker;
 
-static const char *const CHATML_MARKERS[MAX_TRUSTED] = {"<tool_call>", "</tool_call>"};
-static const char *const PHI_MARKERS[MAX_TRUSTED] = {"<|tool|>", "<|/tool|>"};
 static const char *const PHI_ROLE_NAMES[PHI_ROLES] = {"system", "user", "assistant"};
 static const char *const PHI_ROLE_TOKENS[PHI_ROLES] = {"<|system|>", "<|user|>", "<|assistant|>"};
 
@@ -104,23 +103,20 @@ static uint32_t read_header(QwenTokenizer *q, ByteReader *f, uint32_t vocab) {
         q->chat = rd_u32(h + 28);
         q->im_start = UINT32_MAX;
         if (q->normalizer > QBP_NORM_NFC) die("unsupported SMQBP1 normalizer %u", q->normalizer);
-        if (q->pretok != QBP_PRETOK_QWEN2 && q->pretok != QBP_PRETOK_O200K)
+        if (q->pretok < QBP_PRETOK_QWEN2 || q->pretok > QBP_PRETOK_GEMMA)
             die("unsupported SMQBP1 pre-tokenizer %u", q->pretok);
-        if (q->chat > QBP_CHAT_PHI) die("unsupported SMQBP1 chat template %u", q->chat);
+        if (q->chat > QBP_CHAT_GEMMA) die("unsupported SMQBP1 chat template %u", q->chat);
     }
-    if (q->nmerge > MAX_MERGES || total > MAX_PAYLOAD || (version == 1 && q->im_start >= vocab))
+    if (q->nmerge > MAX_QBP_MERGES || total > MAX_PAYLOAD || (version == 1 && q->im_start >= vocab))
         die("invalid SMQBP1 tokenizer dimensions");
     return total;
 }
 
-static void set_markers(QwenTokenizer *q, const char *const *text, int rstrip) {
-    uint32_t i;
-    for (i = 0; i < MAX_TRUSTED; ++i) {
-        q->trusted[i].text = text[i];
-        q->trusted[i].rstrip = rstrip;
-        q->trusted[i].len = (uint32_t)strlen(text[i]);
-        q->trusted[i].id = find_special(q, text[i]);
-    }
+static void add_marker(QwenTokenizer *q, uint32_t idx, const char *text, const char *token_name, int rstrip) {
+    q->trusted[idx].text = text;
+    q->trusted[idx].rstrip = rstrip;
+    q->trusted[idx].len = (uint32_t)strlen(text);
+    q->trusted[idx].id = find_special(q, token_name);
 }
 
 /* BOS and EOS are control tokens; each template's markers are found by text. */
@@ -128,20 +124,41 @@ static void resolve_template(QwenTokenizer *q) {
     uint32_t i;
     if (!q->special[BOS_ID] || !q->special[EOS_ID]) die("SMQBP1 tokens 256 and 257 must be flagged special");
     q->tool_open = q->tool_close = UINT32_MAX;
-    for (i = 0; i < MAX_TRUSTED; ++i) q->trusted[i].id = UINT32_MAX;
+    for (i = 0; i < MAX_TRUSTED; ++i) {
+        q->trusted[i].text = "";
+        q->trusted[i].len = 0;
+        q->trusted[i].rstrip = 0;
+        q->trusted[i].id = UINT32_MAX;
+    }
     if (q->chat == QBP_CHAT_CHATML) {
         if (!piece_is(q, EOS_ID, "<|im_end|>")) die("SMQBP1 token 257 must be <|im_end|> for ChatML");
         if (q->im_start == UINT32_MAX) q->im_start = require_special(q, "<|im_start|>");
         else if (!q->special[q->im_start] || !piece_is(q, q->im_start, "<|im_start|>"))
             die("SMQBP1 im_start must be the <|im_start|> token");
-        set_markers(q, CHATML_MARKERS, 0);
+        add_marker(q, 0, "<tool_call>", "<tool_call>", 0);
+        add_marker(q, 1, "</tool_call>", "</tool_call>", 0);
         q->tool_open = q->trusted[0].id;
         q->tool_close = q->trusted[1].id;
     } else if (q->chat == QBP_CHAT_PHI) {
         if (!piece_is(q, BOS_ID, "<|endoftext|>")) die("SMQBP1 token 256 must be <|endoftext|> for the Phi template");
         if (!piece_is(q, EOS_ID, "<|end|>")) die("SMQBP1 token 257 must be <|end|> for the Phi template");
         for (i = 0; i < PHI_ROLES; ++i) q->role[i] = require_special(q, PHI_ROLE_TOKENS[i]);
-        set_markers(q, PHI_MARKERS, 1); /* rstrip=true on every Phi marker */
+        add_marker(q, 0, "<|tool|>", "<|tool|>", 1);
+        add_marker(q, 1, "<|/tool|>", "<|/tool|>", 1);
+        add_marker(q, 2, "<|tool_call|>", "<|tool_call|>", 1);
+        add_marker(q, 3, "<|/tool_call|>", "<|/tool_call|>", 1);
+        add_marker(q, 4, "<tool_call>", "<|tool_call|>", 1);
+        add_marker(q, 5, "</tool_call>", "<|/tool_call|>", 1);
+        q->tool_open = q->trusted[2].id;
+        q->tool_close = q->trusted[3].id;
+    } else if (q->chat == QBP_CHAT_GEMMA) {
+        if (!piece_is(q, BOS_ID, "<bos>")) die("SMQBP1 token 256 must be <bos> for the Gemma template");
+        if (!piece_is(q, EOS_ID, "<end_of_turn>")) die("SMQBP1 token 257 must be <end_of_turn> for the Gemma template");
+        q->im_start = require_special(q, "<start_of_turn>");
+        add_marker(q, 0, "<tool_call>", "<tool_call>", 0);
+        add_marker(q, 1, "</tool_call>", "</tool_call>", 0);
+        q->tool_open = q->trusted[0].id;
+        q->tool_close = q->trusted[1].id;
     }
 }
 
@@ -246,7 +263,9 @@ static void encode_text(QwenTokenizer *q, const unsigned char *s, uint32_t bytes
     }
     q->offset[nc] = total;
     for (i = 0; i < nc; i = j) {
-        j = q->pretok == QBP_PRETOK_O200K ? o200k_boundary(q->cp, q->cls, nc, i) : qwen2_boundary(q->cp, q->cls, nc, i);
+        j = q->pretok == QBP_PRETOK_O200K ? o200k_boundary(q->cp, q->cls, nc, i)
+          : q->pretok == QBP_PRETOK_GEMMA ? gemma_boundary(q->cp, q->cls, nc, i)
+                                          : qwen2_boundary(q->cp, q->cls, nc, i);
         merge_piece(q, q->offset[i], q->offset[j] - q->offset[i], ids, n);
     }
 }
@@ -334,9 +353,30 @@ static void phi_message(QwenTokenizer *q, const char *role, const unsigned char 
     if (open_assistant) push_id(ids, n, q->capacity, q->role[2]);
 }
 
+/* Gemma: <start_of_turn>{role}\n{text}<end_of_turn>\n, with assistant mapped to
+ * "model" and system opened with <bos>. <end_of_turn> is EOS (257). */
+static void gemma_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
+                          int open_assistant, uint32_t *ids, uint32_t *n) {
+    const char *gemma_role = !strcmp(role, "assistant") ? "model" : !strcmp(role, "system") ? "user" : role;
+    if (strcmp(role, "system") && strcmp(role, "user") && strcmp(role, "assistant") && strcmp(role, "model"))
+        die("the Gemma chat template has no role %s", role);
+    if (!strcmp(role, "system") && *n == 0) push_id(ids, n, q->capacity, BOS_ID);
+    push_id(ids, n, q->capacity, q->im_start);
+    encode_literal(q, gemma_role, ids, n);
+    encode_literal(q, "\n", ids, n);
+    encode_content(q, role, text, bytes, ids, n);
+    push_id(ids, n, q->capacity, EOS_ID);
+    encode_literal(q, "\n", ids, n);
+    if (open_assistant) {
+        push_id(ids, n, q->capacity, q->im_start);
+        encode_literal(q, "model\n", ids, n);
+    }
+}
+
 static void chat_message(QwenTokenizer *q, const char *role, const unsigned char *text, uint32_t bytes,
                          int open_assistant, uint32_t *ids, uint32_t *n) {
     if (q->chat == QBP_CHAT_PHI) phi_message(q, role, text, bytes, open_assistant, ids, n);
+    else if (q->chat == QBP_CHAT_GEMMA) gemma_message(q, role, text, bytes, open_assistant, ids, n);
     else if (q->chat == QBP_CHAT_CHATML) chatml_message(q, role, text, bytes, open_assistant, ids, n);
     else die("this tokenizer has no chat template");
 }
@@ -348,6 +388,7 @@ uint32_t qwen_encode(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, u
         chat_message(q, "system", (const unsigned char *)system, (uint32_t)strlen(system), 0, ids, &n);
         chat_message(q, "user", s, bytes, 1, ids, &n);
     } else {
+        if (q->chat == QBP_CHAT_GEMMA) push_id(ids, &n, q->capacity, BOS_ID);
         encode_text(q, s, bytes, ids, &n);
     }
     if (!n) push_id(ids, &n, q->capacity, BOS_ID);
@@ -365,7 +406,7 @@ uint32_t qwen_chat_close(QwenTokenizer *q, uint32_t *ids) {
     uint32_t n = 0;
     if (q->chat == QBP_CHAT_NONE) die("this tokenizer has no chat template");
     push_id(ids, &n, q->capacity, EOS_ID);
-    if (q->chat == QBP_CHAT_CHATML) encode_literal(q, "\n", ids, &n);
+    if (q->chat == QBP_CHAT_CHATML || q->chat == QBP_CHAT_GEMMA) encode_literal(q, "\n", ids, &n);
     return n;
 }
 

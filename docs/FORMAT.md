@@ -1,13 +1,14 @@
-# smolmoe_v1 architecture and binary contract
+# smolmoe architectures and binary contract
 
-This specification describes the implemented model, not Kimi K3.
+This specification describes the implemented model architectures, not Kimi K3.
 `smolmoe_qwen2` extends the base architecture with F32 bias vectors
-`l.N.q_bias` (1 × D), `l.N.k_bias` and `l.N.v_bias` (1 × KD), added before RoPE
+`l.N.q_bias` (1 × QD), `l.N.k_bias` and `l.N.v_bias` (1 × KD), added before RoPE
 and KV storage. The importer permutes split-half Q/K rows and biases into this
-runtime's adjacent-pair RoPE order. Only the validated Qwen2 layout is supported.
-All matrix shapes below are `(output rows, input columns)` and row-major.
-Let D = dim, H = hidden_dim, V = vocab_size, E = experts, S = shared_experts,
-A = heads, K = kv_heads, L = layers, and KD = K × D/A.
+runtime's adjacent-pair RoPE order. `smolmoe_gemma3` adds the Gemma 3 norms,
+head dimensions, attention windows and activation described below. All matrix
+shapes are `(output rows, input columns)` and row-major. Let D = dim, H =
+hidden_dim, V = vocab_size, E = experts, S = shared_experts, A = heads, K =
+kv_heads, L = layers, HD = head_dim (default D/A), QD = A × HD, and KD = K × HD.
 
 ## Tensor names
 
@@ -15,28 +16,38 @@ A = heads, K = kv_heads, L = layers, and KD = K × D/A.
 |---|---|---|
 | `embed` | V × D | Q8 |
 | `final_norm` | 1 × D | F32 |
-| `lm_head` | V × D | Q8, separate from embedding |
+| `lm_head` | V × D | Q8, separate from or aliased to `embed` |
 | `l.N.attn_norm`, `l.N.ffn_norm` | 1 × D | F32 |
-| `l.N.q`, `l.N.o` | D × D | Q8 |
+| `l.N.post_attn_norm`, `l.N.post_ffn_norm` | 1 × D | F32, Gemma 3 only |
+| `l.N.q_norm`, `l.N.k_norm` | 1 × HD | F32, Gemma 3 only |
+| `l.N.q` | QD × D | Q8 |
+| `l.N.o` | D × QD | Q8 |
 | `l.N.k`, `l.N.v` | KD × D | Q8 |
+| `l.N.q_bias` | 1 × QD | F32, Qwen2 only |
+| `l.N.k_bias`, `l.N.v_bias` | 1 × KD | F32, Qwen2 only |
 | `l.N.router` | E × D | Q8 |
 | `l.N.e.I.gate`, `l.N.e.I.up` | H × D | Q8 |
 | `l.N.e.I.down` | D × H | Q8 |
 | `l.N.s.I.gate`, `l.N.s.I.up` | H × D | Q8 |
 | `l.N.s.I.down` | D × H | Q8 |
 
-N is the zero-based layer number, I the zero-based expert number.
-Every layer is a routed MoE layer; there are no special dense-first layers.
-There are no biases, tied embeddings, q/k norms, output gates, latent projections,
-router bias/correction/grouping, or shared-expert scalar gate.
+N is the zero-based layer number, I the zero-based expert number. In the base
+MoE layout every layer is routed; there are no special dense-first layers.
+Qwen2 has the Q/K/V biases above and may alias its tied output head to `embed`.
+Gemma 3 uses one dense expert with a zero router and aliases `lm_head` to
+`embed`; it also uses the Gemma-only norm vectors above. The implemented layouts
+do not have output gates, latent projections, router bias/correction/grouping,
+or a shared-expert scalar gate. The Gemma converter stores each norm vector as
+`1 + source_weight`.
 
 ## Forward pass
 
 All runtime activations and weight scales are F32. For each token:
 
-1. `x = embed[token]`.
+1. `x = embed[token]`. Gemma 3 scales this vector by `sqrt(D)`.
 2. For each layer, `n = RMSNorm(x, attn_norm, rms_eps)`.
-3. `q = Wq n`, `k = Wk n`, `v = Wv n`. Apply adjacent-pair RoPE to q and k.
+3. `q = Wq n`, `k = Wk n`, `v = Wv n`. Gemma 3 applies `q_norm` and `k_norm`
+   to each head before adjacent-pair RoPE. Apply RoPE to q and k.
    Only the first R = `rotary_dim` coordinates of each head rotate (default R = head_dim);
    the rest pass through. For pair j = 0,2,…,R−2, `angle = position / rope_theta^(j/R)`,
    and the pair is rotated by `f·cos(angle)` and `f·sin(angle)` with f = `rope_attention_factor`
@@ -45,18 +56,23 @@ All runtime activations and weight scales are F32. For each token:
 4. Append k and v to the layer's unquantized KV cache. Query head h maps to
    KV head `floor(h / (heads / kv_heads))`.
 5. `att = softmax(q K^T / sqrt(head_dim)) V`, causal through current position.
-   `x += Wo att`.
+   Gemma 3 applies `post_attn_norm` to `Wo att` before adding it to x.
 6. `n = RMSNorm(x, ffn_norm, rms_eps)`; compute all router logits `r = Wr n`.
 7. Select highest top_k logits, breaking exact ties by lower expert index.
    `p_i = sigmoid(r_i)`; `w_i = p_i / sum_selected(p)`.
 8. For each selected expert in descending logit order,
-   `x += w_i * Wdown_i (SiLU(Wgate_i n) * Wup_i n)`.
+   `x += w_i * Wdown_i (activation(Wgate_i n) * Wup_i n)`; `activation` is
+   SiLU except for Gemma 3, which uses tanh-approximate GELU.
    Then add each shared expert's same MLP output in ascending expert index,
-   with coefficient 1. All experts use the same n from step 6.
+   with coefficient 1. Gemma 3 applies `post_ffn_norm` to its single dense
+   expert's output before the residual addition. All experts use the same n from step 6.
 9. After all layers, `logits = lm_head RMSNorm(x, final_norm, rms_eps)`.
 
 RMSNorm is `x_i / sqrt(mean(x*x) + eps) * weight_i`.
 SiLU is `z/(1+exp(-z))`. There are no residual scaling factors.
+The generic router steps above are bypassed for a one-expert model. For Gemma 3,
+every sixth layer (5, 11, 17, ...) uses global attention and `rope_theta`; the
+other layers use the trailing `sliding_window` positions and `rope_local_theta`.
 Model weights producing non-finite intermediates or a zero sum of selected
 sigmoid probabilities are rejected; numerically extreme checkpoints are outside
 the supported operating range.
@@ -166,9 +182,11 @@ activations, the KV cache and tokenizer tables must fit `--memory-mib`; mapped
 weights are not counted. Without the option the budget is 512 MiB plus the KV
 cache of min(context, 2048) positions.
 
-Two keys are optional: `rotary_dim` (even, 2 to D/A; default D/A) and
-`rope_attention_factor` (in (0, 1000]; default 1). Omitting them gives results
-bit-identical to writing their defaults.
+Optional keys are `rotary_dim` (even, 2 to `head_dim`; default `head_dim`),
+`rope_attention_factor` (in (0, 1000]; default 1), `head_dim` (default D/A),
+`sliding_window` (default 0, meaning full attention), and `rope_local_theta`
+(default `rope_theta`). Gemma 3 sets `head_dim`, `sliding_window` and
+`rope_local_theta` explicitly. Omitting an optional key gives the stated default.
 
 ## Tokenizer
 
@@ -207,14 +225,15 @@ Normal generation prints continuation bytes directly, without echoing the prompt
 Legacy dense FFNs are imported as `experts=1`, `top_k=1`, `shared_experts=0` with
 a zero router matrix, so the sole selected expert's normalized weight is exactly
 1. All other operations follow the main forward specification. The imported
-model is dense, not a learned sparse MoE model. The importer supports the legacy
-7-int llama2.c header and F32 payload layout only; newer format versions,
-MXFP4, Hugging Face checkpoints and Kimi K3 remain unsupported.
+model is dense, not a learned sparse MoE model. This llama2.c importer supports
+the legacy 7-int header and F32 payload layout only; newer llama2.c formats and
+MXFP4 are unsupported by it. Hugging Face conversion is handled separately by
+`scripts/convert.ts` (see [MODELS.md](MODELS.md)); Kimi K3 is not supported.
 
 
 ### Byte-level BPE format (SMQBP1)
 
-Used by Qwen2.5 (version 1) and Phi-4-mini (version 2). All integers are
+Used by Qwen2.5 (version 1) and Phi-4-mini and Gemma 3 (version 2). All integers are
 little-endian uint32.
 
 | Offset | Version 1 (24-byte header) | Version 2 (32-byte header) |
@@ -224,8 +243,8 @@ little-endian uint32.
 | 12 | merge count (at most 262,144) | same |
 | 16 | total piece bytes (at most 64 MiB) | same |
 | 20 | runtime `<\|im_start\|>` ID | normalizer: 0 none, 1 NFC |
-| 24 | (records start) | pre-tokenizer: 1 Qwen2, 2 o200k |
-| 28 | | chat template: 0 none, 1 ChatML, 2 Phi |
+| 24 | (records start) | pre-tokenizer: 1 Qwen2, 2 o200k, 3 Gemma |
+| 28 | | chat template: 0 none, 1 ChatML, 2 Phi, 3 Gemma |
 
 Version 1 means NFC, the Qwen2 pre-tokenizer and ChatML, so the published
 Qwen2.5 `tokenizer.qbp` loads unchanged. Version 1 files are now also held to
@@ -249,13 +268,18 @@ tied head. Qwen2.5 maps `<|endoftext|>` 151643 to 256 and `<|im_end|>` 151645 to
 257. Phi-4-mini maps the byte tokens (GPT-2 byte alphabet order) to their byte
 values, `<|endoftext|>` 199999 to 256, `<|end|>` 200020 to 257, IDs 256..199,998
 to +2, 200,000..200,019 to +1, and leaves 200,021 and above unchanged.
+Gemma 3 uses normalizer 0, pre-tokenizer 3 and chat template 3; its converter
+puts byte tokens at 0..255, `<bos>` at 256 and `<end_of_turn>` at 257. It requires
+`<start_of_turn>` and reuses available `<unused:...>` special-token slots for
+`<tool_call>` / `</tool_call>` when they are absent from the source tokenizer.
 
 **Encoding.** Text is normalized (NFC, Unicode 15.0.0 tables) only when the
 header says so; Phi-4-mini is not normalized. It is split into pre-tokens and each
 pre-token's UTF-8 bytes are merged by increasing pair rank, leftmost first. The
-pre-tokenizers are hand-written matchers equal to the published regexes run by
-Oniguruma (the engine of Hugging Face tokenizers), with no runtime regex or
-Unicode library:
+Qwen2 and o200k pre-tokenizers are hand-written matchers equal to the published
+regexes run by Oniguruma (the engine of Hugging Face tokenizers), with no runtime
+regex or Unicode library. Gemma implements SentencePiece's
+`Split(' ', MergedWithNext)` behavior in a separate boundary matcher.
 
 - Qwen2: `(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+`
 - o200k (GPT-4o, Phi-4-mini): `[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+`
@@ -282,10 +306,17 @@ by the user are never conversation control (Hugging Face would match them).
 - Phi (Phi-4-mini): `<|system|>S<|end|><|user|>U<|end|><|assistant|>`, with no
   newlines. Every Phi marker has `rstrip`, so whitespace right after a role
   marker is dropped, as in the published template. A reply is closed with
-  `<|end|>`. In system text, `<|tool|>` and `<|/tool|>` become their tokens (with
-  rstrip). There is no tool-call protocol yet, so the chat runs without tools
-  and every tool token stays masked. Required: flagged `<|system|>`, `<|user|>`
-  and `<|assistant|>`, ID 256 = `<|endoftext|>` and ID 257 = `<|end|>`.
+  `<|end|>`. In system text, `<|tool|>`, `<|/tool|>`, `<|tool_call|>` and
+  `<|/tool_call|>` become their tokens (with `rstrip`); the plain-text aliases
+  `<tool_call>` and `</tool_call>` map to the call marker pair. The runtime
+  offers its built-in tools for this template. Required: flagged `<|system|>`,
+  `<|user|>` and `<|assistant|>`, ID 256 = `<|endoftext|>` and ID 257 = `<|end|>`.
+- Gemma 3: `<start_of_turn>{role}\n{text}<end_of_turn>\n` per message, with
+  `assistant` mapped to `model` and the initial system message mapped to `user`
+  after BOS. The open reply is `<start_of_turn>model\n`; a reply ends with
+  `<end_of_turn>`. In system text, `<tool_call>` and `</tool_call>` become their
+  tokens and enable the chat's tools. Required: flagged `<start_of_turn>`, ID
+  256 = `<bos>` and ID 257 = `<end_of_turn>`.
 - None: plain text only; `--chat` is refused.
 
 Generation stops at EOS (257). An empty plain prompt encodes as BOS.

@@ -1,149 +1,160 @@
 # smolmoe
 
-Runtime de inferência de LLMs em CPU, escrito em C99, sem frameworks. É um executável pequeno que roda modelos
-quantizados em Q8 (formato `SMOEQ8`) no Windows, no Linux e no macOS. O caso principal é o
-**Qwen2.5-0.5B-Instruct gerando português do Brasil localmente**, sem GPU e sem serviço remoto.
+Runtime de inferência de LLMs em **CPU pura**, escrito em **C99** sem dependências externas. Empacota o motor e os pesos quantizados (`SMOEQ8` / `SMOEQ5`) em um **único executável autocontido** (estilo [llamafile](https://github.com/Mozilla-Ocho/llamafile)) que roda nativamente no Windows, Linux, macOS, Android (Termux) e no navegador via WebAssembly.
 
-| Medido no mesmo i7-10610U (Linux/WSL, prompt de 88 tokens) | v0.1 | **v0.2** |
-|---|---|---|
-| Tempo até o primeiro token | 29,0 s | **1,3 s** |
-| Prefill | 3,0 tok/s | **67–71 tok/s** |
-| Decode | 2,0 tok/s | **22–26 tok/s** |
-| Heap do processo | 1024 MiB | **22 MiB** |
-| Perplexidade (texto PT, 164 tokens) | 5,2750 | 5,2774 (+0,05%) |
+<p align="center">
+  <img src="docs/images/desktop-escuro.png" alt="Interface desktop do smolmoe no tema escuro" width="760">
+</p>
 
-Os números, o método e o que foi descartado no caminho estão em [docs/DECISIONS.md](docs/DECISIONS.md).
+## Destaques
 
-## Jeitos de usar
+- **Zero dependências:** apenas `libc`, `libm` e threads nativas (`Win32` / `pthread`). Sem Python, sem CUDA, sem DLLs externas.
+- **Três interfaces sob o mesmo motor (`engine.c`):** CLI interativa no terminal, janela nativa (Dear ImGui + Direct3D 11 / OpenGL 3) e WebAssembly (SIMD128 + Web Workers).
+- **Executável único (`smolmoe-bundle`):** junte runtime + pesos + tokenizer + config em um único binário pronto para rodar com duplo clique.
+- **Determinismo bit a bit:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`, `--batch` e kernel (`AVX2`, `NEON`, `SIMD128` ou escalar).
+- **Ferramentas nativas em C e escape de shell:** datas/feriados (`data_atual`, `dias_ate`), cálculo (`calcular`), conversão de unidades (`converter`), contagem de texto (`contar`) e execução direta de comandos no terminal com `!comando`.
 
-O mesmo motor de conversa roda em três interfaces, e nenhuma manda texto para fora do computador. O guia
-[docs/CAMINHOS.md](docs/CAMINHOS.md) mostra cada caminho em cada sistema e qual modelo escolher.
+---
 
-| Caminho | Como começar | Guia |
-|---|---|---|
-| **Janela** | Windows: `qwen-pt-gui-windows-x64.exe` do Release (desde a v0.4.0), com dois cliques. Linux e macOS: `make gui`. | [DESKTOP.md](docs/DESKTOP.md) |
-| **Chat no terminal** | `qwen-pt-<sistema>` do Release: Windows, Linux, macOS e Termux. | [INSTALL.md](docs/INSTALL.md) |
-| **Navegador, local** | `make ZIG=... web` e `bun scripts/serve-web.ts`. Depois abra o `.smoe` na página. | [WEB.md](docs/WEB.md) |
-| **Outro modelo** | `smolmoe-<sistema> --model phi-4-mini-instruct.smoe` (ou o Q5) | [INSTALL.md](docs/INSTALL.md) |
-| **Scripts** | `qwen-pt --chat --prompt "..."` escreve uma resposta e sai. | [Opções](#opções-principais) |
-| **Da fonte** | `make`, `make gui`, `make test` | [Desenvolvimento](#desenvolvimento) |
+## Início Rápido
 
-![A janela do smolmoe no tema escuro](docs/images/desktop-escuro.png)
+### 1. Executável único (Recomendado)
 
-## Um arquivo só: o executável já é o modelo
+Com um comando você baixa os pesos (verificados por SHA-256), compila o runtime otimizado e gera um executável único em `dist/`:
 
 ```sh
-make qwen                         # dist/qwen-pt.exe (Windows) ou dist/qwen-pt: chat no terminal + Qwen, 560 MB
-make qwen-gui                     # dist/qwen-pt-gui.exe: a janela + Qwen
-make help                         # todos os atalhos: qwen-q5, phi, stories, all-models...
-dist/qwen-pt.exe                  # duplo clique ou terminal: abre o chat em português
-dist/qwen-pt.exe --chat --prompt "..."   # uma resposta e sai (scripts, pipes)
+# Chat no terminal com Qwen2.5-0.5B Q8 (560 MB)
+make qwen
+./dist/qwen-pt          # Windows: .\dist\qwen-pt.exe
+
+# Janela gráfica (GUI) com Qwen2.5-0.5B Q8
+make qwen-gui
+./dist/qwen-pt-gui      # Windows: .\dist\qwen-pt-gui.exe (ou duplo clique)
 ```
 
-Como o llamafile, o binário carrega os próprios pesos: não precisa de instalação, DLL extra, Python nem arquivo ao
-lado. O chat lembra a conversa (o cache KV é reaproveitado entre turnos); `/limpar` reinicia e `/sair` encerra. Para um
-executável de 340 MB, use `make qwen-q5`. Há um atalho para cada modelo, no terminal e na janela, listados em
-[docs/CAMINHOS.md](docs/CAMINHOS.md#um-atalho-por-modelo). O formato do pacote está em [docs/FORMAT.md](docs/FORMAT.md).
+> [!TIP]
+> Precisa usar menos RAM? Gere a variante **Q5 (340 MB, −39% de memória)** com `make qwen-q5` (terminal) ou `make qwen-q5-gui` (janela). Veja todos os pacotes pré-compilados em [docs/INSTALL.md](docs/INSTALL.md).
 
-## Início rápido
+### 2. Usando o runtime `smolmoe` direto com a pasta `models/` (ou apelidos)
 
-### Windows (MSYS2 UCRT64 ou qualquer MinGW-w64 GCC/Clang)
-
-Os mesmos comandos funcionam no PowerShell, no cmd, no Git Bash e no shell do MSYS2 (veja
-[docs/CAMINHOS.md](docs/CAMINHOS.md#7-compilar-da-fonte)).
+Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `gemma`, `gemma-270m`, `phi`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
 
 ```sh
-make            # gera build/smolmoe.exe (estático em `make release`)
-build/smolmoe.exe --model models/qwen2.5-0.5b-instruct/model.smoe \
-  --config models/qwen2.5-0.5b-instruct/config.ini \
-  --tokenizer models/qwen2.5-0.5b-instruct/tokenizer.qbp \
-  --chat --prompt "Quanto é 7 mais 5? Responda apenas com o número."
+# Atalhos diretos via make:
+make chat              # abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi)
+make run-gui           # abre a janela gráfica (MODEL=qwen|qwen-q5|gemma|phi)
+make chat gemma        # abre o chat no terminal com Gemma 3 1B
+make run-gui gemma     # abre a janela com Gemma 3 1B
+
+# Ou chamando os binários diretamente por apelido ou pasta:
+./build/smolmoe qwen
+./build/smolmoe gemma
+./build/smolmoe phi
+./build/smolmoe-gui qwen
 ```
 
-### Linux / macOS
+### 3. No navegador (WebAssembly local)
 
 ```sh
-make
-build/smolmoe --model models/qwen2.5-0.5b-instruct/model.smoe \
-  --config models/qwen2.5-0.5b-instruct/config.ini \
-  --tokenizer models/qwen2.5-0.5b-instruct/tokenizer.qbp \
-  --chat --prompt "Escreva uma saudação curta para quem está aprendendo programação."
+make run-web                   # compila e sobe em http://localhost:8080/
+bun scripts/serve-web.ts 3000  # ou escolha a porta diretamente (ex.: http://localhost:3000/)
 ```
 
-Os pesos não ficam no git: baixe com `bun scripts/fetch-models.ts` (ou `make models`), que confere o SHA-256 de cada
-arquivo. Detalhes e conversão a partir dos originais em [docs/MODELS.md](docs/MODELS.md).
+---
 
-**Modelo maior: Phi-4-mini (Microsoft, 3,8B).** É 17% melhor em português e acerta contas em que o Qwen 0,5B erra,
-mas escreve a cerca de 4 tokens/s neste notebook e usa 4,4 GB. Ele é obtido pela conversão:
+## Modelos Suportados
+
+| Modelo | Parâmetros | Quantização | Tamanho | RAM aprox. | Velocidade (CPU)* | Atalho `make` / CLI | Status das Ferramentas |
+|---|---:|---|---:|---:|---:|---|---|
+| **Qwen2.5-0.5B-Instruct** | 0,5B | Q8_0 | 556 MB | ~0,6 GB | 22–27 tok/s | `qwen` / `make qwen` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Qwen2.5-0.5B-Instruct** | 0,5B | Q5_0 | 340 MB | ~0,4 GB | 15–18 tok/s | `qwen-q5` / `make qwen-q5` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Gemma-3-1B-Instruct** | 1,0B | Q8_0 | ~1,0 GB | ~1,2 GB | ~12 tok/s | `gemma` / `make gemma` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Gemma-3-270M-Instruct** | 0,27B | Q8_0 | ~290 MB | não medido | não medido | CLI: `gemma-270m` | Conversão e uso com esses pesos ainda não validados ponta a ponta |
+| **Phi-4-mini-instruct** | 3,8B | Q8_0 | 4,3 GB | ~4,4 GB | ~4 tok/s | `phi` / `make phi` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **TinyStories-15M** | 15M | Q8_0 | 27 MB | < 0,1 GB | > 200 tok/s | `stories` / `make stories` | Apenas continuação de texto em inglês (sem template de chat) |
+
+*\*Medido em um Intel Core i7-10610U (4 núcleos físicos, AVX2). Em Apple Silicon M2 Pro (NEON, 5 threads), o Qwen2.5-0.5B Q8 atinge **64 tok/s** no decode e **148 tok/s** no prefill.*
+
+Para converter o **Gemma 3** ou o **Phi-4-mini** a partir dos pesos originais do Hugging Face:
 
 ```sh
-bun scripts/convert.ts fetch-phi3 downloads/phi-4-mini-instruct     # 7,7 GB, SHA-256 conferido
-bun scripts/convert.ts phi3 downloads/phi-4-mini-instruct models/phi-4-mini-instruct
-build/smolmoe --model models/phi-4-mini-instruct/model.smoe --config models/phi-4-mini-instruct/config.ini \
-  --tokenizer models/phi-4-mini-instruct/tokenizer.qbp
+# Gemma 3 1B Instruct (requer HF_TOKEN com licença do Gemma aceita no Hugging Face)
+make gemma-weights # baixa e converte para models/gemma-3-1b-it/
+make gemma         # empacota dist/gemma-3-1b[.exe]
+make gemma-gui     # empacota dist/gemma-3-1b-gui[.exe]
+
+# Phi-4-mini Instruct (7,7 GB)
+make phi-weights   # baixa e converte para models/phi-4-mini-instruct/
+make phi           # empacota dist/phi-4-mini[.exe]
+make phi-gui       # empacota dist/phi-4-mini-gui[.exe]
 ```
 
-O texto gerado vai para o stdout, em streaming. As estatísticas saem no stderr como uma linha JSON.
-Saída real, sem edição:
+Detalhes sobre manifesto, hashes SHA-256 e conversão estão em [docs/MODELS.md](docs/MODELS.md).
+
+---
+
+## Exemplos de Uso
+
+### Chat interativo no terminal
+
+Basta executar o binário sem `--prompt`. O cache KV é reaproveitado entre mensagens:
+
+```text
+$ ./dist/qwen-pt
+smolmoe 0.5.0 - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.
+Ferramentas: data_atual, dias_ate, calcular, converter, contar.
+Comandos: !comando roda no pwsh.
+
+> Olá! Quem escreveu Dom Casmurro?
+Machado de Assis escreveu Dom Casmurro.
+
+> /limpar
+(conversa reiniciada)
+```
+
+### Resposta única para scripts e pipes
+
+Use `--chat --prompt "..."` para responder uma vez no `stdout` (estatísticas saem em JSON no `stderr`):
+
+```sh
+./dist/qwen-pt --chat --prompt "Quanto é 7 mais 5? Responda apenas com o número."
+```
+
+Saída:
 
 ```text
 12
-{"version":"0.2.0","backend":"avx2","threads":4,"batch":32,...,"ttft_seconds":0.858,"prefill_tokens_per_second":79.7,...}
+{"version":"0.5.0","backend":"avx2","threads":4,"batch":32,...,"ttft_seconds":0.858,"prefill_tokens_per_second":79.7,...}
 ```
 
-## Opções principais
+### Ferramentas nativas no chat (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`)
 
-| Opção | Padrão | Efeito |
-|---|---|---|
-| (sem `--prompt`) / `-i` | — | Chat multi-turno no terminal (modelos de chat) |
-| `--chat` / `--system TEXTO` | system em PT-BR | Template ChatML de um turno com `--prompt` |
-| `--no-tools` | ferramentas ligadas no chat | Chat sem as funções de data e de conta (abre cerca de 5,5 s mais rápido) |
-| `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa a hora que as ferramentas usam (execuções reproduzíveis) |
-| `--shell NOME\|CAMINHO` | o shell que abriu o smolmoe | Onde roda um `!comando` do chat: `pwsh`, `powershell`, `cmd`, `bash`, `sh`... |
-| `--no-shell-escape` / `--shell-escape` | ligado só no terminal | Desliga o `!comando`, ou o liga também com entrada por pipe |
-| `--tokens N` | 64 (512 no chat) | Máximo de tokens novos; para no EOS |
-| `--temperature X` | 0 (guloso) | Amostragem quando > 0 |
-| `--top-k N` / `--top-p X` | 40 / 0,95 | Truncamento da amostragem |
-| `--seed N` | 1 | Amostragem reproduzível |
-| `--threads N` | núcleos físicos | Threads de trabalho |
-| `--batch N` | 32 | Tokens do prompt por passada (prefill) |
-| `--context N` | min(modelo, 2048) | Posições do cache KV |
-| `--memory-mib N` | 512 + cache KV (até 2048 posições) | Teto do heap; pesos mapeados não contam |
-| `--perplexity` | — | Mede a perplexidade do prompt (sem gerar) |
-| `--stats`, `--trace`, `--hash-logits`, `--token-ids` | — | Diagnóstico e regressão |
-
-A lista completa está em `smolmoe --help`.
-
-### Funções no chat: datas exatas
-
-O modelo não tem relógio e não sabe fazer conta com datas. No chat, ele chama funções do runtime, e o C faz a conta:
+Modelos pequenos alucinam datas, aritmética, conversões de unidades e contagem de caracteres. No chat, o runtime em C executa as ferramentas e confere os argumentos com a pergunta. Qwen e Phi podem emitir `<tool_call>`; no Gemma, o runtime também abre chamadas para esses pedidos quando o modelo não as inicia:
 
 ```text
 > Quanto tempo falta para o natal?
-[ferramenta] dias_ate: {"name": "dias_ate", "arguments": {"data": "01/12/2023"}} -> {"resumo": "Faltam 49 dias para 25 de dezembro de 2026 (sexta-feira).", ...}
-Para o natal, você tem 49 dias para o dia 25 de dezembro de 2026 (sexta-feira).
+[ferramenta] dias_ate: {"name": "dias_ate", "arguments": {"data": "natal"}} -> {"resumo": "Faltam 49 dias para 25 de dezembro de 2026 (sexta-feira).", ...}
+Para o natal, faltam 49 dias (25 de dezembro de 2026, sexta-feira).
+
+> Quanto é 15% de 230?
+[ferramenta] calcular: {"name": "calcular", "arguments": {"expressao": "15% de 230"}} -> {"resumo": "O resultado é 34,5.", ...}
+O resultado é 34,5.
+
+> Converta 100 km em milhas
+[ferramenta] converter: {"name": "converter", "arguments": {"valor": 100, "de": "km", "para": "milhas"}} -> {"resumo": "100 km equivalem a 62,14 mi.", ...}
+100 km equivalem a 62,14 milhas.
+
+> Quantas letras 'r' tem na palavra morango?
+[ferramenta] contar: {"name": "contar", "arguments": {"texto": "morango", "letra": "r"}} -> {"resumo": "\"r\" aparece 1 vez em \"morango\" (7 letras, 7 caracteres e 1 palavra).", ...}
+A palavra "morango" tem 1 'r'.
 ```
 
-Esta é a saída real, com `--now 2026-11-06T10:30`. Nela, o modelo passou uma data errada ("01/12/2023"), e o runtime
-usou a data da própria pergunta ("natal"). Para isso existe o aterramento.
+- Use `--no-tools` para abrir o chat instantaneamente (~0,4 s em vez de ~5,5 s) quando não precisar de ferramentas.
+- Use `--now AAAA-MM-DDTHH:MM` para fixar o relógio em testes reproduzíveis.
 
-- `data_atual` informa a data, o dia da semana e a hora.
-- `dias_ate` aceita "25 de dezembro", "25/12" ou o nome de um feriado brasileiro, inclusive os móveis (Páscoa,
-  Carnaval, Dia das Mães).
-- As ferramentas só são oferecidas quando a mensagem fala de data ou de tempo. A data escrita pelo usuário vale mais
-  que o argumento do modelo. Uma chamada que não combina com a mensagem é descartada, e o modelo responde sem ela.
-- Em perguntas novas, que não foram usadas no desenho, **12 de 15 saem certas** (`bun scripts/eval-tools.ts --set
-  holdout2`). Quando a ferramenta é chamada, o número de dias sai exato.
-- Os pontos fracos medidos:
-  - Em conversas longas, o modelo deixa de chamar as ferramentas e inventa a hora. Use `/limpar`.
-  - Não entende dia da semana ("até sexta").
-  - Às vezes escreve "atrás" em vez de "faltam".
+### Execução de comandos no shell (`!comando`)
 
-  Os detalhes estão em [docs/DECISIONS.md](docs/DECISIONS.md), iteração 4.
-
-### Comandos do shell no chat: `!`
-
-Uma linha que começa com `!` roda no shell, e a saída aparece direto no terminal. O modelo não vê o comando nem a saída.
+Qualquer linha digitada começando com `!` roda diretamente no shell do sistema (`pwsh`, `powershell`, `cmd`, `bash` ou `zsh`), sem passar pelo modelo:
 
 ```text
 > !git status --short
@@ -153,121 +164,98 @@ Uma linha que começa com `!` roda no shell, e a saída aparece direto no termin
 (pasta atual: C:\Users\voce\smolmoe-c99\src)
 ```
 
-- **Qual shell:** o mesmo que abriu o smolmoe (PowerShell, pwsh, cmd, Git Bash, bash ou zsh). Se você abriu com duplo
-  clique, ele usa o PowerShell 7, o Windows PowerShell ou o cmd, nessa ordem; fora do Windows, o `$SHELL`. O banner
-  mostra a escolha, e `--shell` passa por cima dela. O perfil do PowerShell não é carregado.
-- **`!cd PASTA`** muda a pasta do próprio chat, e os próximos comandos rodam lá. Ele aceita um caminho, com `~`, mas
-  não variáveis (`cd $HOME`). Cada `!` é um processo novo, então variáveis de ambiente definidas num comando não
-  passam para o seguinte.
-- **Ctrl+C** interrompe o comando, não o chat.
-- **Segurança:**
-  - só roda o que você digita; nada que o modelo escreve vira comando;
-  - **texto colado vira uma mensagem para o modelo**, e nenhuma linha dele roda, nem as que começam com `!`. Isso
-    protege contra texto copiado de sites com linhas escondidas. O chat reconhece a colagem de três jeitos:
-    - pelas marcas que o terminal põe em volta do texto colado (Linux, macOS e Termux);
-    - por linhas que chegam juntas, mais rápido do que alguém digita;
-    - por texto que já estava esperando quando o prompt apareceu;
-  - com entrada por pipe (`type arquivo.txt | qwen-pt.exe`), `!` é texto comum, a menos que se use `--shell-escape`;
-  - um comando cortado por ser longo demais não roda.
-- **Limite honesto (só no console do Windows):** lá o terminal não marca o texto colado, então colar **uma única
-  linha** que já termina com Enter é igual a digitá-la, como seria colá-la direto no PowerShell.
+> [!NOTE]
+> **Proteção contra colagem maliciosa (pastejacking):** blocos de texto colados no terminal são enviados inteiros como mensagem ao modelo — linhas com `!` coladas nunca são executadas como comandos.
 
-### Função no chat: contas (`calcular`)
+---
 
-O modelo escreve a conta, e o programa a calcula em double e responde no formato brasileiro:
+## Principais Opções da CLI (`smolmoe`)
 
-```text
-> Quanto é 15% de 230?
-[ferramenta] calcular: {"name": "calcular", "arguments": {"expressao": "15% de 230"}} -> {"resumo": "O resultado é 34,5.", ...}
-O resultado é 34,5.
-```
+| Opção | Padrão | Descrição |
+|---|---|---|
+| `--model ARQUIVO` | modelo embutido | Caminho do arquivo `.smoe` |
+| `--config ARQUIVO` | embutida no `.smoe` | Caminho da `config.ini` (necessário só em `.smoe` v1/v2 sem config embutida) |
+| `--tokenizer ARQUIVO` | embutido no `.smoe` | Caminho do `.qbp` ou `.spb` |
+| `-i`, `--interactive` | ligado sem `--prompt` | Inicia o chat multi-turno no terminal |
+| `--chat` | desligado | Aplica o template de chat de 1 turno ao usar `--prompt` |
+| `--prompt TEXTO` | — | Gera uma única resposta e encerra |
+| `--system TEXTO` | PT-BR curto | Define o prompt de sistema do chat |
+| `--no-tools` | ferramentas ligadas | Desativa `data_atual`, `dias_ate`, `calcular`, `converter` e `contar` no chat |
+| `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa data/hora para as ferramentas |
+| `--shell NOME\|CAMINHO` | shell pai | Define o shell usado por `!comando` (`pwsh`, `bash`, `cmd`...) |
+| `--tokens N` | `64` (`512` no chat) | Máximo de novos tokens gerados |
+| `--context N` | `min(modelo, 2048)` | Tamanho do cache KV em tokens |
+| `--threads N` | núcleos físicos | Número de threads de trabalho |
+| `--temperature X` | `0` (guloso) | Temperatura de amostragem (`> 0` ativa top-k/top-p) |
+| `--top-k N` / `--top-p X` | `40` / `0.95` | Limites da amostragem estocástica |
 
-- Entende símbolos e palavras ("mais", "vezes", "dividido por", "15% de 230", "raiz(144)") e números como "1.234,56"
-  ou "dois mil e quinhentos".
-- Todo número da conta tem que vir da mensagem (exceto constantes pequenas e porcentagens). Uma conta com número
-  inventado é descartada.
-- **Limite medido, e importante:** o programa calcula certo a conta que recebe, mas quem escreve a conta é o modelo.
-  No teste às cegas, o Qwen 0,5B acertou 12 de 40 contas com a ferramenta e 11 de 40 sem ela. Ela acerta conta direta
-  e porcentagem simples, mas faz errar quando o modelo monta a fórmula errada (troco como "48,20 − 50" dá R$ −1,80).
-  O aviso `[ferramenta]` mostra a conta escrita. Os detalhes estão em [docs/DECISIONS.md](docs/DECISIONS.md),
-  iteração 7.
+Execute `smolmoe --help` ou `smolmoe-gui --help` para ver todas as flags de diagnóstico (`--profile`, `--perplexity`, `--trace`, `--hash-logits`).
 
-### Q5: 39% menos memória
+---
 
-```sh
-build/smolmoe-quantize --in models/qwen2.5-0.5b-instruct/model.smoe --out models/qwen2.5-0.5b-instruct/model-q5.smoe
-```
+## Compilação e Desenvolvimento
 
-O arquivo Q5 tem 340 MB em vez de 556 MB, com perplexidade +1,7% (+1,1% mantendo o embedding em Q8 com
-`--keep embed --keep lm_head`). Neste notebook ele **não** é mais rápido: o desempacotamento de 5 bits custa mais
-computação do que a banda economizada. Use-o quando a memória for o limite.
+### Requisitos
 
-## Como funciona
+- **Windows:** MSYS2 UCRT64 (`mingw-w64-ucrt-x86_64-gcc`) e `make` (funciona direto no PowerShell, `cmd`, Git Bash ou MSYS2).
+- **Linux:** `gcc` ou `clang`, `make` (para a GUI: `g++`, `pkg-config`, `libglfw3-dev`).
+- **macOS:** Xcode Command Line Tools (para a GUI: `brew install glfw`).
+- **Testes e Scripts:** [Bun](https://bun.sh) (e `zig 0.13` apenas para compilar os alvos WebAssembly).
 
-- **Pesos mapeados em memória** (`mmap` / `MapViewOfFile`): sem cópia, sem cache duplicado, e o SO gerencia as
-  páginas. Antes, um cache LRU próprio sobre `pread` mantinha os pesos duas vezes na RAM e era o maior gargalo.
-- **Produto escalar inteiro exato**: as ativações são quantizadas em blocos de 32 (Q8) e a soma de produtos int8 é
-  exata. A acumulação em float segue uma ordem fixa de 8 lanes, que os kernels escalar, AVX2, NEON e SIMD128
-  (WebAssembly) reproduzem bit a bit.
-- **Prefill em lote**: o mesmo código processa N tokens por passada. Cada linha de pesos é lida uma vez para 4 tokens.
-- **Pool de threads com partição estática**: o resultado é o mesmo com qualquer número de threads.
-- **Validação única na carga**: escalas finitas e não negativas, extents e shapes. O laço de inferência não tem checagens
-  por acesso.
-
-**Contrato de determinismo:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`,
-`--batch` e kernel (AVX2, NEON, SIMD128 ou escalar). A suíte de testes garante isso. A exponencial é própria e idêntica em
-todo sistema operacional; entre sistemas ainda não há garantia formal só porque as tabelas de RoPE usam `cos`/`sin`
-da libm local (na prática, Windows, Linux e WebAssembly já dão o mesmo hash nos modelos testados).
-
-## Desenvolvimento
+### Alvos do Makefile
 
 ```sh
-make test        # testes unitários em C + suíte de integração (bun test)
-make sanitize    # ASan/UBSan (Linux/macOS)
-make release     # binário otimizado e enxuto (estático no Windows)
-make gui         # a janela: build/smolmoe-gui (C++17; no Linux e no macOS, precisa da GLFW)
-make help        # os alvos comuns e um atalho por modelo (make qwen, make qwen-gui, make all-models...)
-make ZIG=zig wasi web   # WebAssembly: módulos WASI para os testes e a página do navegador (precisa do zig 0.13)
-bun scripts/bench.ts                                    # medianas de leitura/escrita e tempo por fase
-bun scripts/bench.ts --ab build/smolmoe-base.exe        # A/B alternado contra um binário anterior
+make                 # Compila build/smolmoe, build/smolmoe-bundle e build/smolmoe-quantize
+make gui             # Compila a janela nativa em build/smolmoe-gui
+make release         # Binários otimizados e estáticos em build/release/
+make all-models      # Empacota todos os executáveis autocontidos em dist/
+make test            # Roda testes unitários em C + suíte de integração no Bun
+make sanitize        # Roda toda a suíte sob AddressSanitizer + UndefinedBehaviorSanitizer (Linux/macOS)
+make bench           # Executa o benchmark padrão (scripts/bench.ts)
+make help            # Lista todos os atalhos em português
 ```
 
-Para julgar uma otimização: copie o binário atual (por exemplo, para `build/smolmoe-base.exe`), faça a mudança,
-recompile e rode o modo `--ab`. Os dois binários rodam alternados na mesma sessão, e o calor do processador afeta os
-dois por igual. O script sai com erro se alguma métrica piorar além do limiar (`--threshold`, padrão 5%).
-`--profile` no runtime mostra para onde vai o tempo de cada passada.
-
-Requisitos: compilador C99 (GCC ou Clang), `make` e [Bun](https://bun.sh) para os testes e scripts.
-O runtime não tem dependências além da libc e da libm (e `pthread` em POSIX). A janela, que é opcional, usa C++17 e
-o Dear ImGui, que vem no repositório (`third_party/imgui`). No Linux e no macOS ela também precisa da GLFW.
+### Estrutura do Repositório
 
 ```text
-src/        runtime C99 (plataforma, kernels, modelo, tokenizers, CLI, motor de conversa)
-gui/        a janela em C++17 com Dear ImGui (Win32 + Direct3D 11, ou GLFW + OpenGL 3)
-web/        a página do navegador (TypeScript) sobre o build WebAssembly
-third_party/  Dear ImGui 1.91.9b, sem mudanças (MIT)
-tests/      testes unitários C + integração TypeScript (fixtures MoE sintéticas)
-scripts/    benchmark, comparação de qualidade, geração de fixtures (TypeScript/Bun)
-tools/      conversores de checkpoints (Python legado, POSIX)
-docs/       formato, decisões, modelos, roadmap
-models/     pesos locais (fora do git)
+src/          Runtime C99 (plataforma, kernels SIMD, modelo, tokenizers, ferramentas, engine e CLI)
+gui/          Interface gráfica em C++17 com Dear ImGui (Win32 + Direct3D 11 / GLFW + OpenGL 3)
+web/          Aplicação web em TypeScript sobre o build WebAssembly (WASI + SIMD128)
+scripts/      Conversor de modelos Hugging Face (convert.ts), download, benchmark e avaliação (Bun)
+tests/        Testes unitários em C e testes de integração / paridade numérica em TypeScript
+docs/         Documentação detalhada de arquitetura, formato binário, modelos e decisões
 ```
 
-## Escopo honesto
+---
 
-- Arquiteturas suportadas: `smolmoe_v1` (GQA, RoPE com rotação parcial opcional, RMSNorm, SwiGLU, roteamento top-k
-  sigmoide, experts compartilhados) e `smolmoe_qwen2` (com viés em QKV). Qualquer outra é recusada explicitamente.
-- Modelos convertidos e validados: Qwen2.5-0.5B-Instruct, Phi-4-mini-instruct (até 4096 tokens de contexto, chat
-  sem ferramentas) e TinyStories. O Gemma está no [roadmap](docs/ROADMAP.md).
-- O roteamento MoE é testado só com checkpoints sintéticos. **Nenhum modelo MoE treinado é suportado ainda**; os modelos
-  incluídos são densos, representados como um expert sempre ativo.
-- Não é compatível com Kimi K3 nem com GGUF, e ainda não há servidor HTTP (está no [roadmap](docs/ROADMAP.md)).
-- A janela vem pronta só para Windows, desde a v0.4.0. No Linux e no macOS, ela compila no CI, mas ainda não foi aberta à mão
-  ([DESKTOP.md](docs/DESKTOP.md)).
-- O Qwen 0.5B é pequeno: às vezes mistura idiomas ou ignora o formato pedido. Revise as respostas.
-- O checkpoint precisa ficar imutável durante a execução. No Windows o arquivo é aberto sem permitir escrita; no
-  Linux/macOS, truncar ou reescrever o `.smoe` enquanto ele roda derruba o processo (`SIGBUS`), como em qualquer
-  programa que usa `mmap`.
+## Arquitetura e Desempenho
 
-Licença MIT. Os pesos convertidos mantêm suas licenças originais (Apache-2.0 para Qwen, MIT para Phi e TinyStories); ver
-[THIRD_PARTY.md](THIRD_PARTY.md).
+| Métrica (i7-10610U, Qwen2.5-0.5B Q8, prompt de 88 tokens) | v0.1 | **Atual** |
+|---|---:|---:|
+| Tempo até o primeiro token (TTFT) | 29,0 s | **1,3 s** |
+| Velocidade de leitura (Prefill) | 3,0 tok/s | **67–71 tok/s** |
+| Velocidade de escrita (Decode) | 2,0 tok/s | **22–26 tok/s** |
+| Consumo de heap (além dos pesos via `mmap`) | 1024 MiB | **22 MiB** |
+| Perplexidade (texto PT-BR, 164 tokens) | 5,2750 | **5,2774 (+0,05%)** |
+
+1. **Pesos mapeados direto do disco (`mmap` / `MapViewOfFile`):** sem cópia em RAM e sem cache duplicado.
+2. **Produto escalar inteiro exato (Q8/Q5):** ativações quantizadas em blocos de 32 valores e acumulação float em ordem fixa de 8 lanes — reproduzida bit a bit nos kernels escalar, `AVX2`, `NEON` e `SIMD128`.
+3. **Prefill em lote e Threadpool estático:** processa múltiplos tokens por leitura de linha de peso e particiona o trabalho de forma determinística entre os núcleos físicos.
+4. **Validação estrita na carga:** shapes, alinhamentos, escalas e extents do arquivo `.smoe` são verificados na abertura; o laço de inferência roda sem checagens redundantes.
+
+---
+
+## Documentação Complementar
+
+- **[docs/CAMINHOS.md](docs/CAMINHOS.md)** — Guia completo comparando cada modo de execução (CLI, GUI, Web, pacotes únicos) por sistema operacional.
+- **[docs/INSTALL.md](docs/INSTALL.md)** — Download e verificação dos binários prontos do GitHub Releases.
+- **[docs/DESKTOP.md](docs/DESKTOP.md)** — Uso, atalhos e detalhes técnicos da interface gráfica (Dear ImGui).
+- **[docs/WEB.md](docs/WEB.md)** — Como compilar e servir a versão WebAssembly no navegador.
+- **[docs/MODELS.md](docs/MODELS.md)** — Como baixar, verificar ou converter modelos (Qwen2.5, Gemma 3, Phi-4-mini, Q5) do Hugging Face.
+- **[docs/FORMAT.md](docs/FORMAT.md)** — Especificação binária dos contêineres `SMOEQ8`/`SMOEQ5` (v1, v2, v3), tokenizers (`SMQBP1`, `SMSPB1`) e trailer `SMOEBDL1`.
+- **[docs/DECISIONS.md](docs/DECISIONS.md)** — Histórico de engenharia, benchmarks A/B e experimentos descartados.
+- **[docs/ROADMAP.md](docs/ROADMAP.md)** — Próximos passos de otimização, novos modelos e ferramentas.
+
+## Licença
+
+Código-fonte sob licença [MIT](LICENSE). Os pesos convertidos mantêm as condições de uso do modelo original (Apache-2.0 para Qwen2.5; Gemma Terms of Use para Gemma 3; MIT para Phi-4-mini e TinyStories); consulte [docs/MODELS.md](docs/MODELS.md) e [THIRD_PARTY.md](THIRD_PARTY.md).

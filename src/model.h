@@ -23,7 +23,8 @@ typedef struct Expert {
 } Expert;
 
 typedef struct Layer {
-    const float *attn_norm, *ffn_norm, *q_bias, *k_bias, *v_bias;
+    const float *attn_norm, *ffn_norm, *post_attn_norm, *post_ffn_norm;
+    const float *q_bias, *k_bias, *v_bias, *q_norm, *k_norm;
     QMat q, k, v, o, router;
     Expert *experts, *shared;
 } Layer;
@@ -41,7 +42,7 @@ typedef enum ModelPhase {
 
 typedef struct Model {
     Config c;
-    uint32_t context, batch, head_dim, kv_dim, logit_rows, nb_dim, nb_hidden;
+    uint32_t context, batch, head_dim, q_dim, kv_dim, logit_rows, nb_dim, nb_q, nb_hidden;
     QMat embed, head;
     const float *final_norm;
     Layer *layers;
@@ -53,8 +54,8 @@ typedef struct Model {
     /* Routing state (experts > 1 only). */
     float *route, *weights, *expert_out;
     uint32_t *selected, *members;
-    double *inv_freq;
-    float *rope_cos, *rope_sin;
+    double *inv_freq, *inv_freq_local;
+    float *rope_cos, *rope_sin, *rope_cos_local, *rope_sin_local;
     float *keys, *values, *scores;
     uint64_t expert_calls;
     int profiling;

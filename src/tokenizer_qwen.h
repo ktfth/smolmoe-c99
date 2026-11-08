@@ -11,8 +11,8 @@
 
 /* v2 header enums; any other value is rejected at load. */
 enum { QBP_NORM_NONE = 0, QBP_NORM_NFC = 1 };
-enum { QBP_PRETOK_QWEN2 = 1, QBP_PRETOK_O200K = 2 };
-enum { QBP_CHAT_NONE = 0, QBP_CHAT_CHATML = 1, QBP_CHAT_PHI = 2 };
+enum { QBP_PRETOK_QWEN2 = 1, QBP_PRETOK_O200K = 2, QBP_PRETOK_GEMMA = 3 };
+enum { QBP_CHAT_NONE = 0, QBP_CHAT_CHATML = 1, QBP_CHAT_PHI = 2, QBP_CHAT_GEMMA = 3 };
 
 typedef struct QwenTokenizer QwenTokenizer;
 

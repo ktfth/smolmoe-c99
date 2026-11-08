@@ -10,14 +10,15 @@ indicados.
 |---|---|---|
 | Clicar e conversar | [Janela com o modelo dentro](#1-janela) | Windows (no Release desde a v0.4.0); Linux e macOS compilando |
 | Conversar no terminal, sem instalar nada | [Chat no terminal, arquivo único](#2-chat-no-terminal-arquivo-único) | Windows, Linux, macOS, Termux |
-| Usar outro modelo (Phi-4-mini, Q5) | [Programa e modelo separados](#3-programa-e-modelo-separados) | Todos |
+| Usar outro modelo (Gemma 3 1B, Phi-4-mini, Q5) | [Programa e modelo separados](#3-programa-e-modelo-separados) | Todos |
 | Uma resposta para um script | [Uma resposta e sai](#4-uma-resposta-e-sai-scripts) | Todos |
 | Conversar no navegador, sem binário nativo | [Navegador, no seu computador](#5-navegador-no-seu-computador) | Chrome ou Edge recentes (testado no Chrome) |
 | Um executável seu, com outro modelo dentro | [Montar seu próprio arquivo único](#6-montar-seu-próprio-arquivo-único) | Todos |
 | Mexer no código | [Compilar da fonte](#7-compilar-da-fonte) | Windows (MSYS2), Linux, macOS |
 
-Em todos os caminhos é o mesmo motor de conversa: o mesmo português, as mesmas ferramentas de data e de conta, e os
-mesmos números (o navegador dá exatamente as respostas do nativo). Nenhum deles manda texto para fora do computador.
+Nos modelos com template de chat, as interfaces usam o mesmo motor de conversa e as cinco ferramentas locais —
+`data_atual`, `dias_ate`, `calcular`, `converter` e `contar`. O navegador dá as mesmas respostas do nativo. Nenhum
+deles manda texto para fora do computador.
 
 ### Qual modelo
 
@@ -25,7 +26,9 @@ mesmos números (o navegador dá exatamente as respostas do nativo). Nenhum dele
 |---|---|---|---|
 | **Qwen2.5-0.5B Q8** (padrão) | `qwen2.5-0.5b-instruct-q8.smoe`, 560 MB | ~0,6 GB | Chat em português, com as ferramentas. É o que vem dentro do `qwen-pt`. |
 | Qwen2.5-0.5B Q5 | `qwen2.5-0.5b-instruct-q5.smoe`, 340 MB | ~0,4 GB | O mesmo modelo, para quando falta memória. Não é mais rápido. |
-| Phi-4-mini (3,8B) | `phi-4-mini-instruct.smoe.001` a `.003` (juntar) | 4,4 GB | Português e contas melhores, a ~4 tokens/s. Ainda sem as ferramentas. Não cabe no navegador. |
+| Gemma 3 1B Instruct | `models/gemma-3-1b-it/` (converter localmente) | ~1,2 GB | Chat em português com as cinco ferramentas; requer acesso autorizado ao checkpoint no Hugging Face. |
+| Gemma 3 270M Instruct | `models/gemma-3-270m-it/` (converter localmente) | não medido | A arquitetura e o conversor estão implementados, mas o uso com esses pesos ainda não foi validado ponta a ponta. |
+| Phi-4-mini (3,8B) | `phi-4-mini-instruct.smoe.001` a `.003` (juntar) | 4,4 GB | Português e contas melhores, a ~4 tokens/s. Oferece as cinco ferramentas. Não cabe no navegador. |
 | TinyStories 15M | `tinystories-15m.smoe`, 28 MB | pouca | Testar se roda. Escreve historinhas em inglês e não conversa (a janela e o navegador o recusam). |
 
 O repositório é privado: os arquivos do Release baixam com o GitHub CLI autenticado (`gh auth login`). Os comandos
@@ -68,10 +71,13 @@ Para trocar de modelo sem baixar outro executável: o programa `smolmoe-<sistema
 ```sh
 ./smolmoe-linux-x64 --model qwen2.5-0.5b-instruct-q5.smoe          # chat com o Q5
 ./smolmoe-linux-x64 --model phi-4-mini-instruct.smoe               # Phi-4-mini, depois de juntar as partes
+make chat gemma                                                     # Gemma 3 1B no terminal; na primeira vez baixa e converte os pesos
+make run-gui gemma                                                  # Gemma 3 1B na janela
 ```
 
 No Windows, o comando é `.\smolmoe-windows-x64.exe --model ...`. Juntar as partes do Phi-4-mini está em
-[INSTALL.md](INSTALL.md#phi-4-mini-modelo-maior).
+[INSTALL.md](INSTALL.md#phi-4-mini-modelo-maior). A conversão automática do Gemma exige `HF_TOKEN` e aceite dos termos
+no Hugging Face; veja [MODELS.md](MODELS.md).
 
 Os `.smoe` do Release são autocontidos. Um `model.smoe` sem configuração dentro, como os de `models/<nome>/`
 baixados por `bun scripts/fetch-models.ts`, precisa também de `--config config.ini --tokenizer tokenizer.qbp`. Na
@@ -97,6 +103,7 @@ A página `web/` roda o modelo inteiro no navegador, em WebAssembly. Ela fica pa
 publicação na internet. Guia em [WEB.md](WEB.md).
 
 ```sh
+make run-web                         # compila a página e abre http://localhost:8080/
 make ZIG=/caminho/do/zig web     # precisa do zig 0.13 e do bun
 bun scripts/serve-web.ts         # http://localhost:8080/
 ```
@@ -162,6 +169,8 @@ build/smolmoe-gui models/qwen2.5-0.5b-instruct/model.smoe
 | `make qwen-gui` | `qwen-pt-gui` | A janela com o Qwen Q8 |
 | `make qwen-q5` | `qwen-pt-q5` | Terminal com o Qwen Q5: 340 MB, menos memória. O arquivo Q5 é gerado do Q8. |
 | `make qwen-q5-gui` | `qwen-pt-q5-gui` | A janela com o Qwen Q5 |
+| `make gemma` | `gemma-3-1b` | Terminal com o Gemma 3 1B; baixa e converte na primeira vez (requer `HF_TOKEN` e aceite dos termos) |
+| `make gemma-gui` | `gemma-3-1b-gui` | A janela com o Gemma 3 1B |
 | `make phi` | `phi-4-mini` | Terminal com o Phi-4-mini (4,4 GB). Os pesos vêm de `make phi-weights`: 7,7 GB de download e ~13 GB de disco. |
 | `make phi-gui` | `phi-4-mini-gui` | A janela com o Phi-4-mini |
 | `make stories` | `tinystories` | Historinhas em inglês, para testar se roda |

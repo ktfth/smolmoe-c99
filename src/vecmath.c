@@ -79,6 +79,18 @@ void silu_mul_scalar(float *up, const float *gate, size_t n) {
     for (i = 0; i < n; ++i) up[i] *= gate[i] / (1.0f + exp_det(-gate[i]));
 }
 
+/* gelu_pytorch_tanh(g) = 0.5 * g * (1 + tanh(c * (g + 0.044715 * g^3)))
+ *                      = g / (1 + exp(-2 * c * (g + 0.044715 * g^3))),
+ * with c = sqrt(2 / pi) = 0.7978845608028654f. */
+void gelu_mul_scalar(float *up, const float *gate, size_t n) {
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        float g = gate[i];
+        float u = 1.5957691216f * (g + 0.044715f * g * g * g);
+        up[i] *= g / (1.0f + exp_det(-u));
+    }
+}
+
 #if defined(SM_HAVE_AVX2)
 /* exp_det() on 4 clamped, finite lanes, operation for operation, before the
  * final rounding to binary32. */

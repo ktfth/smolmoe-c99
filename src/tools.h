@@ -26,14 +26,19 @@ ToolClock tool_clock_now(void);
  * built-in tools. Returns the length, or 0 when it does not fit in cap. */
 size_t tools_system_prompt(const char *system, char *out, size_t cap);
 
-/* Whether to offer the tools for this user message: it names a date or talks
- * about time. Elsewhere small models call tools they do not need. */
+/* Whether to offer the tools for this user message: it names a date, talks
+ * about time, asks for a calculation, converts units or counts text. Elsewhere
+ * small models call tools they do not need. */
 int tools_relevant(const char *user_text);
 
-/* The one tool a message clearly needs, or NULL: "calcular" for a calculation
- * that names no date or time. Used when the model's own call was discarded
- * (it picked a tool that does not fit): the runtime then opens that call. */
+/* The one tool a message clearly needs, or NULL: "calcular", "converter" or
+ * "contar" when no date or time is asked. Used when the model omits or misses
+ * the call: the runtime then opens that call. */
 const char *tools_forced_choice(const char *user_text);
+
+/* Date/time fallback choice ("dias_ate" or "data_atual") when a date/time
+ * question is asked and the model omits the tool call. */
+const char *tools_date_choice(const char *user_text);
 
 /* The call text the model would write after <tool_call> up to the first
  * argument's value, for a forced choice. Returns its length, or 0 when the

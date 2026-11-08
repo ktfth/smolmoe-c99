@@ -521,8 +521,8 @@ e o ganho esperado é pequeno pelo mesmo motivo: a fórmula continuaria sendo do
 - **Custo:** a declaração da `calcular` soma 118 tokens ao prompt de sistema, que vai a 397. Abrir o chat leva cerca
   de 5,9 s com as ferramentas e 0,4 s com `--no-tools` (mediana de 3, alternadas).
 - **Reavaliar com um modelo que escreve fórmulas melhor.** Sem ferramenta, o Phi-4-mini já acertou "15% de 230" e o
-  desconto (iteração 6), mas antes precisa de ferramentas no chat. O protocolo é o mesmo: conjunto novo às cegas e
-  linha de base pareada.
+  desconto (iteração 6). Desde a v0.5.0, o runtime oferece as ferramentas ao Phi; o protocolo continua sendo usar um
+  conjunto novo às cegas e comparar pergunta a pergunta.
 - **Lição de processo:** a maquinaria toda (aterramento, chamada forçada, revisão) foi construída antes de testar a
   hipótese central às cegas. No ajudante de comandos, primeiro se mede às cegas o modelo com os exemplos recuperados,
   contra o modelo sem eles. A maquinaria de segurança só é construída se esse ganho aparecer.
@@ -783,4 +783,4 @@ Ver [ROADMAP.md](ROADMAP.md). As suspeitas atuais, ainda sem medição:
   só ganha 2,4× com 4 threads.
 - O kernel Q5 custa 2,6× o Q8 por bloco; uma variante com desempacotamento por tabela ou 2 blocos por iteração pode
   torná-lo vantajoso também em velocidade.
-- Os conversores ainda estão em Python e o `q8pack.c` é só POSIX.
+- O conversor do TinyStories ainda está em Python e o `q8pack.c` é só POSIX.

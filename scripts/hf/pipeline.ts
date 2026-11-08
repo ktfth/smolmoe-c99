@@ -24,9 +24,9 @@ import { type Checkpoint, type HfTensor, readTensorBytes } from "./safetensors";
 export type TensorSource =
   /** Q8 matrix whose row i is source row rows[i] of `tensor` (row maps, slices, head permutations) */
   | { readonly kind: "rows"; readonly tensor: HfTensor; readonly rows: Uint32Array }
-  /** F32 vector, optionally head-permuted (q/k biases) */
+  /** F32 vector, optionally head-permuted (q/k biases or norms) and/or shifted by +1 (Gemma RMSNorm) */
   | { readonly kind: "vector"; readonly tensor: HfTensor; readonly heads?: { readonly count: number;
-    readonly headDim: number; readonly rotaryDim: number } }
+    readonly headDim: number; readonly rotaryDim: number }; readonly addOne?: boolean }
   /** all-zero Q8 matrix (the router of a dense model: one expert with weight exactly 1) */
   | { readonly kind: "zeros" }
   /** lm_head sharing embed's payload */
@@ -97,7 +97,8 @@ function records(plan: ModelPlan, blobs: ReadonlyMap<string, Uint8Array>): Recor
 }
 
 function vectorBytes(s: Extract<TensorSource, { kind: "vector" }>): Uint8Array {
-  const x = decodeVector(s.tensor.dtype, readTensorBytes(s.tensor));
+  let x = decodeVector(s.tensor.dtype, readTensorBytes(s.tensor));
+  if (s.addOne) x = Float32Array.from(x, (v) => v + 1);
   return encodeF32(s.heads ? permuteHeads(x, s.heads.count, s.heads.headDim, s.heads.rotaryDim) : x);
 }
 

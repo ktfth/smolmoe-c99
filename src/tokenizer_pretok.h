@@ -125,4 +125,22 @@ static inline uint32_t o200k_boundary(const uint32_t *c, const uint8_t *k, uint3
     return j != PRETOK_NO_MATCH ? j : pretok_whitespace(c, n, i);
 }
 
+/* Gemma / SentencePiece Split(' ', MergedWithNext): digits are single tokens,
+ * newlines stand alone, and a leading space attaches to the word/punct run that
+ * follows it. */
+static inline uint32_t gemma_boundary(const uint32_t *c, const uint8_t *k, uint32_t n, uint32_t i) {
+    uint32_t j = i;
+    if (c[j] == '\r' || c[j] == '\n') {
+        while (j < n && (c[j] == '\r' || c[j] == '\n')) ++j;
+        return j;
+    }
+    if (k[j] & UC_N) return j + 1;
+    if (c[j] == ' ') {
+        ++j;
+        if (j < n && (c[j] == ' ' || c[j] == '\r' || c[j] == '\n' || (k[j] & UC_N))) return j;
+    }
+    while (j < n && c[j] != ' ' && c[j] != '\r' && c[j] != '\n' && !(k[j] & UC_N)) ++j;
+    return j > i ? j : i + 1;
+}
+
 #endif

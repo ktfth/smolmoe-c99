@@ -60,16 +60,17 @@ typedef struct Source {
 
 static void usage(FILE *out) {
     fputs("smolmoe " SMOLMOE_VERSION " - CPU inference for SMOEQ8 checkpoints\n\n"
-          "usage: smolmoe --model FILE [--config FILE --tokenizer FILE] [--prompt TEXT] [options]\n"
+          "usage: smolmoe [--model] <FILE|DIR|qwen|qwen-q5|gemma|phi|stories> [--prompt TEXT] [options]\n"
           "       qwen-pt.exe [--prompt TEXT] [options]     (self-contained bundle: no files needed)\n"
           "  Without a prompt, a chat model starts an interactive conversation.\n"
-          "  --config/--tokenizer default to the copies embedded by smolmoe-bundle.\n\n"
+          "  --config/--tokenizer default to config.ini and tokenizer.qbp/.spb beside the model,\n"
+          "  or to the copies embedded by smolmoe-bundle.\n\n"
           "input\n"
           "  --prompt-file FILE   raw UTF-8/byte prompt instead of --prompt\n"
           "  --chat               wrap the prompt in the model's single-turn chat template\n"
           "  --interactive, -i    multi-turn chat on stdin/stdout (default without a prompt)\n"
           "  --system TEXT        chat system message (default: Brazilian Portuguese)\n"
-          "  --no-tools           chat without the built-in tools (date, days until a date)\n"
+          "  --no-tools           chat without the built-in tools (date, days until a date, calc, convert, count)\n"
           "  --now YYYY-MM-DDTHH:MM  fixed local time for the tools (default: the clock)\n"
           "  --shell NAME|PATH    shell for \"!command\" lines in the chat: pwsh, powershell, cmd, bash, sh...\n"
           "                       (default: the shell that started smolmoe, else the system's)\n"
@@ -162,6 +163,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--shell-escape")) { o->shell_escape = 1; continue; }
         if (!strcmp(opt, "--no-shell-escape")) { o->shell_escape = -1; continue; }
         if (!strcmp(opt, "--profile")) { o->profile = 1; continue; }
+        if (opt[0] != '-' && !o->model) { o->model = opt; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         parse_value(o, opt, argv[++a]);
     }
@@ -301,12 +303,56 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
 
 /* ---- model source ------------------------------------------------------ */
 
-/* --model wins; otherwise look for a container appended to this executable. */
-static void open_source(const Options *o, Source *s, Memory *mem) {
+static int file_exists(const char *path) {
+    FILE *f = open_file(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+static char *beside_path(const char *path, const char *name, Memory *mem) {
+    size_t dir = strlen(path);
+    char *joined;
+    while (dir && path[dir - 1] != '/' && path[dir - 1] != '\\') --dir;
+    joined = (char *)mem_alloc(mem, add_size(dir, strlen(name) + 1), 1);
+    memcpy(joined, path, dir);
+    strcpy(joined + dir, name);
+    return file_exists(joined) ? joined : NULL;
+}
+
+static const char *resolve_model_target(const char *arg, Memory *mem) {
+    size_t len;
+    char *joined;
+    if (!arg) return NULL;
+    if (!strcmp(arg, "qwen") || !strcmp(arg, "qwen-pt")) return "models/qwen2.5-0.5b-instruct/model.smoe";
+    if (!strcmp(arg, "qwen-q5") || !strcmp(arg, "qwen-pt-q5")) return "models/qwen2.5-0.5b-instruct/model-q5.smoe";
+    if (!strcmp(arg, "gemma") || !strcmp(arg, "gemma-3") || !strcmp(arg, "gemma-3-1b"))
+        return "models/gemma-3-1b-it/model.smoe";
+    if (!strcmp(arg, "gemma-270m") || !strcmp(arg, "gemma-3-270m"))
+        return "models/gemma-3-270m-it/model.smoe";
+    if (!strcmp(arg, "phi") || !strcmp(arg, "phi-4") || !strcmp(arg, "phi-4-mini"))
+        return "models/phi-4-mini-instruct/model.smoe";
+    if (!strcmp(arg, "stories") || !strcmp(arg, "tinystories")) return "models/tinystories-15m/model.smoe";
+    len = strlen(arg);
+    if (len < 5 || strcmp(arg + len - 5, ".smoe") != 0) {
+        int sep = len && (arg[len - 1] == '/' || arg[len - 1] == '\\');
+        const char *suffix = sep ? "model.smoe" : "/model.smoe";
+        joined = (char *)mem_alloc(mem, add_size(len, strlen(suffix) + 1), 1);
+        memcpy(joined, arg, len);
+        strcpy(joined + len, suffix);
+        if (file_exists(joined)) return joined;
+    }
+    return arg;
+}
+
+/* --model wins; otherwise look for a container appended to this executable,
+ * or default to the local Qwen chat model when starting an interactive terminal. */
+static void open_source(Options *o, Source *s, Memory *mem) {
     const char *self;
     char err[512];
     uint64_t offset, length;
     memset(s, 0, sizeof(*s));
+    o->model = resolve_model_target(o->model, mem);
     if (o->model) {
         map_file(o->model, &s->file);
         modelfile_parse(&s->mf, s->file.data, s->file.size, mem);
@@ -315,33 +361,55 @@ static void open_source(const Options *o, Source *s, Memory *mem) {
     }
     self = self_executable_path();
     /* Not being able to read our own file just means "no bundle". */
-    if (!self || !try_map_file(self, &s->file, err, sizeof(err))) return;
-    if (!bundle_find(s->file.data, s->file.size, &offset, &length)) {
+    if (self && try_map_file(self, &s->file, err, sizeof(err))) {
+        if (bundle_find(s->file.data, s->file.size, &offset, &length)) {
+            modelfile_parse(&s->mf, s->file.data + offset, length, mem);
+            s->present = 1;
+            return;
+        }
         unmap_file(&s->file);
-        return;
     }
-    modelfile_parse(&s->mf, s->file.data + offset, length, mem);
-    s->present = 1;
+    if (o->interactive && stdin_is_terminal() && file_exists("models/qwen2.5-0.5b-instruct/model.smoe")) {
+        o->model = "models/qwen2.5-0.5b-instruct/model.smoe";
+        map_file(o->model, &s->file);
+        modelfile_parse(&s->mf, s->file.data, s->file.size, mem);
+        s->present = 1;
+    }
 }
 
 static const Tensor *embedded(const Source *s, const char *name) {
     return s->present ? modelfile_blob(&s->mf, name) : NULL;
 }
 
-static Config load_config(const Options *o, const Source *s) {
+/* Converted model folders have both config.ini and tokenizer.qbp/.spb beside model.smoe. */
+static const char *sidecar_tokenizer(const Options *o, Memory *mem) {
+    const char *p;
+    if (!o->model) return NULL;
+    p = beside_path(o->model, "tokenizer.qbp", mem);
+    return p ? p : beside_path(o->model, "tokenizer.spb", mem);
+}
+
+static Config load_config(const Options *o, const Source *s, Memory *mem) {
     const Tensor *blob;
+    const char *cfg;
     if (o->config) return config_read(o->config);
     blob = embedded(s, BLOB_CONFIG);
-    if (!blob) die("no config: pass --config, or embed it with smolmoe-bundle");
-    return config_parse(blob->data, (size_t)blob->bytes);
+    if (blob) return config_parse(blob->data, (size_t)blob->bytes);
+    if ((o->tokenizer || sidecar_tokenizer(o, mem)) && (cfg = beside_path(o->model, "config.ini", mem)) != NULL)
+        return config_read(cfg);
+    die("no config: pass --config, or embed it with smolmoe-bundle");
+    return config_parse(NULL, 0);
 }
 
 static Tokenizer *load_tokenizer(const Options *o, const Source *s, uint32_t vocab, Memory *mem) {
     const Tensor *blob;
+    const char *tok;
     if (o->tokenizer) return tokenizer_load(o->tokenizer, vocab, mem);
     blob = embedded(s, BLOB_TOKENIZER);
-    if (!blob) die("no tokenizer: pass --tokenizer, or embed it with smolmoe-bundle");
-    return tokenizer_parse(blob->data, (size_t)blob->bytes, vocab, mem);
+    if (blob) return tokenizer_parse(blob->data, (size_t)blob->bytes, vocab, mem);
+    if ((tok = sidecar_tokenizer(o, mem)) != NULL) return tokenizer_load(tok, vocab, mem);
+    die("no tokenizer: pass --tokenizer, or embed it with smolmoe-bundle");
+    return NULL;
 }
 
 /* ---- generation -------------------------------------------------------- */
@@ -513,7 +581,7 @@ int main(int argc, char **argv) {
         usage(stderr);
         return 1;
     }
-    c = load_config(&o, &src);
+    c = load_config(&o, &src, &mem);
     context = o.context ? o.context : (c.max_context < DEFAULT_CONTEXT ? c.max_context : DEFAULT_CONTEXT);
     if (context > c.max_context) die("--context exceeds the model's max_context (%u)", c.max_context);
     /* The KV cache grows with the model and the context; the default budget

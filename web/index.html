@@ -31,8 +31,12 @@
   header h1 { margin: 0; font-size: 1.25rem; letter-spacing: 0.01em; }
   header p { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-  .setup h2 { margin: 0 0 4px; font-size: 1rem; }
-  .setup p { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; }
+  .setup h2 { margin: 0 0 8px; font-size: 1rem; }
+  .setup p { margin: 8px 0 12px; color: var(--muted); font-size: 0.9rem; }
+  select {
+    font: inherit; border-radius: 8px; padding: 8px 12px; width: 100%; max-width: 360px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   button, .file {
     font: inherit; border-radius: 8px; padding: 8px 14px; cursor: pointer;
@@ -68,6 +72,7 @@
 
   <section class="panel setup" id="setup">
     <h2 id="model-name">Modelo</h2>
+    <select id="model-select" aria-label="Selecionar modelo" hidden></select>
     <p id="model-help"></p>
     <div class="actions">
       <button class="primary" id="download" hidden>Baixar e abrir</button>

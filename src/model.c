@@ -49,20 +49,26 @@ static Expert expert_weights(const ModelFile *f, const Config *c, uint32_t layer
     return x;
 }
 
-static void load_layer(Layer *l, const ModelFile *f, const Config *c, uint32_t i, uint32_t kv_dim, Memory *mem) {
+static void load_layer(Layer *l, const ModelFile *f, const Config *c, uint32_t i, uint32_t q_dim, uint32_t kv_dim, Memory *mem) {
     char name[TENSOR_NAME_SIZE];
     uint32_t e;
     l->attn_norm = fvec(f, layer_name(name, i, "attn_norm"), c->dim, mem);
     l->ffn_norm = fvec(f, layer_name(name, i, "ffn_norm"), c->dim, mem);
-    l->q = qmat(f, layer_name(name, i, "q"), c->dim, c->dim);
+    l->q = qmat(f, layer_name(name, i, "q"), q_dim, c->dim);
     l->k = qmat(f, layer_name(name, i, "k"), kv_dim, c->dim);
     l->v = qmat(f, layer_name(name, i, "v"), kv_dim, c->dim);
-    l->o = qmat(f, layer_name(name, i, "o"), c->dim, c->dim);
+    l->o = qmat(f, layer_name(name, i, "o"), c->dim, q_dim);
     l->router = qmat(f, layer_name(name, i, "router"), c->experts, c->dim);
     if (c->qkv_bias) {
-        l->q_bias = fvec(f, layer_name(name, i, "q_bias"), c->dim, mem);
+        l->q_bias = fvec(f, layer_name(name, i, "q_bias"), q_dim, mem);
         l->k_bias = fvec(f, layer_name(name, i, "k_bias"), kv_dim, mem);
         l->v_bias = fvec(f, layer_name(name, i, "v_bias"), kv_dim, mem);
+    }
+    if (c->gemma3) {
+        l->post_attn_norm = fvec(f, layer_name(name, i, "post_attn_norm"), c->dim, mem);
+        l->post_ffn_norm = fvec(f, layer_name(name, i, "post_ffn_norm"), c->dim, mem);
+        l->q_norm = fvec(f, layer_name(name, i, "q_norm"), c->head_dim, mem);
+        l->k_norm = fvec(f, layer_name(name, i, "k_norm"), c->head_dim, mem);
     }
     l->experts = (Expert *)mem_alloc(mem, c->experts, sizeof(Expert));
     l->shared = (Expert *)mem_alloc(mem, c->shared ? c->shared : 1, sizeof(Expert));
@@ -77,38 +83,41 @@ static void *buffer(Memory *mem, size_t rows, size_t cols, size_t size) {
 void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
                 uint32_t logit_rows, Pool *pool, Memory *mem) {
     uint64_t expected;
-    uint32_t i, half, threads = pool_threads(pool);
+    uint32_t i, half, nb_max, threads = pool_threads(pool);
     memset(m, 0, sizeof(*m));
     m->c = *c;
     m->context = context;
     m->batch = batch;
     m->logit_rows = logit_rows;
     m->pool = pool;
-    m->head_dim = c->dim / c->heads;
+    m->head_dim = c->head_dim;
+    m->q_dim = c->heads * m->head_dim;
     m->kv_dim = c->kv_heads * m->head_dim;
     m->nb_dim = (c->dim + QK - 1) / QK;
+    m->nb_q = (m->q_dim + QK - 1) / QK;
     m->nb_hidden = (c->hidden + QK - 1) / QK;
+    nb_max = m->nb_dim > m->nb_q ? m->nb_dim : m->nb_q;
     half = c->rotary_dim / 2;
-    expected = 3 + (uint64_t)c->layers * (7 + 3 * c->qkv_bias + 3 * (uint64_t)(c->experts + c->shared));
+    expected = 3 + (uint64_t)c->layers * (7 + 3 * c->qkv_bias + 4 * c->gemma3 + 3 * (uint64_t)(c->experts + c->shared));
     if (expected != f->count - f->blobs) die("tensor count does not match config");
 
     m->embed = qmat(f, "embed", c->vocab, c->dim);
     m->head = qmat(f, "lm_head", c->vocab, c->dim);
     m->final_norm = fvec(f, "final_norm", c->dim, mem);
     m->layers = (Layer *)mem_alloc(mem, c->layers, sizeof(Layer));
-    for (i = 0; i < c->layers; ++i) load_layer(&m->layers[i], f, c, i, m->kv_dim, mem);
+    for (i = 0; i < c->layers; ++i) load_layer(&m->layers[i], f, c, i, m->q_dim, m->kv_dim, mem);
 
     m->x = (float *)buffer(mem, batch, c->dim, sizeof(float));
     m->xn = (float *)buffer(mem, batch, c->dim, sizeof(float));
-    m->q = (float *)buffer(mem, batch, c->dim, sizeof(float));
-    m->att = (float *)buffer(mem, batch, c->dim, sizeof(float));
+    m->q = (float *)buffer(mem, batch, m->q_dim, sizeof(float));
+    m->att = (float *)buffer(mem, batch, m->q_dim, sizeof(float));
     m->out = (float *)buffer(mem, batch, c->dim, sizeof(float));
     m->k = (float *)buffer(mem, batch, m->kv_dim, sizeof(float));
     m->v = (float *)buffer(mem, batch, m->kv_dim, sizeof(float));
     m->gate = (float *)buffer(mem, batch, c->hidden, sizeof(float));
     m->up = (float *)buffer(mem, batch, c->hidden, sizeof(float));
-    m->xd = (float *)buffer(mem, batch, m->nb_dim, sizeof(float));
-    m->xq = (int8_t *)buffer(mem, batch, (size_t)m->nb_dim * QK, 1);
+    m->xd = (float *)buffer(mem, batch, nb_max, sizeof(float));
+    m->xq = (int8_t *)buffer(mem, batch, (size_t)nb_max * QK, 1);
     m->hd = (float *)buffer(mem, batch, m->nb_hidden, sizeof(float));
     m->hq = (int8_t *)buffer(mem, batch, (size_t)m->nb_hidden * QK, 1);
     if (c->experts > 1) {
@@ -122,16 +131,22 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     }
     m->logits = (float *)buffer(mem, logit_rows, c->vocab, sizeof(float));
     m->inv_freq = (double *)mem_alloc(mem, half, sizeof(double));
-    for (i = 0; i < half; ++i) m->inv_freq[i] = pow((double)c->theta, -(double)(2 * i) / (double)c->rotary_dim);
+    m->inv_freq_local = (double *)mem_alloc(mem, half, sizeof(double));
+    for (i = 0; i < half; ++i) {
+        m->inv_freq[i] = pow((double)c->theta, -(double)(2 * i) / (double)c->rotary_dim);
+        m->inv_freq_local[i] = pow((double)c->local_theta, -(double)(2 * i) / (double)c->rotary_dim);
+    }
     m->rope_cos = (float *)buffer(mem, batch, half, sizeof(float));
     m->rope_sin = (float *)buffer(mem, batch, half, sizeof(float));
+    m->rope_cos_local = (float *)buffer(mem, batch, half, sizeof(float));
+    m->rope_sin_local = (float *)buffer(mem, batch, half, sizeof(float));
     m->keys = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
     m->values = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
     m->scores = (float *)buffer(mem, threads, context, sizeof(float));
 }
 
 size_t kv_cache_bytes(const Config *c, uint32_t context) {
-    size_t kv_dim = (size_t)c->kv_heads * (c->dim / c->heads);
+    size_t kv_dim = (size_t)c->kv_heads * c->head_dim;
     return mul_size(mul_size(mul_size(c->layers, context), kv_dim), 2 * sizeof(float));
 }
 
@@ -252,19 +267,22 @@ static int rmsnorm(const float *x, const float *w, float *y, uint32_t n, float e
 }
 
 /* Per-token work that ends in a quantized row: optional RMSNorm (src -> rows)
- * or SwiGLU (rows *= silu(gate)), then Q8. One token's row never spans two
+ * or SwiGLU/GeGLU (rows *= act(gate)), then Q8. One token's row never spans two
  * threads, so the split cannot change any value. */
 typedef struct RowTask {
     const float *src, *norm, *gate;
     float *rows, *d, eps;
     int8_t *q;
-    uint32_t n, cols, nb, fault;
+    uint32_t n, cols, nb, gemma3, fault;
 } RowTask;
 
 static int row_work(const RowTask *t, uint32_t r) {
     float *row = t->rows + (size_t)r * t->cols;
     if (t->norm && rmsnorm(t->src + (size_t)r * t->cols, t->norm, row, t->cols, t->eps)) return 0;
-    if (t->gate) silu_mul(row, t->gate + (size_t)r * t->cols, t->cols);
+    if (t->gate) {
+        if (t->gemma3) gelu_mul_scalar(row, t->gate + (size_t)r * t->cols, t->cols);
+        else silu_mul(row, t->gate + (size_t)r * t->cols, t->cols);
+    }
     return quantize_q8(row, t->cols, t->d + (size_t)r * t->nb, t->q + (size_t)r * t->nb * QK) == 0;
 }
 
@@ -305,15 +323,23 @@ static void norm_quantize(Model *m, const float *src, const float *weight, uint3
 }
 
 static void quantize_attention(Model *m, uint32_t n) {
-    RowTask t = rows_of(m->att, n, m->c.dim, m->nb_dim, m->xd, m->xq);
+    RowTask t = rows_of(m->att, n, m->q_dim, m->nb_q, m->xd, m->xq);
     run_rows(m, &t);
 }
 
-/* m->up *= silu(m->gate), quantized into m->hd/m->hq. */
+/* m->up *= act(m->gate), quantized into m->hd/m->hq. */
 static void silu_quantize(Model *m, uint32_t n) {
     RowTask t = rows_of(m->up, n, m->c.hidden, m->nb_hidden, m->hd, m->hq);
     t.gate = m->gate;
+    t.gemma3 = m->c.gemma3;
     run_rows(m, &t);
+}
+
+static void norm_rows_inplace(float *rows, const float *weight, uint32_t n, uint32_t cols, float eps) {
+    uint32_t r;
+    for (r = 0; r < n; ++r)
+        if (rmsnorm(rows + (size_t)r * cols, weight, rows + (size_t)r * cols, cols, eps))
+            die("non-finite activation; the checkpoint is outside the supported numeric range");
 }
 
 static void rope_tables(Model *m, uint32_t n, uint32_t pos0) {
@@ -321,8 +347,11 @@ static void rope_tables(Model *m, uint32_t n, uint32_t pos0) {
     for (t = 0; t < n; ++t)
         for (i = 0; i < half; ++i) {
             double angle = (double)(pos0 + t) * m->inv_freq[i];
+            double angle_local = (double)(pos0 + t) * m->inv_freq_local[i];
             m->rope_cos[t * half + i] = (float)(m->c.rope_factor * cos(angle));
             m->rope_sin[t * half + i] = (float)(m->c.rope_factor * sin(angle));
+            m->rope_cos_local[t * half + i] = (float)(m->c.rope_factor * cos(angle_local));
+            m->rope_sin_local[t * half + i] = (float)(m->c.rope_factor * sin(angle_local));
         }
 }
 
@@ -351,26 +380,32 @@ typedef struct AttnTask {
     uint32_t layer, ntok, pos0;
 } AttnTask;
 
-static void attend(Model *m, size_t layer_base, uint32_t t, uint32_t h, uint32_t pos, float *scores) {
+/* In Gemma 3, every 6th layer (5, 11, 17, ...) is global; the other 5 are local. */
+static int is_local_layer(const Config *c, uint32_t layer) {
+    return c->sliding_window > 0 && (!c->gemma3 || (layer + 1) % 6 != 0);
+}
+
+static void attend(Model *m, uint32_t layer, size_t layer_base, uint32_t t, uint32_t h, uint32_t pos, float *scores) {
     const Config *c = &m->c;
     uint32_t hd = m->head_dim, kh = h / (c->heads / c->kv_heads), p, j;
-    const float *q = m->q + (size_t)t * c->dim + (size_t)h * hd;
+    uint32_t start = is_local_layer(c, layer) && pos >= c->sliding_window ? pos - c->sliding_window + 1 : 0;
+    const float *q = m->q + (size_t)t * m->q_dim + (size_t)h * hd;
     const float *keys = m->keys + layer_base + (size_t)kh * hd;
     const float *values = m->values + layer_base + (size_t)kh * hd;
-    float *out = m->att + (size_t)t * c->dim + (size_t)h * hd;
+    float *out = m->att + (size_t)t * m->q_dim + (size_t)h * hd;
     float factor = 1.0f / sqrtf((float)hd), high = -FLT_MAX, total = 0, inv;
-    for (p = 0; p <= pos; ++p) {
+    for (p = start; p <= pos; ++p) {
         float s = dot_f32(q, keys + (size_t)p * m->kv_dim, hd) * factor;
         scores[p] = s;
         if (s > high) high = s;
     }
-    for (p = 0; p <= pos; ++p) {
+    for (p = start; p <= pos; ++p) {
         scores[p] = exp_det(scores[p] - high);
         total += scores[p];
     }
     inv = 1.0f / total;
     for (j = 0; j < hd; ++j) out[j] = 0;
-    for (p = 0; p <= pos; ++p) {
+    for (p = start; p <= pos; ++p) {
         const float *v = values + (size_t)p * m->kv_dim;
         float w = scores[p] * inv;
         for (j = 0; j < hd; ++j) out[j] += w * v[j];
@@ -384,13 +419,16 @@ static void attention_task(void *ctx, uint32_t index, uint32_t count) {
     size_t layer_base = (size_t)a->layer * m->context * m->kv_dim;
     float *scores = m->scores + (size_t)index * m->context;
     split_range(a->ntok * heads, index, count, &begin, &end);
-    for (i = begin; i < end; ++i) attend(m, layer_base, i / heads, i % heads, a->pos0 + i / heads, scores);
+    for (i = begin; i < end; ++i) attend(m, a->layer, layer_base, i / heads, i % heads, a->pos0 + i / heads, scores);
 }
 
 static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     const Config *c = &m->c;
     Layer *L = &m->layers[l];
     uint32_t t, half = c->rotary_dim / 2;
+    int local = is_local_layer(c, l);
+    const float *rcos = local ? m->rope_cos_local : m->rope_cos;
+    const float *rsin = local ? m->rope_sin_local : m->rope_sin;
     MatItem qkv[3];
     AttnTask task;
     double clock = clock_start(m);
@@ -403,9 +441,12 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     lap(m, PHASE_QKV, &clock);
     for (t = 0; t < n; ++t) {
         size_t slot = ((size_t)l * m->context + pos0 + t) * m->kv_dim;
-        rope(m->q + (size_t)t * c->dim, c->heads, m->head_dim, half, m->rope_cos + t * half, m->rope_sin + t * half);
-        rope(m->k + (size_t)t * m->kv_dim, c->kv_heads, m->head_dim, half, m->rope_cos + t * half, m->rope_sin + t * half);
-        memcpy(m->keys + slot, m->k + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
+        float *qt = m->q + (size_t)t * m->q_dim, *kt = m->k + (size_t)t * m->kv_dim;
+        if (L->q_norm) norm_rows_inplace(qt, L->q_norm, c->heads, m->head_dim, c->eps);
+        if (L->k_norm) norm_rows_inplace(kt, L->k_norm, c->kv_heads, m->head_dim, c->eps);
+        rope(qt, c->heads, m->head_dim, half, rcos + t * half, rsin + t * half);
+        rope(kt, c->kv_heads, m->head_dim, half, rcos + t * half, rsin + t * half);
+        memcpy(m->keys + slot, kt, m->kv_dim * sizeof(float));
         memcpy(m->values + slot, m->v + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
     }
     lap(m, PHASE_ROPE, &clock);
@@ -420,13 +461,14 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     qkv[0] = item(&L->o, NULL, m->out);
     matmul(m, qkv, 1, m->xd, m->xq, n);
     lap(m, PHASE_ATTN_OUT, &clock);
+    if (L->post_attn_norm) norm_rows_inplace(m->out, L->post_attn_norm, n, c->dim, c->eps);
     add_rows(m->x, m->out, (size_t)n * c->dim);
     lap(m, PHASE_RESIDUAL, &clock);
 }
 
 /* ---- feed-forward and routing ------------------------------------------ */
 
-/* out[t] = down(SiLU(gate x_t) * up x_t) for ntok quantized inputs. */
+/* out[t] = down(act(gate x_t) * up x_t) for ntok quantized inputs. */
 static void expert_mlp(Model *m, const Expert *e, const float *xd, const int8_t *xq, uint32_t ntok) {
     MatItem items[2];
     double clock = clock_start(m);
@@ -513,6 +555,7 @@ static void ffn_block(Model *m, uint32_t l, uint32_t n) {
         /* A single expert's normalized router weight is exactly 1. */
         expert_mlp(m, &L->experts[0], m->xd, m->xq, n);
         clock = clock_start(m);
+        if (L->post_ffn_norm) norm_rows_inplace(m->out, L->post_ffn_norm, n, c->dim, c->eps);
         add_rows(m->x, m->out, (size_t)n * c->dim);
         lap(m, PHASE_RESIDUAL, &clock);
     } else {
@@ -521,6 +564,7 @@ static void ffn_block(Model *m, uint32_t l, uint32_t n) {
     for (s = 0; s < c->shared; ++s) {
         expert_mlp(m, &L->shared[s], m->xd, m->xq, n);
         clock = clock_start(m);
+        if (L->post_ffn_norm) norm_rows_inplace(m->out, L->post_ffn_norm, n, c->dim, c->eps);
         add_rows(m->x, m->out, (size_t)n * c->dim);
         lap(m, PHASE_RESIDUAL, &clock);
     }
@@ -539,7 +583,8 @@ static void output_logits(Model *m, uint32_t n, LogitsMode mode) {
 
 void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode) {
     const Config *c = &m->c;
-    uint32_t t, l;
+    uint32_t t, l, j;
+    float embed_scale = c->gemma3 ? sqrtf((float)c->dim) : 1.0f;
     double clock = clock_start(m);
     if (!n || n > m->batch || pos0 > m->context || n > m->context - pos0) die("token batch exceeds context");
     for (t = 0; t < n; ++t) {
@@ -548,6 +593,8 @@ void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, 
         float *x = m->x + (size_t)t * c->dim;
         if (m->embed.dtype == DTYPE_Q5) dequantize_q5_row(row, c->dim, x);
         else dequantize_q8_row(row, c->dim, x);
+        if (c->gemma3)
+            for (j = 0; j < c->dim; ++j) x[j] *= embed_scale;
     }
     lap(m, PHASE_EMBED, &clock);
     rope_tables(m, n, pos0);
