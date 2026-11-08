@@ -24,6 +24,12 @@ const PHI: ModelConfig = {
   rope_theta: 10000, rotary_dim: 96, rope_attention_factor: Math.sqrt(1 + Math.log(32) / Math.log(4096)),
 };
 
+const GEMMA: ModelConfig = {
+  architecture: "smolmoe_gemma3", dim: 1152, hidden_dim: 6912, layers: 26, heads: 4, kv_heads: 1, experts: 1,
+  top_k: 1, vocab_size: 262144, max_context: 32768, shared_experts: 0, bos_id: 256, eos_id: 257, rms_eps: 1e-6,
+  rope_theta: 1000000, head_dim: 256, sliding_window: 512, rope_local_theta: 10000,
+};
+
 describe("pyFloatRepr (Python repr of a float)", () => {
   test.each([
     [1e-6, "1e-06"], [1e-5, "1e-05"], [1000000, "1000000.0"], [10000, "10000.0"], [1.5e-7, "1.5e-07"],
@@ -61,9 +67,10 @@ describe("formatConfig", () => {
 });
 
 describe("parseConfig (port of src/config.c)", () => {
-  test("round-trips both models", () => {
+  test("round-trips Qwen, Phi, and Gemma 3 configs", () => {
     expect(parseConfig(formatConfig(QWEN))).toEqual(QWEN);
     expect(parseConfig(formatConfig(PHI))).toEqual(PHI);
+    expect(parseConfig(formatConfig(GEMMA))).toEqual(GEMMA);
   });
 
   test("accepts comments, blank lines, CRLF and any key order", () => {
@@ -133,6 +140,10 @@ describe("tensor set", () => {
     expect(q.find((t) => t.name === "l.3.k_bias")).toEqual({ name: "l.3.k_bias", rows: 1, cols: 128, kind: "vector" });
     expect(tensorSpecs(PHI).some((t) => t.name.endsWith("_bias"))).toBe(false);
     expect(tensorSpecs(PHI).find((t) => t.name === "l.0.k")).toEqual({ name: "l.0.k", rows: 1024, cols: 3072, kind: "matrix" });
+    expect(expectedTensorCount(GEMMA)).toBe(3 + 26 * 14);
+    expect(tensorSpecs(GEMMA).find((t) => t.name === "l.0.q")).toEqual({ name: "l.0.q", rows: 1024, cols: 1152, kind: "matrix" });
+    expect(tensorSpecs(GEMMA).find((t) => t.name === "l.0.o")).toEqual({ name: "l.0.o", rows: 1152, cols: 1024, kind: "matrix" });
+    expect(tensorSpecs(GEMMA).find((t) => t.name === "l.0.q_norm")).toEqual({ name: "l.0.q_norm", rows: 1, cols: 256, kind: "vector" });
   });
 
   test("routed and shared experts appear for MoE configs", () => {

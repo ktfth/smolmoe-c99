@@ -1,0 +1,12 @@
+{
+  "model": "unsloth/gemma-3-1b-it",
+  "converter": "smolmoe scripts/convert.ts 1.0.0",
+  "source_sha256": {
+    "model.safetensors": "3d4ef8d71c14db7e448a09ebe891cfb6bf32c57a9b44499ae0d1c098e48516b6",
+    "config.json": "c5b2136c452797c0c52cba5793ced59d95453dfdc3444433b03e27699ff1c2cd",
+    "tokenizer.json": "4667f2089529e8e7657cfb6d1c19910ae71ff5f28aa7ab2ff2763330affad795"
+  },
+  "quantization": "lossy Q8 block32",
+  "norms": "Gemma (1 + weight) baked into F32 norm vectors; q_norm/k_norm permuted to adjacent-pair rotary",
+  "tied_lm_head": true
+}

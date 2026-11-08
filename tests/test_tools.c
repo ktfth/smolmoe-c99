@@ -120,6 +120,10 @@ static void test_date_parse(void) {
     expect_date("Proclamação da República", 2026, 11, 15);
     expect_date("Consciência Negra", 2026, 11, 20);
     expect_date("Finados", 2027, 11, 2);
+    expect_date("Quantos dias até domingo?", 2026, 11, 8);
+    expect_date("próxima segunda", 2026, 11, 9);
+    expect_date("sexta-feira", 2026, 11, 13);
+    expect_date("daqui a 10 dias", 2026, 11, 16);
     expect_date("Hoje é dia 3. Quanto falta para 25/12?", 2026, 12, 25);
     expect_date("tenho 30 anos e faço 3 de março", 2027, 3, 3);
     expect_date("aniversário da Natália", 0, 0, 0);  /* "natal" only as a whole word */
@@ -220,12 +224,16 @@ static void test_grounding(void) {
 /* Tools are offered only for messages about dates or time. */
 static void test_relevance(void) {
     static const char *const yes[] = {"Que dia é hoje?", "Que horas são?", "Estamos em que mês?",
+                                      "Estamos em que ano?", "Qual é o ano atual?", "Quantos dias até sexta?",
                                       "Quanto falta para o carnaval?", "Quantos dias faltam para 25/12?",
                                       "Em que dia da semana estamos?", "falta quanto pro meu aniversário?",
-                                      "Qual é a data de hoje?", "QUE HORAS SAO"};
+                                      "Qual é a data de hoje?", "QUE HORAS SAO",
+                                      "Converta 100 km em milhas", "Quanto é 30 °C em Fahrenheit?",
+                                      "Quantas letras r tem em morango?", "Quantas palavras tem na frase?"};
     static const char *const calc[] = {"Quanto é 7 mais 5?", "Quanto é 15% de 230?", "Divida 100 reais entre 3"};
     static const char *const no[] = {"Qual é a capital da França?", "Tenho 2 gatos e 1 cachorro.",
                                      "Quem escreveu Dom Casmurro?", "Me dê uma dica curta para estudar melhor.",
+                                     "Em que ano o Brasil foi descoberto?",
                                      "Olá, tudo bem?", "Dias melhores virão é uma música?", ""};
     size_t i;
     for (i = 0; i < sizeof(yes) / sizeof(yes[0]); ++i) CHECK(tools_relevant(yes[i]), "relevant: %s", yes[i]);
@@ -342,6 +350,42 @@ static void test_forced_choice(void) {
     CHECK(tools_call_prefix("calcular", prefix, 8) == 0, "too small a buffer is refused");
 }
 
+static void test_convert_and_count(void) {
+    const char *now = "2026-11-06T10:30";
+    expect_grounded(now, "Converta 100 km em milhas",
+                    "{\"name\": \"converter\", \"arguments\": {\"valor\": 100, \"de\": \"km\", \"para\": \"mi\"}}",
+                    "converter", 1,
+                    "{\"resumo\": \"100 km equivalem a 62,14 mi.\", \"valor\": \"100\", \"de\": \"km\", "
+                    "\"para\": \"mi\", \"resultado\": \"62,14\"}");
+    expect_grounded(now, "Quanto é 30 °C em Fahrenheit?",
+                    "{\"name\": \"converter\", \"arguments\": {\"valor\": 30, \"de\": \"C\", \"para\": \"F\"}}",
+                    "converter", 1,
+                    "{\"resumo\": \"30 °C equivalem a 86 °F.\", \"valor\": \"30\", \"de\": \"°C\", "
+                    "\"para\": \"°F\", \"resultado\": \"86\"}");
+    expect_grounded(now, "Quantos MB tem 2 GB?",
+                    "{\"name\": \"converter\", \"arguments\": {\"valor\": 2, \"de\": \"GB\", \"para\": \"MB\"}}",
+                    "converter", 1,
+                    "{\"resumo\": \"2 GB equivalem a 2.048 MB.\", \"valor\": \"2\", \"de\": \"GB\", "
+                    "\"para\": \"MB\", \"resultado\": \"2.048\"}");
+    expect_call(now, "{\"name\": \"converter\", \"arguments\": {\"valor\": 10, \"de\": \"km\", \"para\": \"kg\"}}",
+                "converter", 0, "{\"erro\": \"unidades incompatíveis: km e kg\"}");
+    expect_grounded(now, "Quantas letras 'r' tem na palavra morango?",
+                    "{\"name\": \"contar\", \"arguments\": {\"texto\": \"morango\", \"letra\": \"r\"}}", "contar", 1,
+                    "{\"resumo\": \"\\\"r\\\" aparece 1 vez em \\\"morango\\\" (7 letras, 7 caracteres e 1 palavra).\", "
+                    "\"texto\": \"morango\", \"letra\": \"r\", \"ocorrencias\": 1, \"letras\": 7, "
+                    "\"caracteres\": 7, \"palavras\": 1}");
+    expect_grounded(now, "Quantas letras tem a palavra paralelepípedo?",
+                    "{\"name\": \"contar\", \"arguments\": {\"texto\": \"paralelepípedo\"}}", "contar", 1,
+                    "{\"resumo\": \"\\\"paralelepípedo\\\" tem 14 letras, 14 caracteres e 1 palavra.\", "
+                    "\"texto\": \"paralelepípedo\", \"letras\": 14, \"caracteres\": 14, \"palavras\": 1}");
+    CHECK(tools_forced_choice("Converta 100 km em milhas") != NULL &&
+              !strcmp(tools_forced_choice("Converta 100 km em milhas"), "converter"),
+          "forced choice converter");
+    CHECK(tools_forced_choice("Quantas letras r tem em morango?") != NULL &&
+              !strcmp(tools_forced_choice("Quantas letras r tem em morango?"), "contar"),
+          "forced choice contar");
+}
+
 static void test_system_prompt(void) {
     char out[4096];
     size_t n = tools_system_prompt("Seja breve.", out, sizeof(out));
@@ -351,6 +395,8 @@ static void test_system_prompt(void) {
           "declares data_atual first");
     CHECK(strstr(out, "\"name\": \"dias_ate\"") != NULL, "declares dias_ate");
     CHECK(strstr(out, "\"name\": \"calcular\"") != NULL, "declares calcular");
+    CHECK(strstr(out, "\"name\": \"converter\"") != NULL, "declares converter");
+    CHECK(strstr(out, "\"name\": \"contar\"") != NULL, "declares contar");
     CHECK(strstr(out, "230") == NULL, "no example numbers the model could copy");
     CHECK(n > 12 && !strcmp(out + n - 12, "</tool_call>"), "ends with the call format");
     CHECK(tools_system_prompt("Seja breve.", out, 64) == 0, "too small a buffer is refused");
@@ -369,6 +415,7 @@ int main(void) {
     test_invalid_calls();
     test_result_is_valid_json();
     test_calculate();
+    test_convert_and_count();
     test_forced_choice();
     test_system_prompt();
     if (failures) {

@@ -12,8 +12,8 @@
  * parseQbp ports qwen_load (src/tokenizer_qwen.c) and adds the v2 rules.
  */
 export const NORMALIZER = { none: 0, nfc: 1 } as const;
-export const PRETOKENIZER = { qwen2: 1, o200k: 2 } as const;
-export const TEMPLATE = { none: 0, chatml: 1, phi: 2 } as const;
+export const PRETOKENIZER = { qwen2: 1, o200k: 2, gemma: 3 } as const;
+export const TEMPLATE = { none: 0, chatml: 1, phi: 2, gemma: 3 } as const;
 export type Normalizer = (typeof NORMALIZER)[keyof typeof NORMALIZER];
 export type PreTokenizer = (typeof PRETOKENIZER)[keyof typeof PRETOKENIZER];
 export type ChatTemplate = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -33,7 +33,7 @@ export interface QbpTokenizer {
   readonly merges: Uint32Array;
 }
 
-const MAX_MERGES = 262144;
+const MAX_MERGES = 1048576;
 const MAX_PIECE = 65536;
 const MAX_PAYLOAD = 67108864;
 const MAGIC = [0x53, 0x4d, 0x51, 0x42, 0x50, 0x31, 0x00]; /* "SMQBP1\0" */
@@ -90,8 +90,8 @@ function parseHeader(view: DataView, vocab: number): { header: QbpHeader; size: 
   if (view.byteLength < 32) fail("truncated Qwen tokenizer: header");
   const normalizer = view.getUint32(20, true), pretokenizer = view.getUint32(24, true), template = view.getUint32(28, true);
   if (normalizer > 1) fail(`unknown normalizer ${normalizer}`);
-  if (pretokenizer < 1 || pretokenizer > 2) fail(`unknown pre-tokenizer ${pretokenizer}`);
-  if (template > 2) fail(`unknown chat template ${template}`);
+  if (pretokenizer < 1 || pretokenizer > 3) fail(`unknown pre-tokenizer ${pretokenizer}`);
+  if (template > 3) fail(`unknown chat template ${template}`);
   return {
     header: { version: 2, normalizer: normalizer as Normalizer, pretokenizer: pretokenizer as PreTokenizer,
       template: template as ChatTemplate },
@@ -119,6 +119,10 @@ function checkTemplate(t: QbpTokenizer): void {
     for (const m of PHI_MARKERS) if (!hasSpecial(m)) fail(`phi template needs the special token ${m}`);
     if (!same(t.pieces[257]!, "<|end|>") || !same(t.pieces[256]!, "<|endoftext|>"))
       fail("phi template needs <|endoftext|> at 256 and <|end|> at 257");
+  } else if (t.header.template === TEMPLATE.gemma) {
+    if (!hasSpecial("<start_of_turn>")) fail("gemma template needs the special token <start_of_turn>");
+    if (!same(t.pieces[257]!, "<end_of_turn>") || !same(t.pieces[256]!, "<bos>"))
+      fail("gemma template needs <bos> at 256 and <end_of_turn> at 257");
   }
 }
 

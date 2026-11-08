@@ -8,6 +8,8 @@ pesos (`model.smoe`), o tokenizer, a `config.ini` e a `provenance.json`. Os dois
 |---|---|---|---|
 | `models/qwen2.5-0.5b-instruct` | Qwen2.5-0.5B-Instruct, Q8 | Chat em português (`--chat`) | 531 MiB |
 | `models/tinystories-15m` | TinyStories 15M (llama2.c), Q8 | Histórias curtas em inglês; testes rápidos | 26 MiB |
+| `models/gemma-3-1b-it` | Gemma 3 1B Instruct (Google), Q8 | Chat equilibrado; por conversão (`make gemma-weights`) | ~1,0 GiB |
+| `models/gemma-3-270m-it` | Gemma 3 270M Instruct (Google), Q8 | Chat ultraleve; por conversão (`convert.ts gemma3`) | ~280 MiB |
 | `models/phi-4-mini-instruct` | Phi-4-mini-instruct (Microsoft), Q8 | Chat de mais qualidade, mais lento; só por conversão (opção 2) | 4,0 GiB |
 
 ## Opção 1: baixar os pesos já convertidos
@@ -40,12 +42,16 @@ Get-FileHash models\*\model.smoe -Algorithm SHA256                      # PowerS
 
 ## Opção 2: converter a partir dos originais
 
-O conversor é `scripts/convert.ts` (TypeScript/Bun) e roda em qualquer sistema, inclusive no Windows nativo. Cada
-modelo tem a revisão do Hugging Face e o SHA-256 dos originais fixados no código: um original diferente é recusado.
+O conversor é `scripts/convert.ts` (TypeScript/Bun) e roda em qualquer sistema, inclusive no Windows nativo. Os
+comandos `fetch-*` usam revisões fixas e conferem SHA-256 dos arquivos declarados; para Gemma, isso cobre o checkpoint
+1B usado pelo atalho `make gemma`. Conversões manuais gravam os hashes de entrada em `provenance.json`.
 
 ```sh
 bun scripts/convert.ts fetch-qwen2 downloads/qwen2.5-0.5b-instruct-src
 bun scripts/convert.ts qwen2 downloads/qwen2.5-0.5b-instruct-src models/qwen2.5-0.5b-instruct
+
+bun scripts/convert.ts fetch-gemma3 downloads/gemma-3-1b-it          # requer HF_TOKEN
+bun scripts/convert.ts gemma3 downloads/gemma-3-1b-it models/gemma-3-1b-it
 
 bun scripts/convert.ts fetch-phi3 downloads/phi-4-mini-instruct      # 7,7 GB
 bun scripts/convert.ts phi3 downloads/phi-4-mini-instruct models/phi-4-mini-instruct
@@ -75,7 +81,7 @@ build/smolmoe --model models/phi-4-mini-instruct/model.smoe --config models/phi-
 - **Contexto:** até 4096 tokens. É o limite em que o modelo não precisa da escala de contexto longo.
 - **Memória:** cerca de 4,4 GB, quase todos pesos mapeados.
 - **Velocidade neste notebook:** cerca de 4 tokens/s escrevendo e 12 tokens/s lendo.
-- **Ferramentas:** o chat roda sem elas, porque o formato de chamada de função do Phi ainda não foi validado.
+- **Ferramentas:** o runtime reconhece o formato de chamada do tokenizer Phi e oferece as ferramentas nativas do chat (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`).
 
 ## Variante Q5 (menos memória)
 
@@ -89,6 +95,9 @@ Use `--model .../model-q5.smoe` com a mesma `config.ini` e o mesmo tokenizer. Cu
 ## Licenças
 
 - Qwen2.5-0.5B-Instruct: Apache-2.0 (`models/qwen2.5-0.5b-instruct/LICENSE-Qwen.txt`).
+- Gemma 3 1B Instruct: [Gemma Terms of Use](https://ai.google.dev/gemma/terms/); o acesso ao checkpoint no Hugging
+  Face exige aceitar os termos. Antes de redistribuir pesos ou executáveis empacotados com Gemma, siga as condições
+  de distribuição dos termos oficiais.
 - Phi-4-mini-instruct: MIT (`models/phi-4-mini-instruct/LICENSE-Phi.txt`).
 - TinyStories 15M e o tokenizer do llama2.c: MIT (`licenses/llama2.c-MIT.txt`).
 

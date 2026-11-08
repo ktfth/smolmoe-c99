@@ -92,6 +92,11 @@ static uint32_t emit(const Engine *e, Calls *calls, uint32_t token, unsigned cha
     return len;
 }
 
+static const char *chosen_tool(const char *message) {
+    const char *tool = tools_forced_choice(message);
+    return tool ? tool : tools_date_choice(message);
+}
+
 /* Streams one reply; every generated token is fed back, it is history. With a
  * prefix, the reply starts inside a call the runtime opened (forced choice):
  * the prefix is the call text already in the context. */
@@ -99,6 +104,7 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
     Model *m = e->model;
     uint32_t i, generated = 0, shown = 0;
     unsigned char last = 0;
+    int aborted = 0;
     memset(calls, 0, sizeof(*calls));
     if (prefix) {
         open_call(calls);
@@ -115,16 +121,42 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
         /* Never an empty reply: with the tool markers banned, the model's next
          * choice after a call it wanted to make was often <|im_end|>. */
         e->banned[EOS_ID] = (unsigned char)(i == 0);
-        token = sampler_next(e->sampler, m->logits);
+        token = (i == 0 && prefix_len >= 2 && prefix[prefix_len - 1] == '}' && prefix[prefix_len - 2] == '}')
+              ? e->tool_close
+              : sampler_next(e->sampler, m->logits);
+        if (i == 0 && !prefix && e->tools) {
+            if (!e->banned[e->tool_open] && token != e->tool_open && chosen_tool(e->message)) {
+                aborted = 1;
+                break;
+            }
+            if (e->banned[e->tool_open]) {
+                /* When tools are banned, prevent a raw JSON/XML/codeblock leak ('{', '[', '<', '`') on the first token. */
+                uint32_t banned_toks[8], nb = 0, k;
+                while (nb < 8 && token != EOS_ID && tokenizer_decode(e->tok, token, e->piece) > 0 &&
+                       (e->piece[0] == '{' || e->piece[0] == '[' || e->piece[0] == '<' || e->piece[0] == '`')) {
+                    banned_toks[nb++] = token;
+                    e->banned[token] = 1;
+                    token = sampler_next(e->sampler, m->logits);
+                }
+                for (k = 0; k < nb; ++k) e->banned[banned_toks[k]] = 0;
+            }
+        }
         if (token == EOS_ID) break;
         if (!e->stats.generated && !generated) e->stats.first_token_seconds = now_seconds() - turn_start;
         if (e->tools && token == e->tool_open) open_call(calls);
         else if (e->tools && token == e->tool_close) calls->open = 0;
         else shown += emit(e, calls, token, &last);
+        if (prefix && calls->open && !calls->truncated[0] && calls->len[0] > prefix_len &&
+            calls->text[0][calls->len[0] - 1] == '}' &&
+            tool_call_grounded(calls->text[0], calls->len[0], e->message)) {
+            calls->open = 0;
+        }
         model_forward(m, &token, 1, e->pos++, LOGITS_LAST);
         ++generated;
+        if (prefix && !calls->open) break;
     }
     e->banned[EOS_ID] = 0;
+    if (aborted) return generated;
     /* A reply that called tools ends its line only if it showed an unfinished
      * one; the answer comes in the next reply. */
     if (!calls->count || (shown && last != '\n')) e->sink.text(e->sink.ctx, (const unsigned char *)"\n", 1);
@@ -154,6 +186,11 @@ static uint32_t tool_results(Engine *e, const Calls *calls) {
     ToolClock now = e->fixed_clock ? *e->fixed_clock : tool_clock_now();
     size_t used = 0;
     uint32_t k;
+    if (e->model->c.gemma3) {
+        int w = snprintf(response, sizeof(response), "%s", e->message);
+        if (w < 0 || (size_t)w >= sizeof(response)) die("internal error: tool response overflow");
+        used = (size_t)w;
+    }
     for (k = 0; k < calls->count; ++k) {
         Notice n;
         int w;
@@ -166,8 +203,17 @@ static uint32_t tool_results(Engine *e, const Calls *calls) {
         notice_put(&n, " -> ");
         notice_put(&n, result);
         say(e, n.text);
-        w = snprintf(response + used, sizeof(response) - used, "%s<tool_response>\n%s\n</tool_response>",
-                     k ? "\n" : "", result);
+        if (e->model->c.gemma3) {
+            char summary[TOOL_RESULT_MAX];
+            if (!tool_result_string(result, "resumo", summary, sizeof(summary)) &&
+                !tool_result_string(result, "erro", summary, sizeof(summary)))
+                snprintf(summary, sizeof(summary), "%s", result);
+            w = snprintf(response + used, sizeof(response) - used,
+                         "\n(Informação exata: %s Responda em português em uma frase curta.)", summary);
+        } else {
+            w = snprintf(response + used, sizeof(response) - used, "%s<tool_response>\n%s\n</tool_response>",
+                         k ? "\n" : "", result);
+        }
         if (w < 0 || (size_t)w >= sizeof(response) - used) die("internal error: tool response overflow");
         used += (size_t)w;
         ++e->stats.tool_calls;
@@ -216,7 +262,7 @@ static int fits(const Engine *e, uint32_t n) {
  * no forced choice or no room for it. */
 static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     char prefix[CALL_BYTES];
-    const char *tool = tools_forced_choice(e->message);
+    const char *tool = chosen_tool(e->message);
     Notice note;
     uint32_t n, plen;
     if (!tool || !(plen = (uint32_t)tools_call_prefix(tool, prefix, sizeof(prefix)))) return 0;
@@ -258,7 +304,7 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
         drop_stopped_call(e, calls, start);
         return;
     }
-    if (!calls->count || all_grounded(e, calls)) return;
+    if (calls->count ? all_grounded(e, calls) : (!e->tools || !chosen_tool(e->message))) return;
     e->pos = start;
     if (forced_reply(e, calls, len)) {
         if (e->stopped) {
@@ -275,9 +321,10 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
 
 /* One tool round: run the calls, then the model answers with the tools banned
  * (a 0.5B model chains calls badly). Returns 0 when the results do not fit. */
-static int tool_round(Engine *e, Calls *calls) {
+static int tool_round(Engine *e, Calls *calls, uint32_t start) {
     uint32_t n;
     if (!calls->count) return 1;
+    if (e->model->c.gemma3) e->pos = start;
     n = tool_results(e, calls);
     if (!fits(e, n)) return 0;
     offer_tools(e, 0);
@@ -290,14 +337,15 @@ static int tool_round(Engine *e, Calls *calls) {
  * answered again, once. */
 static void answer(Engine *e, uint32_t len) {
     Calls calls;
-    int fresh = e->pos == e->system_len;
+    uint32_t start = e->pos;
+    int fresh = start == e->system_len;
     first_reply(e, &calls, len);
-    if (e->stopped || tool_round(e, &calls)) return;
+    if (e->stopped || tool_round(e, &calls, start)) return;
     if (!fresh) {
         e->pos = e->system_len;
         say(e, "(contexto cheio: conversa reiniciada)");
         first_reply(e, &calls, len);
-        if (e->stopped || tool_round(e, &calls)) return;
+        if (e->stopped || tool_round(e, &calls, e->system_len)) return;
     }
     /* Do not leave a call without its result in the history. */
     e->pos = e->system_len;
@@ -322,8 +370,9 @@ const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t con
 }
 
 void engine_start(Engine *e) {
-    uint32_t n = tokenizer_chat_turn(e->tok, "system", (const unsigned char *)e->system, (uint32_t)strlen(e->system),
-                                     0, e->ids);
+    const char *tools_hdr = e->model->c.gemma3 ? strstr(e->system, "\n\n# Tools") : NULL;
+    uint32_t sys_len = tools_hdr ? (uint32_t)(tools_hdr - e->system) : (uint32_t)strlen(e->system);
+    uint32_t n = tokenizer_chat_turn(e->tok, "system", (const unsigned char *)e->system, sys_len, 0, e->ids);
     double t0;
     memset(&e->stats, 0, sizeof(e->stats));
     if (n + CLOSE_RESERVE + 16 > e->model->context) die("the system prompt does not fit in --context");

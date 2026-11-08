@@ -469,7 +469,10 @@ static int in_list(double v, const double *list, int n) {
 }
 
 int calc_grounded(const char *expr, const char *text) {
-    static const double CONSTANTS[] = {0.5, 1, 2, 3, 4, 10, 12, 100, 1000};
+    static const double CONSTANTS[] = {
+        0.5, 1, 2, 3, 4, 7, 10, 12, 24, 30, 31, 60, 100, 360, 365, 1000,
+        3.14, 3.14159, 3.14159265
+    };
     char folded[FOLD_MAX];
     double value, derived[3 * MAX_SAID];
     Numbers said;

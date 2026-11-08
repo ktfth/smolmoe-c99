@@ -1,10 +1,12 @@
 #include "tools.h"
 #include "calc.h"
 #include "calendar.h"
+#include "textfold.h"
 #include "util.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -157,14 +159,25 @@ static int escape_char(Json *j, unsigned *cp) {
     }
 }
 
+static int only_closing_braces(const char *p, const char *end) {
+    for (; p < end; ++p)
+        if (*p != '}' && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') return 0;
+    return 1;
+}
+
 /* A JSON string into out (UTF-8, NUL-terminated); 0 if malformed or too long. */
-static int parse_string(Json *j, char *out, size_t cap) {
+static int parse_string_val(Json *j, char *out, size_t cap, int allow_unquoted_end) {
     size_t n = 0;
     if (!eat(j, '"')) return 0;
     while (j->p < j->end) {
         unsigned char c = (unsigned char)*j->p++;
         unsigned cp;
         if (c == '"') {
+            out[n] = 0;
+            return 1;
+        }
+        if (allow_unquoted_end && c == '}' && only_closing_braces(j->p - 1, j->end)) {
+            --j->p;
             out[n] = 0;
             return 1;
         }
@@ -178,6 +191,8 @@ static int parse_string(Json *j, char *out, size_t cap) {
     }
     return 0;
 }
+
+static int parse_string(Json *j, char *out, size_t cap) { return parse_string_val(j, out, cap, 0); }
 
 /* JSON number grammar, kept as text: -?(0|[1-9]d*)(.d+)?([eE][+-]?d+)? */
 static int parse_number(Json *j, char *out, size_t cap) {
@@ -224,7 +239,7 @@ static int parse_scalar(Json *j, Arg *a) {
     skip_ws(j);
     if (peek(j, '"')) {
         a->kind = ARG_STRING;
-        return parse_string(j, a->value, sizeof(a->value));
+        return parse_string_val(j, a->value, sizeof(a->value), 1);
     }
     if (j->p < j->end && (*j->p == '-' || (*j->p >= '0' && *j->p <= '9'))) {
         a->kind = ARG_NUMBER;
@@ -290,7 +305,7 @@ static int parse_call(const char *s, size_t n, Call *c) {
             if (!parse_member(&j, c)) return 0;
         } while (eat(&j, ','));
     }
-    if (!eat(&j, '}')) return 0;
+    if (!eat(&j, '}') && !(c->has_name && c->has_args)) return 0;
     skip_ws(&j);
     return j.p == j.end && c->has_name;
 }
@@ -477,6 +492,392 @@ static int days_until(const Call *c, const char *user_text, const ToolClock *now
     return 1;
 }
 
+/* ---- converter (unidades) ------------------------------------------------- */
+
+typedef enum { UNIT_LEN, UNIT_MASS, UNIT_TEMP, UNIT_SPEED, UNIT_VOL, UNIT_DATA } UnitKind;
+
+typedef struct Unit {
+    const char *name, *symbol;
+    UnitKind kind;
+    double factor;
+    int short_form; /* 1: single-letter or short token that must follow a number/marker in free text */
+} Unit;
+
+/* Ordered longest-first when prefixes overlap ("km/h" before "km", "milimetro" before "m"). */
+static const Unit UNITS[] = {
+    {"quilometros", "km", UNIT_LEN, 1000.0, 0},
+    {"quilometro", "km", UNIT_LEN, 1000.0, 0},
+    {"centimetros", "cm", UNIT_LEN, 0.01, 0},
+    {"centimetro", "cm", UNIT_LEN, 0.01, 0},
+    {"milimetros", "mm", UNIT_LEN, 0.001, 0},
+    {"milimetro", "mm", UNIT_LEN, 0.001, 0},
+    {"polegadas", "pol", UNIT_LEN, 0.0254, 0},
+    {"polegada", "pol", UNIT_LEN, 0.0254, 0},
+    {"metros", "m", UNIT_LEN, 1.0, 0},
+    {"metro", "m", UNIT_LEN, 1.0, 0},
+    {"milhas", "mi", UNIT_LEN, 1609.344, 0},
+    {"milha", "mi", UNIT_LEN, 1609.344, 0},
+    {"jardas", "yd", UNIT_LEN, 0.9144, 0},
+    {"jarda", "yd", UNIT_LEN, 0.9144, 0},
+    {"pes", "ft", UNIT_LEN, 0.3048, 0},
+    {"pol", "pol", UNIT_LEN, 0.0254, 0},
+    {"km/h", "km/h", UNIT_SPEED, 1.0 / 3.6, 0},
+    {"kmh", "km/h", UNIT_SPEED, 1.0 / 3.6, 0},
+    {"m/s", "m/s", UNIT_SPEED, 1.0, 0},
+    {"mph", "mph", UNIT_SPEED, 0.44704, 0},
+    {"km", "km", UNIT_LEN, 1000.0, 0},
+    {"cm", "cm", UNIT_LEN, 0.01, 0},
+    {"mm", "mm", UNIT_LEN, 0.001, 0},
+    {"mi", "mi", UNIT_LEN, 1609.344, 0},
+    {"yd", "yd", UNIT_LEN, 0.9144, 0},
+    {"ft", "ft", UNIT_LEN, 0.3048, 0},
+    {"pe", "ft", UNIT_LEN, 0.3048, 1},
+    {"in", "pol", UNIT_LEN, 0.0254, 1},
+    {"m", "m", UNIT_LEN, 1.0, 1},
+    {"quilogramas", "kg", UNIT_MASS, 1000.0, 0},
+    {"quilograma", "kg", UNIT_MASS, 1000.0, 0},
+    {"miligramas", "mg", UNIT_MASS, 0.001, 0},
+    {"miligrama", "mg", UNIT_MASS, 0.001, 0},
+    {"toneladas", "t", UNIT_MASS, 1000000.0, 0},
+    {"tonelada", "t", UNIT_MASS, 1000000.0, 0},
+    {"quilos", "kg", UNIT_MASS, 1000.0, 0},
+    {"quilo", "kg", UNIT_MASS, 1000.0, 0},
+    {"gramas", "g", UNIT_MASS, 1.0, 0},
+    {"grama", "g", UNIT_MASS, 1.0, 0},
+    {"libras", "lb", UNIT_MASS, 453.59237, 0},
+    {"libra", "lb", UNIT_MASS, 453.59237, 0},
+    {"oncas", "oz", UNIT_MASS, 28.349523125, 0},
+    {"onca", "oz", UNIT_MASS, 28.349523125, 0},
+    {"ton", "t", UNIT_MASS, 1000000.0, 0},
+    {"lbs", "lb", UNIT_MASS, 453.59237, 0},
+    {"kg", "kg", UNIT_MASS, 1000.0, 0},
+    {"mg", "mg", UNIT_MASS, 0.001, 0},
+    {"lb", "lb", UNIT_MASS, 453.59237, 0},
+    {"oz", "oz", UNIT_MASS, 28.349523125, 0},
+    {"t", "t", UNIT_MASS, 1000000.0, 1},
+    {"g", "g", UNIT_MASS, 1.0, 1},
+    {"fahrenheit", "°F", UNIT_TEMP, 1.0, 0},
+    {"celsius", "°C", UNIT_TEMP, 1.0, 0},
+    {"kelvins", "K", UNIT_TEMP, 1.0, 0},
+    {"kelvin", "K", UNIT_TEMP, 1.0, 0},
+    {"c", "°C", UNIT_TEMP, 1.0, 1},
+    {"f", "°F", UNIT_TEMP, 1.0, 1},
+    {"k", "K", UNIT_TEMP, 1.0, 1},
+    {"mililitros", "mL", UNIT_VOL, 0.001, 0},
+    {"mililitro", "mL", UNIT_VOL, 0.001, 0},
+    {"litros", "L", UNIT_VOL, 1.0, 0},
+    {"litro", "L", UNIT_VOL, 1.0, 0},
+    {"galoes", "gal", UNIT_VOL, 3.785411784, 0},
+    {"galao", "gal", UNIT_VOL, 3.785411784, 0},
+    {"gal", "gal", UNIT_VOL, 3.785411784, 0},
+    {"ml", "mL", UNIT_VOL, 0.001, 0},
+    {"l", "L", UNIT_VOL, 1.0, 1},
+    {"terabytes", "TB", UNIT_DATA, 1099511627776.0, 0},
+    {"terabyte", "TB", UNIT_DATA, 1099511627776.0, 0},
+    {"gigabytes", "GB", UNIT_DATA, 1073741824.0, 0},
+    {"gigabyte", "GB", UNIT_DATA, 1073741824.0, 0},
+    {"megabytes", "MB", UNIT_DATA, 1048576.0, 0},
+    {"megabyte", "MB", UNIT_DATA, 1048576.0, 0},
+    {"kilobytes", "KB", UNIT_DATA, 1024.0, 0},
+    {"kilobyte", "KB", UNIT_DATA, 1024.0, 0},
+    {"bytes", "B", UNIT_DATA, 1.0, 0},
+    {"byte", "B", UNIT_DATA, 1.0, 0},
+    {"tib", "TB", UNIT_DATA, 1099511627776.0, 0},
+    {"gib", "GB", UNIT_DATA, 1073741824.0, 0},
+    {"mib", "MB", UNIT_DATA, 1048576.0, 0},
+    {"kib", "KB", UNIT_DATA, 1024.0, 0},
+    {"tb", "TB", UNIT_DATA, 1099511627776.0, 0},
+    {"gb", "GB", UNIT_DATA, 1073741824.0, 0},
+    {"mb", "MB", UNIT_DATA, 1048576.0, 0},
+    {"kb", "KB", UNIT_DATA, 1024.0, 0},
+    {"b", "B", UNIT_DATA, 1.0, 1},
+};
+
+static const char *skip_unit_lead(const char *p) {
+    for (;;) {
+        while (*p == ' ' || *p == '?') ++p; /* '?' comes from '°' in text_fold */
+        if (!strncmp(p, "graus ", 6)) p += 6;
+        else if (!strncmp(p, "grau ", 5)) p += 5;
+        else if (!strncmp(p, "de ", 3)) p += 3;
+        else break;
+    }
+    return p;
+}
+
+static const Unit *match_unit_at(const char *p, int allow_short, const char **after) {
+    size_t i;
+    p = skip_unit_lead(p);
+    for (i = 0; i < sizeof(UNITS) / sizeof(UNITS[0]); ++i) {
+        size_t len = strlen(UNITS[i].name);
+        if (UNITS[i].short_form && !allow_short) continue;
+        if (!strncmp(p, UNITS[i].name, len) && !text_is_letter(p[len]) && p[len] != '/') {
+            if (after) *after = p + len;
+            return &UNITS[i];
+        }
+    }
+    return NULL;
+}
+
+static const Unit *parse_unit(const char *raw) {
+    char folded[64];
+    const char *after;
+    const Unit *u;
+    if (!raw || !text_fold(raw, folded, sizeof(folded))) return NULL;
+    u = match_unit_at(folded, 1, &after);
+    if (!u) return NULL;
+    while (*after == ' ' || *after == '?') ++after;
+    return *after == 0 ? u : NULL;
+}
+
+static int parse_folded_number(const char *p, double *out, const char **after) {
+    char buf[64];
+    size_t n = 0;
+    const char *s = p;
+    char *end;
+    if (*s == '-' && s[1] >= '0' && s[1] <= '9') buf[n++] = *s++;
+    if (*s < '0' || *s > '9') return 0;
+    while (*s >= '0' && *s <= '9' && n + 2 < sizeof(buf)) buf[n++] = *s++;
+    if ((*s == ',' || *s == '.') && s[1] >= '0' && s[1] <= '9') {
+        buf[n++] = '.';
+        ++s;
+        while (*s >= '0' && *s <= '9' && n + 1 < sizeof(buf)) buf[n++] = *s++;
+    }
+    buf[n] = 0;
+    *out = strtod(buf, &end);
+    if (end != buf + n) return 0;
+    *after = s;
+    return 1;
+}
+
+/* Extracts <val> <from_unit> ... <to_unit> (or "quantos <to_unit> ... <val> <from_unit>")
+ * when both units belong to the same category and are distinct. */
+static int convert_extract(const char *user_text, double *val_out, const Unit **from_out, const Unit **to_out) {
+    static const char *const preps[] = {"em ", "para ", "pra ", "a "};
+    static const char *const asks[] = {"quantos ", "quantas "};
+    char folded[FOLD_MAX];
+    const char *p, *after_num, *after_u1;
+    const Unit *early_to = NULL;
+    size_t i;
+    text_fold_tail(user_text, folded, sizeof(folded));
+    for (p = folded; *p; ++p) {
+        if (p == folded || !text_is_letter(p[-1])) {
+            for (i = 0; i < sizeof(asks) / sizeof(asks[0]); ++i) {
+                size_t len = strlen(asks[i]);
+                if (!strncmp(p, asks[i], len)) {
+                    const Unit *u = match_unit_at(p + len, 0, NULL);
+                    if (u) early_to = u;
+                }
+            }
+        }
+    }
+    for (p = folded; *p; ++p) {
+        double v;
+        const Unit *u1;
+        int deg;
+        if (p > folded && (text_is_letter(p[-1]) || (p[-1] >= '0' && p[-1] <= '9'))) continue;
+        if (!parse_folded_number(p, &v, &after_num)) continue;
+        deg = after_num[0] == '?' || !strncmp(after_num, " ?", 2) || !strncmp(after_num, " grau", 5);
+        u1 = match_unit_at(after_num, 1, &after_u1);
+        if (!u1) continue;
+        if (u1->short_form && u1->kind == UNIT_TEMP && !deg && after_num == skip_unit_lead(after_num)) continue;
+        if (early_to && early_to->kind == u1->kind && strcmp(early_to->symbol, u1->symbol) != 0) {
+            *val_out = v;
+            *from_out = u1;
+            *to_out = early_to;
+            return 1;
+        }
+        for (; *after_u1; ++after_u1) {
+            if (after_u1 > folded && text_is_letter(after_u1[-1])) continue;
+            for (i = 0; i < sizeof(preps) / sizeof(preps[0]); ++i) {
+                size_t len = strlen(preps[i]);
+                if (!strncmp(after_u1, preps[i], len)) {
+                    const Unit *u2 = match_unit_at(after_u1 + len, 1, NULL);
+                    if (u2 && u2->kind == u1->kind && strcmp(u2->symbol, u1->symbol) != 0) {
+                        *val_out = v;
+                        *from_out = u1;
+                        *to_out = u2;
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static int convert_relevant(const char *user_text) {
+    double v;
+    const Unit *from, *to;
+    return convert_extract(user_text, &v, &from, &to);
+}
+
+static double convert_math(double val, const Unit *from, const Unit *to) {
+    if (from->kind == UNIT_TEMP) {
+        double c = !strcmp(from->symbol, "°F") ? (val - 32.0) * 5.0 / 9.0
+                 : !strcmp(from->symbol, "K")  ? val - 273.15
+                                               : val;
+        return !strcmp(to->symbol, "°F") ? c * 9.0 / 5.0 + 32.0
+             : !strcmp(to->symbol, "K")  ? c + 273.15
+                                         : c;
+    }
+    return val * (from->factor / to->factor);
+}
+
+static int model_convert_args(const Call *c, double *val_out, const Unit **from_out, const Unit **to_out) {
+    const Arg *v = find_arg(c, "valor");
+    const Arg *de = find_arg(c, "de");
+    const Arg *para = find_arg(c, "para");
+    const char *after;
+    if (!v) v = find_arg(c, "value");
+    if (!de) de = find_arg(c, "origem");
+    if (!para) para = find_arg(c, "destino");
+    if (!v || (v->kind != ARG_NUMBER && v->kind != ARG_STRING) || !parse_folded_number(v->value, val_out, &after))
+        return 0;
+    *from_out = de && de->kind == ARG_STRING ? parse_unit(de->value) : NULL;
+    *to_out = para && para->kind == ARG_STRING ? parse_unit(para->value) : NULL;
+    return *from_out != NULL && *to_out != NULL;
+}
+
+static int convert_unit(const Call *c, const char *user_text, char result[TOOL_RESULT_MAX]) {
+    double val, out;
+    const Unit *from = NULL, *to = NULL;
+    char in_fmt[64], out_fmt[64];
+    if (!convert_extract(user_text, &val, &from, &to) && !model_convert_args(c, &val, &from, &to))
+        return error_result(result, "informe \"valor\", \"de\" e \"para\" com unidades conhecidas (ex.: km, mi, C, F)");
+    if (from->kind != to->kind)
+        return error_result(result, "unidades incompatíveis: %s e %s", from->symbol, to->symbol);
+    out = convert_math(val, from, to);
+    calc_format(val, in_fmt, sizeof(in_fmt));
+    calc_format(out, out_fmt, sizeof(out_fmt));
+    snprintf(result, TOOL_RESULT_MAX,
+             "{\"resumo\": \"%s %s equivalem a %s %s.\", \"valor\": \"%s\", \"de\": \"%s\", \"para\": \"%s\", "
+             "\"resultado\": \"%s\"}",
+             in_fmt, from->symbol, out_fmt, to->symbol, in_fmt, from->symbol, to->symbol, out_fmt);
+    return 1;
+}
+
+/* ---- contar (letras, palavras e caracteres) ------------------------------- */
+
+static int count_relevant(const char *user_text) {
+    char folded[FOLD_MAX];
+    text_fold_tail(user_text, folded, sizeof(folded));
+    return strstr(folded, "quantas letras") != NULL || strstr(folded, "quantos caracteres") != NULL ||
+           strstr(folded, "quantas palavras") != NULL || strstr(folded, "quantas vezes a letra") != NULL ||
+           strstr(folded, "ocorrencias da letra") != NULL;
+}
+
+static const char *count_text_arg(const Call *c) {
+    const Arg *a = find_arg(c, "texto");
+    if (!a) a = find_arg(c, "palavra");
+    if (!a) a = find_arg(c, "text");
+    return a && a->kind == ARG_STRING && a->value[0] ? a->value : NULL;
+}
+
+static const char *count_target_arg(const Call *c) {
+    const Arg *a = find_arg(c, "letra");
+    if (!a) a = find_arg(c, "alvo");
+    if (!a) a = find_arg(c, "caractere");
+    return a && a->kind == ARG_STRING && a->value[0] ? a->value : NULL;
+}
+
+/* When the user asks "quantas letras 'r' tem em morango?" and the model omits "letra",
+ * recover the single letter from the user's question. */
+static void infer_target_letter(const char *user_text, char out[8]) {
+    char folded[FOLD_MAX];
+    const char *p;
+    out[0] = 0;
+    text_fold_tail(user_text, folded, sizeof(folded));
+    p = strstr(folded, "letra");
+    if (!p) return;
+    p += 5;
+    if (*p == 's') ++p;
+    while (*p == ' ' || *p == '\'' || *p == '"') ++p;
+    if (text_is_letter(p[0]) && (!text_is_letter(p[1]))) {
+        if (p[-1] == '\'' || p[-1] == '"' || !strncmp(p + 1, " tem ", 5) || !strncmp(p + 1, " ha ", 4) ||
+            !strncmp(p + 1, " aparece", 8) || !strncmp(p + 1, " em ", 4) || !strncmp(p + 1, " na ", 4) ||
+            !strncmp(p + 1, " no ", 4)) {
+            out[0] = p[0];
+            out[1] = 0;
+        }
+    }
+}
+
+static int count_grounded(const Call *c, const char *user_text) {
+    char folded_user[FOLD_MAX], folded_text[FOLD_MAX];
+    const char *texto = count_text_arg(c);
+    if (!texto || !text_fold(texto, folded_text, sizeof(folded_text)) || !folded_text[0]) return 0;
+    if (!user_text[0]) return 1;
+    if (!count_relevant(user_text)) return 0;
+    text_fold_tail(user_text, folded_user, sizeof(folded_user));
+    return strstr(folded_user, folded_text) != NULL;
+}
+
+static void analyze_utf8(const char *s, int *chars, int *letters, int *words) {
+    const unsigned char *p = (const unsigned char *)s;
+    int in_word = 0;
+    *chars = *letters = *words = 0;
+    while (*p) {
+        int is_let = 0, is_alnum = 0;
+        if ((*p & 0x80) == 0) {
+            is_let = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z');
+            is_alnum = is_let || (*p >= '0' && *p <= '9');
+            ++p;
+        } else if (*p == 0xc3 && p[1] >= 0x80 && p[1] <= 0xbf) {
+            is_let = p[1] != 0x97 && p[1] != 0xb7; /* Latin-1 letters except × and ÷ */
+            is_alnum = is_let;
+            p += 2;
+        } else {
+            ++p;
+            while ((*p & 0xc0) == 0x80) ++p;
+        }
+        ++(*chars);
+        if (is_let) ++(*letters);
+        if (is_alnum && !in_word) {
+            ++(*words);
+            in_word = 1;
+        } else if (!is_alnum) {
+            in_word = 0;
+        }
+    }
+}
+
+static int count_text(const Call *c, const char *user_text, char result[TOOL_RESULT_MAX]) {
+    const char *texto = count_text_arg(c), *letra = count_target_arg(c);
+    char inferred[8], folded_text[FOLD_MAX], folded_target[64], esc_text[64], esc_target[16];
+    int chars, letters, words, hits = 0;
+    if (!texto) return error_result(result, "falta o argumento \"texto\" com a palavra ou frase a contar");
+    if (!letra) {
+        infer_target_letter(user_text, inferred);
+        if (inferred[0]) letra = inferred;
+    }
+    analyze_utf8(texto, &chars, &letters, &words);
+    json_escape(esc_text, sizeof(esc_text), texto);
+    if (letra && text_fold(texto, folded_text, sizeof(folded_text)) &&
+        text_fold(letra, folded_target, sizeof(folded_target)) && folded_target[0]) {
+        size_t tlen = strlen(folded_target);
+        const char *p = folded_text;
+        while ((p = strstr(p, folded_target)) != NULL) {
+            ++hits;
+            p += tlen;
+        }
+        json_escape(esc_target, sizeof(esc_target), letra);
+        snprintf(result, TOOL_RESULT_MAX,
+                 "{\"resumo\": \"\\\"%s\\\" aparece %d %s em \\\"%s\\\" (%d %s, %d %s e %d %s).\", "
+                 "\"texto\": \"%s\", \"letra\": \"%s\", \"ocorrencias\": %d, \"letras\": %d, "
+                 "\"caracteres\": %d, \"palavras\": %d}",
+                 esc_target, hits, hits == 1 ? "vez" : "vezes", esc_text, letters,
+                 letters == 1 ? "letra" : "letras", chars, chars == 1 ? "caractere" : "caracteres", words,
+                 words == 1 ? "palavra" : "palavras", esc_text, esc_target, hits, letters, chars, words);
+        return 1;
+    }
+    snprintf(result, TOOL_RESULT_MAX,
+             "{\"resumo\": \"\\\"%s\\\" tem %d %s, %d %s e %d %s.\", \"texto\": \"%s\", \"letras\": %d, "
+             "\"caracteres\": %d, \"palavras\": %d}",
+             esc_text, letters, letters == 1 ? "letra" : "letras", chars, chars == 1 ? "caractere" : "caracteres",
+             words, words == 1 ? "palavra" : "palavras", esc_text, letters, chars, words);
+    return 1;
+}
+
 /* ---- calcular --------------------------------------------------------------- */
 
 static const char *expression_arg(const Call *c) {
@@ -491,7 +892,10 @@ static int calculate(const Call *c, const char *user_text, char result[TOOL_RESU
     double value;
     const char *expr = expression_arg(c);
     if (!expr) return error_result(result, "falta o argumento \"expressao\", com a conta a fazer");
-    if (!calc_eval(expr, user_text, &value, err, sizeof(err))) return error_result(result, "não consegui calcular: %s", err);
+    if (!calc_eval(expr, user_text, &value, err, sizeof(err))) {
+        if (convert_relevant(user_text)) return convert_unit(c, user_text, result);
+        return error_result(result, "não consegui calcular: %s", err);
+    }
     calc_format(value, formatted, sizeof(formatted));
     json_escape(escaped, sizeof(escaped), expr);
     snprintf(result, TOOL_RESULT_MAX, "{\"resumo\": \"O resultado é %s.\", \"expressao\": \"%s\", \"resultado\": \"%s\"}",
@@ -499,28 +903,73 @@ static int calculate(const Call *c, const char *user_text, char result[TOOL_RESU
     return 1;
 }
 
-int tools_relevant(const char *user_text) { return date_or_time_mentioned(user_text) || calc_relevant(user_text); }
+int tools_relevant(const char *user_text) {
+    return date_or_time_mentioned(user_text) || calc_relevant(user_text) || convert_relevant(user_text) ||
+           count_relevant(user_text);
+}
+
+static int current_date_question(const char *user_text) {
+    static const char *const now_words[] = {"hoje", "amanha", "ontem", "agora", "atual", "estamos"};
+    char s[FOLD_MAX];
+    text_fold_tail(user_text, s, sizeof(s));
+    if (text_has_word(s, now_words, sizeof(now_words) / sizeof(now_words[0]))) return 1;
+    return strstr(s, "que horas") != NULL || strstr(s, "qual a hora") != NULL || strstr(s, "qual e a hora") != NULL ||
+           strstr(s, "que dia") != NULL || strstr(s, "qual a data") != NULL || strstr(s, "qual e a data") != NULL;
+}
 
 const char *tools_forced_choice(const char *user_text) {
-    return calc_relevant(user_text) && !date_question(user_text) ? "calcular" : NULL;
+    if (date_question(user_text)) return NULL;
+    if (count_relevant(user_text)) return "contar";
+    if (convert_relevant(user_text)) return "converter";
+    if (calc_relevant(user_text)) return "calcular";
+    return NULL;
+}
+
+const char *tools_date_choice(const char *user_text) {
+    Date named, reference;
+    reference.year = 2000;
+    reference.month = 1;
+    reference.day = 1;
+    if (!date_question(user_text) || calc_relevant(user_text) || convert_relevant(user_text) ||
+        count_relevant(user_text))
+        return NULL;
+    if (date_find(user_text, reference, &named, 1) > 0) return "dias_ate";
+    if (current_date_question(user_text)) return "data_atual";
+    return NULL;
 }
 
 size_t tools_call_prefix(const char *tool, char *out, size_t cap) {
     int w;
-    if (strcmp(tool, "calcular")) return 0;
-    w = snprintf(out, cap, "\n{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"");
+    if (!strcmp(tool, "calcular"))
+        w = snprintf(out, cap, "\n{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"");
+    else if (!strcmp(tool, "converter"))
+        w = snprintf(out, cap, "\n{\"name\": \"converter\", \"arguments\": {\"valor\": ");
+    else if (!strcmp(tool, "contar"))
+        w = snprintf(out, cap, "\n{\"name\": \"contar\", \"arguments\": {\"texto\": \"");
+    else if (!strcmp(tool, "dias_ate"))
+        w = snprintf(out, cap, "\n{\"name\": \"dias_ate\", \"arguments\": {}}");
+    else if (!strcmp(tool, "data_atual"))
+        w = snprintf(out, cap, "\n{\"name\": \"data_atual\", \"arguments\": {}}");
+    else
+        return 0;
     return w < 0 || (size_t)w >= cap ? 0 : (size_t)w;
 }
 
 int tool_call_grounded(const char *call, size_t n, const char *user_text) {
     Call c;
     Date named, reference;
+    double val;
+    const Unit *from, *to;
     reference.year = 2000; /* any valid day: only whether a date is named matters */
     reference.month = 1;
     reference.day = 1;
     if (!parse_call(call, n, &c)) return 0;
     if (!strcmp(c.name, "data_atual")) return 1;
     if (!strcmp(c.name, "calcular")) return expression_arg(&c) && calc_grounded(expression_arg(&c), user_text);
+    if (!strcmp(c.name, "converter"))
+        return convert_relevant(user_text) ||
+               (!user_text[0] && model_convert_args(&c, &val, &from, &to) && from->kind == to->kind);
+    if (!strcmp(c.name, "contar")) return count_grounded(&c, user_text);
     /* "3/4 de 200" is a fraction, not the 3rd of April. */
     return !strcmp(c.name, "dias_ate") && date_question(user_text) && date_find(user_text, reference, &named, 1) > 0;
 }
@@ -536,6 +985,8 @@ int tool_run(const char *call, size_t n, const char *user_text, const ToolClock 
     if (!strcmp(c.name, "data_atual")) return current_date(now, result);
     if (!strcmp(c.name, "dias_ate")) return days_until(&c, user_text, now, result);
     if (!strcmp(c.name, "calcular")) return calculate(&c, user_text, result);
+    if (!strcmp(c.name, "converter")) return convert_unit(&c, user_text, result);
+    if (!strcmp(c.name, "contar")) return count_text(&c, user_text, result);
     return error_result(result, "função desconhecida: %s", c.name);
 }
 
@@ -557,6 +1008,19 @@ static const char *const TOOL_SPECS[] = {
     "potência e raiz. Use sempre que a resposta depender de um cálculo.\", \"parameters\": {\"type\": \"object\", "
     "\"properties\": {\"expressao\": {\"type\": \"string\", \"description\": \"A conta, com + - * / ^ e "
     "parênteses\"}}, \"required\": [\"expressao\"]}}}",
+    "{\"type\": \"function\", \"function\": {\"name\": \"converter\", \"description\": "
+    "\"Converte um valor entre unidades de medida (comprimento, massa, temperatura, velocidade, volume ou dados). "
+    "Use quando o usuário pedir para converter unidades.\", \"parameters\": {\"type\": \"object\", "
+    "\"properties\": {\"valor\": {\"type\": \"number\", \"description\": \"Valor numérico a converter\"}, "
+    "\"de\": {\"type\": \"string\", \"description\": \"Unidade de origem\"}, "
+    "\"para\": {\"type\": \"string\", \"description\": \"Unidade de destino\"}}, "
+    "\"required\": [\"valor\", \"de\", \"para\"]}}}",
+    "{\"type\": \"function\", \"function\": {\"name\": \"contar\", \"description\": "
+    "\"Conta letras, ocorrências de uma letra, palavras e caracteres em uma palavra ou frase. Use quando o "
+    "usuário perguntar quantas letras, palavras ou caracteres há em um texto.\", \"parameters\": "
+    "{\"type\": \"object\", \"properties\": {\"texto\": {\"type\": \"string\", \"description\": "
+    "\"A palavra ou frase exatamente como o usuário escreveu\"}, \"letra\": {\"type\": \"string\", "
+    "\"description\": \"Letra específica a contar (opcional)\"}}, \"required\": [\"texto\"]}}}",
 };
 
 size_t tools_system_prompt(const char *system, char *out, size_t cap) {

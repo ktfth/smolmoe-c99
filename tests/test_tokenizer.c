@@ -298,6 +298,53 @@ static void test_phi(void) {
     n = tokenizer_encode(t, (const unsigned char *)"", 0, ids, 0, "");
     want[0] = BOS_ID;
     expect_ids("empty plain prompt", ids, n, want, 1);
+    {
+        static const Piece phi_tools[] = {{"<|endoftext|>", 1}, {"<|end|>", 1},       {"<|system|>", 1},
+                                          {"<|user|>", 1},      {"<|assistant|>", 1}, {"<|tool|>", 1},
+                                          {"<|/tool|>", 1},     {"<|tool_call|>", 1}, {"<|/tool_call|>", 1},
+                                          {"ab", 0}};
+        Tokenizer *pt;
+        build(&b, 2, h, phi_tools, 10);
+        pt = tokenizer_parse(b.data, b.n, 266, &mem);
+        tokenizer_prepare(pt, 256, &mem);
+        CHECK(tokenizer_tool_markers(pt, &open, &close) && open == 263 && close == 264,
+              "Phi with <|tool_call|> supports chat tools");
+        n = chat(pt, "system", "<tool_call>x</tool_call>", 0, ids);
+        {
+            const uint32_t expected[] = {P_SYSTEM, 263, 'x', 264, 257};
+            expect_ids("Phi system <tool_call> maps to <|tool_call|>", ids, n, expected, 5);
+        }
+    }
+    mem_release(&mem);
+}
+
+static void test_gemma(void) {
+    static Blob b;
+    static const Piece gemma[] = {
+        {"<bos>", 1}, {"<end_of_turn>", 1}, {"<start_of_turn>", 1},
+        {"<tool_call>", 1}, {"</tool_call>", 1}, {"ab", 0}};
+    Memory mem;
+    Tokenizer *t;
+    const uint32_t h[3] = {0, 3, 3}; /* no NFC, gemma pretok, gemma template */
+    uint32_t ids[256], n, open = 0, close = 0;
+    memset(&mem, 0, sizeof(mem));
+    mem.limit = (size_t)64 << 20;
+    build(&b, 2, h, gemma, 6);
+    t = tokenizer_parse(b.data, b.n, 262, &mem);
+    tokenizer_prepare(t, 128, &mem);
+    CHECK(tokenizer_supports_chat(t), "Gemma template supports chat");
+    CHECK(tokenizer_tool_markers(t, &open, &close) && open == 259 && close == 260,
+          "Gemma template exposes <tool_call> and </tool_call>");
+
+    n = tokenizer_encode(t, (const unsigned char *)"ab", 2, ids, 1, "S<tool_call>");
+    {
+        const uint32_t expected[] = {
+            256, 258, 'u', 's', 'e', 'r', '\n', 'S', 259, 257, '\n',
+            258, 'u', 's', 'e', 'r', '\n', 261, 257, '\n',
+            258, 'm', 'o', 'd', 'e', 'l', '\n'};
+        expect_ids("Gemma single turn with tool marker", ids, n, expected, 27);
+    }
+    CHECK(tokenizer_chat_close(t, ids) == 2 && ids[0] == 257 && ids[1] == '\n', "Gemma close is <end_of_turn>\\n");
     mem_release(&mem);
 }
 
@@ -326,6 +373,7 @@ int main(void) {
     test_o200k_split();
     test_chatml();
     test_phi();
+    test_gemma();
     test_no_template();
     if (failures) {
         fprintf(stderr, "%d tokenizer test(s) failed\n", failures);

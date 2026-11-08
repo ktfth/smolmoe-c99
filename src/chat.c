@@ -137,7 +137,7 @@ void chat_run(const ChatContext *c) {
         bracketed_paste_start();
     }
     fprintf(stderr, "smolmoe " SMOLMOE_VERSION " - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.\n");
-    if (e->tools) fputs("Ferramentas: data_atual, dias_ate, calcular.\n", stderr);
+    if (e->tools) fputs("Ferramentas: data_atual, dias_ate, calcular, converter, contar.\n", stderr);
     if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s.\n", c->shell->name);
     for (;;) {
         int len, truncated, pasted;

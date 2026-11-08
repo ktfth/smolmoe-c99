@@ -158,18 +158,12 @@ Em aberto:
 
 ## Capacidade de modelo
 
-Feito: **Phi-4-mini** (iteração 6) e o **conversor em TypeScript** para Qwen2 e Phi-3. Falta portar o do TinyStories
+Feito: **Phi-4-mini** (iteração 6), **Gemma 3 1B** (runtime, tokenizer, conversor e uso pelo chat; conferido com
+os pesos locais) e o **conversor em TypeScript** para Qwen2, Phi-3 e Gemma 3. Falta portar o do TinyStories
 (`tools/import_llama2c.py`).
 
-1. **Gemma 3 (1B e 270M).** Aguarda o aceite dos termos no Hugging Face (`HF_TOKEN`). Exige no motor:
-   - ativação GELU;
-   - 4 normalizações por camada;
-   - normalização de Q/K;
-   - atenção local de 512 tokens em 5 de cada 6 camadas;
-   - duas frequências de RoPE;
-   - tamanho de cabeça desacoplado da largura.
-
-   Exige também um tokenizer SentencePiece de 262 mil peças e o template de chat do Gemma.
+1. **Gemma 3 270M.** O suporte à arquitetura foi implementado junto com o 1B; falta validar a conversão e o uso
+   ponta a ponta dos pesos 270M. O comando de download disponível hoje busca o checkpoint 1B.
 2. **Um MoE treinado de verdade.** O candidato mais leve é o Granite 3.1 1B-A400M (IBM, Apache-2.0: 32 experts, 8
    ativos, cerca de 400M parâmetros ativos). Também OLMoE-1B-7B. Exigem roteamento softmax (hoje é só sigmoide),
    fatores de escala e tokenizer próprio. Sem esse item, o "MoE" do nome continua sem prova.

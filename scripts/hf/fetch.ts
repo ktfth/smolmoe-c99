@@ -53,8 +53,13 @@ async function download(url: string, dest: string, fetcher: Fetcher): Promise<vo
   }
 }
 
+const defaultFetcher: Fetcher = (url) => {
+  const token = process.env.HF_TOKEN || process.env.HUGGING_FACE_HUB_TOKEN;
+  return token ? fetch(url, { headers: { Authorization: `Bearer ${token}` } }) : fetch(url);
+};
+
 export async function fetchPinned(repo: string, files: readonly PinnedFile[], dir: string,
-  log: (line: string) => void, fetcher: Fetcher = fetch): Promise<{ readonly fetched: readonly string[] }> {
+  log: (line: string) => void, fetcher: Fetcher = defaultFetcher): Promise<{ readonly fetched: readonly string[] }> {
   if (!REPO.test(repo)) throw new Error(`invalid repo: ${repo}`);
   mkdirSync(dir, { recursive: true });
   const fetched: string[] = [];

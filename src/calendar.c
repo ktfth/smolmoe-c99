@@ -233,7 +233,7 @@ static int add_holidays(const char *s, Date today, Mention *found, int n, int ma
     return n;
 }
 
-/* Every digit run that starts a date ("dia 3." or "30 anos" do not). */
+/*Every digit run that starts a date ("dia 3." or "30 anos" do not). */
 static int add_numeric(const char *s, Date today, Mention *found, int n, int max) {
     const char *p = s;
     while (*p && n < max) {
@@ -252,6 +252,71 @@ static int add_numeric(const char *s, Date today, Mention *found, int n, int max
     return n;
 }
 
+typedef struct WeekdayName {
+    const char *name;
+    int wday;
+} WeekdayName;
+
+static const WeekdayName WEEKDAY_NAMES[] = {
+    {"segunda-feira", 1}, {"segunda feira", 1}, {"terca-feira", 2},  {"terca feira", 2},
+    {"quarta-feira", 3},  {"quarta feira", 3},  {"quinta-feira", 4}, {"quinta feira", 4},
+    {"sexta-feira", 5},   {"sexta feira", 5},   {"sabado", 6},       {"domingo", 0},
+    {"segunda", 1},       {"terca", 2},         {"quarta", 3},       {"quinta", 4},
+    {"sexta", 5},
+};
+
+/* Whether the text before s[pos] ends with a preposition or modifier that
+ * points at a future target weekday ("até sexta", "para a próxima segunda"). */
+static int has_target_prefix(const char *s, size_t pos) {
+    static const char *const prefixes[] = {
+        "ate ", "ate a ", "ate o ", "para ", "para a ", "para o ", "pra ", "pro ",
+        "proxima ", "proximo ", "ate a proxima ", "ate o proximo "
+    };
+    size_t i;
+    for (i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        size_t len = strlen(prefixes[i]);
+        if (pos >= len && !memcmp(s + pos - len, prefixes[i], len) &&
+            (pos == len || !text_is_letter(s[pos - len - 1])))
+            return 1;
+    }
+    return 0;
+}
+
+/* Target weekdays ("até sexta", or a bare "sexta-feira" passed as tool arg)
+ * and relative offsets ("daqui a 10 dias"). */
+static int add_weekdays_and_relative(const char *s, Date today, Mention *found, int n, int max) {
+    size_t i, slen = strlen(s);
+    const char *rel;
+    for (i = 0; i < sizeof(WEEKDAY_NAMES) / sizeof(WEEKDAY_NAMES[0]) && n < max; ++i) {
+        size_t wlen = strlen(WEEKDAY_NAMES[i].name);
+        const char *at = text_find_word(s, s, WEEKDAY_NAMES[i].name);
+        while (at && inside(found, n, (size_t)(at - s)))
+            at = text_find_word(s, at + 1, WEEKDAY_NAMES[i].name);
+        if (!at) continue;
+        if (at[wlen] == '-' && !strncmp(at + wlen, "-feira", 6)) continue;
+        if (slen == wlen || has_target_prefix(s, (size_t)(at - s))) {
+            int diff = (WEEKDAY_NAMES[i].wday - weekday_index(today) + 7) % 7;
+            if (diff == 0) diff = 7;
+            found[n].date = date_from_days(date_days(today) + diff);
+            found[n].at = (size_t)(at - s);
+            found[n].len = wlen;
+            ++n;
+        }
+    }
+    rel = strstr(s, "daqui a ");
+    if (rel && n < max) {
+        const char *p = rel + 8;
+        int days = 0;
+        if (read_number(&p, 4, &days) && days > 0 && (!strncmp(p, " dia", 4))) {
+            found[n].date = date_from_days(date_days(today) + days);
+            found[n].at = (size_t)(rel - s);
+            found[n].len = (size_t)(p - rel);
+            ++n;
+        }
+    }
+    return n;
+}
+
 /* Dates in order of mention, each date once. */
 static int mentions(const char *text, Date today, Date *out, int max) {
     char s[FOLD_MAX];
@@ -260,6 +325,7 @@ static int mentions(const char *text, Date today, Date *out, int max) {
     text_fold_tail(text, s, sizeof(s));
     n = add_holidays(s, today, found, 0, MAX_MENTIONS);
     n = add_numeric(s, today, found, n, MAX_MENTIONS);
+    n = add_weekdays_and_relative(s, today, found, n, MAX_MENTIONS);
     for (i = 1; i < n; ++i) /* insertion sort by position */
         for (j = i; j > 0 && found[j].at < found[j - 1].at; --j) {
             Mention t = found[j];
@@ -282,7 +348,15 @@ static const char *const TIME_WORDS[] = {"hoje", "amanha", "ontem", "agora", "ho
                                          "data", "datas", "semana", "mes", "falta", "faltam", "faltando",
                                          "faltar", "aniversario", "calendario", "feriado", "feriados"};
 
-static int has_time_word(const char *s) { return text_has_word(s, TIME_WORDS, sizeof(TIME_WORDS) / sizeof(TIME_WORDS[0])); }
+static int has_current_year_question(const char *s) {
+    static const char *const year_ctx[] = {"estamos", "atual", "este", "esse"};
+    return text_find_word(s, s, "ano") != NULL &&
+           text_has_word(s, year_ctx, sizeof(year_ctx) / sizeof(year_ctx[0]));
+}
+
+static int has_time_word(const char *s) {
+    return text_has_word(s, TIME_WORDS, sizeof(TIME_WORDS) / sizeof(TIME_WORDS[0])) || has_current_year_question(s);
+}
 
 int date_or_time_mentioned(const char *text) {
     char s[FOLD_MAX];

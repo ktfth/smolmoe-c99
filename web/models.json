@@ -5,5 +5,33 @@
     "bytes": 560052800,
     "sha256": "c681ed90ad9e7d708dd89605ea0a461f9f60f8f51a08401058c2134ad12d4e48",
     "url": ""
+  },
+  {
+    "name": "Qwen 2.5 0.5B Instruct (Q5)",
+    "file": "qwen2.5-0.5b-instruct-q5.smoe",
+    "bytes": 343932928,
+    "sha256": "",
+    "url": ""
+  },
+  {
+    "name": "Gemma 3 1B Instruct (Q8)",
+    "file": "gemma-3-1b-it-q8.smoe",
+    "bytes": 1073741824,
+    "sha256": "",
+    "url": ""
+  },
+  {
+    "name": "Gemma 3 270M Instruct (Q8)",
+    "file": "gemma-3-270m-it-q8.smoe",
+    "bytes": 293601280,
+    "sha256": "",
+    "url": ""
+  },
+  {
+    "name": "Phi-4-mini Instruct 3.8B (Q8)",
+    "file": "phi-4-mini-instruct-q8.smoe",
+    "bytes": 4080218931,
+    "sha256": "",
+    "url": ""
   }
 ]

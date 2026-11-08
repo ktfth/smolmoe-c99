@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — 2026-11-08
+
+### Adicionado
+- **Gemma 3 1B Instruct:** suporte ao runtime C, tokenizer e conversor do Hugging Face. O checkpoint usado pelo
+  atalho `make gemma` tem revisão e hashes SHA-256 fixados; o modelo também pode ser aberto pelo chat, pela janela e
+  pela interface web.
+- **Cinco ferramentas locais no chat:** `data_atual`, `dias_ate`, `calcular`, `converter` e `contar`. Para pedidos
+  reconhecidos, o runtime recupera uma chamada de ferramenta quando o Gemma responde sem iniciá-la.
+- Atalhos `make chat`, `make run-gui` e `make run-web` para abrir as interfaces diretamente com um modelo.
+
+### Alterado
+- README, guia de modelos e roadmap atualizados para documentar o Gemma, as ferramentas e os comandos disponíveis.
+- Dependências dos atalhos de modelos alinhadas aos arquivos que cada modo de chat precisa.
+
 ## 0.4.0 — 2026-11-07
 
 ### Adicionado

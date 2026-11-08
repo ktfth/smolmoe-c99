@@ -8,7 +8,7 @@
  */
 import { compareNames } from "./format";
 
-export type Architecture = "smolmoe_v1" | "smolmoe_qwen2";
+export type Architecture = "smolmoe_v1" | "smolmoe_qwen2" | "smolmoe_gemma3";
 
 export interface ModelConfig {
   readonly architecture: Architecture;
@@ -28,19 +28,22 @@ export interface ModelConfig {
   readonly rope_theta: number;
   readonly rotary_dim?: number;
   readonly rope_attention_factor?: number;
+  readonly head_dim?: number;
+  readonly sliding_window?: number;
+  readonly rope_local_theta?: number;
 }
 
 type IntKey = "dim" | "hidden_dim" | "layers" | "heads" | "kv_heads" | "experts" | "top_k" | "vocab_size"
-  | "max_context" | "shared_experts" | "bos_id" | "eos_id" | "rotary_dim";
-type RealKey = "rms_eps" | "rope_theta" | "rope_attention_factor";
+  | "max_context" | "shared_experts" | "bos_id" | "eos_id" | "rotary_dim" | "head_dim" | "sliding_window";
+type RealKey = "rms_eps" | "rope_theta" | "rope_attention_factor" | "rope_local_theta";
 
 /** Required keys, in the order Python's checkpoint.BASE_CONFIG writes them. */
 export const REQUIRED_KEYS = ["architecture", "dim", "hidden_dim", "layers", "heads", "kv_heads", "experts", "top_k",
   "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id", "rms_eps", "rope_theta"] as const;
-export const OPTIONAL_KEYS = ["rotary_dim", "rope_attention_factor"] as const;
-const REQUIRED_INT_KEYS: readonly Exclude<IntKey, "rotary_dim">[] = ["dim", "hidden_dim", "layers", "heads",
+export const OPTIONAL_KEYS = ["rotary_dim", "rope_attention_factor", "head_dim", "sliding_window", "rope_local_theta"] as const;
+const REQUIRED_INT_KEYS: readonly Exclude<IntKey, "rotary_dim" | "head_dim" | "sliding_window">[] = ["dim", "hidden_dim", "layers", "heads",
   "kv_heads", "experts", "top_k", "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id"];
-const REAL_KEYS: ReadonlySet<string> = new Set<RealKey>(["rms_eps", "rope_theta", "rope_attention_factor"]);
+const REAL_KEYS: ReadonlySet<string> = new Set<RealKey>(["rms_eps", "rope_theta", "rope_attention_factor", "rope_local_theta"]);
 
 export const MAX_CONTEXT = 1_048_576;
 const MAX_DIM = 65536;
@@ -70,30 +73,39 @@ export function pyFloatRepr(x: number): string {
 
 const isU32 = (n: number, max: number) => Number.isSafeInteger(n) && n >= 0 && n <= max;
 
-/** The checks of config_parse (src/config.c) plus the optional RoPE keys. Throws on failure. */
+/** The checks of config_parse (src/config.c) plus the optional RoPE/head_dim/sliding_window keys. Throws on failure. */
 export function validateConfig(c: ModelConfig): ModelConfig {
-  if (c.architecture !== "smolmoe_v1" && c.architecture !== "smolmoe_qwen2")
+  if (c.architecture !== "smolmoe_v1" && c.architecture !== "smolmoe_qwen2" && c.architecture !== "smolmoe_gemma3")
     throw new Error(`unsupported architecture: ${String(c.architecture)}`);
   for (const k of REQUIRED_INT_KEYS) if (!isU32(c[k], MAX_CONTEXT)) throw new Error(`invalid ${k}: ${c[k]}`);
   for (const k of ["rms_eps", "rope_theta"] as const) {
     if (typeof c[k] !== "number") throw new Error(`invalid ${k}: ${String(c[k])}`);
   }
   const eps = Math.fround(c.rms_eps), theta = Math.fround(c.rope_theta);
+  if (c.head_dim === undefined && (!c.heads || c.heads > c.dim || c.dim % c.heads))
+    throw new Error("invalid config dimensions or special token IDs");
+  const hd = c.head_dim ?? (c.dim / c.heads);
   if (!c.dim || c.dim > MAX_DIM || !c.hidden_dim || c.hidden_dim > MAX_DIM || !c.layers || c.layers > 1024 ||
-    !c.heads || c.heads > c.dim || c.dim % c.heads || (c.dim / c.heads) % 2 ||
+    !c.heads || c.heads > MAX_DIM || !isU32(hd, MAX_DIM) || !hd || hd % 2 || c.heads * hd > MAX_DIM ||
     !c.kv_heads || c.heads % c.kv_heads || !c.experts || c.experts > 4096 ||
     !c.top_k || c.top_k > c.experts || c.shared_experts > 16 || c.vocab_size < 258 || c.vocab_size > 258 + MAX_MERGES ||
     !c.max_context || c.max_context > MAX_CONTEXT || c.bos_id !== BOS_ID || c.eos_id !== EOS_ID ||
     !(eps > 0 && eps < 1) || !(theta > 1) || !Number.isFinite(theta))
     throw new Error("invalid config dimensions or special token IDs");
   if (c.rotary_dim !== undefined) {
-    const hd = c.dim / c.heads;
     if (!isU32(c.rotary_dim, MAX_DIM) || c.rotary_dim < 2 || c.rotary_dim % 2 || c.rotary_dim > hd)
       throw new Error(`invalid rotary_dim: ${c.rotary_dim} (must be even, 2..${hd})`);
   }
   /* kept as a double by the runtime (src/config.c), so no float cast here */
   if (c.rope_attention_factor !== undefined && !(c.rope_attention_factor > 0 && c.rope_attention_factor <= MAX_ROPE_FACTOR))
     throw new Error(`invalid rope_attention_factor: ${c.rope_attention_factor} (must be in (0, ${MAX_ROPE_FACTOR}])`);
+  if (c.sliding_window !== undefined && (!isU32(c.sliding_window, c.max_context) || c.sliding_window < 1))
+    throw new Error(`invalid sliding_window: ${c.sliding_window} (must be in 1..${c.max_context})`);
+  if (c.rope_local_theta !== undefined) {
+    const localTheta = Math.fround(c.rope_local_theta);
+    if (!(localTheta > 1) || !Number.isFinite(localTheta))
+      throw new Error(`invalid rope_local_theta: ${c.rope_local_theta}`);
+  }
   return c;
 }
 
@@ -150,7 +162,8 @@ export function parseConfig(text: string | Uint8Array): ModelConfig {
     if (!known.has(key)) throw new Error(`unknown config key: ${key}`);
     if (values.has(key)) throw new Error(`duplicate config key: ${key}`);
     if (key === "architecture") {
-      if (value !== "smolmoe_v1" && value !== "smolmoe_qwen2") throw new Error(`unsupported architecture: ${value}`);
+      if (value !== "smolmoe_v1" && value !== "smolmoe_qwen2" && value !== "smolmoe_gemma3")
+        throw new Error(`unsupported architecture: ${value}`);
       values.set(key, value);
     } else values.set(key, REAL_KEYS.has(key) ? parseReal(value, key) : parseU32(value, key));
   }
@@ -169,15 +182,17 @@ export interface TensorSpec {
 
 /** The exact tensor set of model_init, sorted by name (checkpoint.py shapes()). */
 export function tensorSpecs(c: ModelConfig): readonly TensorSpec[] {
-  const d = c.dim, h = c.hidden_dim, kd = c.kv_heads * (c.dim / c.heads);
+  const d = c.dim, h = c.hidden_dim, hd = c.head_dim ?? (c.dim / c.heads), qd = c.heads * hd, kd = c.kv_heads * hd;
   const m = (name: string, rows: number, cols: number): TensorSpec => ({ name, rows, cols, kind: "matrix" });
   const v = (name: string, cols: number): TensorSpec => ({ name, rows: 1, cols, kind: "vector" });
   const specs: TensorSpec[] = [m("embed", c.vocab_size, d), v("final_norm", d), m("lm_head", c.vocab_size, d)];
   for (let l = 0; l < c.layers; l++) {
     const p = `l.${l}.`;
-    specs.push(v(`${p}attn_norm`, d), v(`${p}ffn_norm`, d), m(`${p}q`, d, d), m(`${p}k`, kd, d), m(`${p}v`, kd, d),
-      m(`${p}o`, d, d), m(`${p}router`, c.experts, d));
-    if (c.architecture === "smolmoe_qwen2") specs.push(v(`${p}q_bias`, d), v(`${p}k_bias`, kd), v(`${p}v_bias`, kd));
+    specs.push(v(`${p}attn_norm`, d), v(`${p}ffn_norm`, d), m(`${p}q`, qd, d), m(`${p}k`, kd, d), m(`${p}v`, kd, d),
+      m(`${p}o`, d, qd), m(`${p}router`, c.experts, d));
+    if (c.architecture === "smolmoe_qwen2") specs.push(v(`${p}q_bias`, qd), v(`${p}k_bias`, kd), v(`${p}v_bias`, kd));
+    if (c.architecture === "smolmoe_gemma3")
+      specs.push(v(`${p}post_attn_norm`, d), v(`${p}post_ffn_norm`, d), v(`${p}q_norm`, hd), v(`${p}k_norm`, hd));
     for (const [kind, count] of [["e", c.experts], ["s", c.shared_experts]] as const) {
       for (let e = 0; e < count; e++)
         specs.push(m(`${p}${kind}.${e}.gate`, h, d), m(`${p}${kind}.${e}.up`, h, d), m(`${p}${kind}.${e}.down`, d, h));
@@ -188,5 +203,6 @@ export function tensorSpecs(c: ModelConfig): readonly TensorSpec[] {
 
 export function expectedTensorCount(c: ModelConfig): number {
   const qkvBias = c.architecture === "smolmoe_qwen2" ? 1 : 0;
-  return 3 + c.layers * (7 + 3 * qkvBias + 3 * (c.experts + c.shared_experts));
+  const gemma3 = c.architecture === "smolmoe_gemma3" ? 1 : 0;
+  return 3 + c.layers * (7 + 3 * qkvBias + 4 * gemma3 + 3 * (c.experts + c.shared_experts));
 }

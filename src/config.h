@@ -12,10 +12,12 @@
 
 typedef struct Config {
     uint32_t dim, hidden, layers, heads, kv_heads, experts, top_k, vocab;
-    uint32_t max_context, shared, bos, eos, qkv_bias;
-    uint32_t rotary_dim; /* leading coordinates of each head that RoPE rotates (default: all) */
-    float eps, theta;
-    double rope_factor; /* rope_attention_factor: scales RoPE cos/sin (default 1) */
+    uint32_t max_context, shared, bos, eos, qkv_bias, gemma3;
+    uint32_t head_dim;       /* per-head dimension (default: dim / heads) */
+    uint32_t rotary_dim;     /* leading coordinates of each head that RoPE rotates (default: head_dim) */
+    uint32_t sliding_window; /* local attention window for non-global layers (default: 0 = full) */
+    float eps, theta, local_theta;
+    double rope_factor;      /* rope_attention_factor: scales RoPE cos/sin (default 1) */
 } Config;
 
 #include <stddef.h>

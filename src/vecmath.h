@@ -22,6 +22,8 @@ typedef void (*SiluMul)(float *up, const float *gate, size_t n);
 extern SiluMul silu_mul;
 
 void silu_mul_scalar(float *up, const float *gate, size_t n);
+/* up[i] *= gelu_tanh(gate[i]): the GeGLU activation (Gemma 3). */
+void gelu_mul_scalar(float *up, const float *gate, size_t n);
 #if defined(SM_HAVE_AVX2)
 void silu_mul_avx2(float *up, const float *gate, size_t n);
 #endif
