@@ -1,5 +1,14 @@
 # Changelog
 
+## Não lançado
+
+### Adicionado
+- **`smolmoe-inventario`:** inventário defensivo só leitura de máquinas Linux (portas em escuta com processo,
+  usuários com login, grupos administrativos, binários SUID/SGID com hash, caminhos graváveis por todos, pontos de
+  persistência, chaves SSH autorizadas, configurações de segurança e alertas) e `--comparar` entre dois relatórios,
+  com código de saída para uso em cron. Lê só arquivos; não executa programas nem usa a rede. `--raiz` lê um disco
+  montado. Detalhes em `docs/INVENTARIO.md`.
+
 ## 0.5.0 — 2026-11-08
 
 ### Adicionado

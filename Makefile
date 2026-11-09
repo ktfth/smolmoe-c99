@@ -68,6 +68,9 @@ TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 TEST_CALC  := $(BUILD)/test-calc$(EXE)
 TEST_SHELL := $(BUILD)/test-shell$(EXE)
 TEST_DESKTOP := $(BUILD)/test-desktop$(EXE)
+TEST_INV   := $(BUILD)/test-inventory$(EXE)
+INVENTARIO := $(BUILD)/smolmoe-inventario$(EXE)
+OBJ_INV    := $(BUILD)/obj/inventory.o $(BUILD)/obj/sha256.o
 QUANTIZE   := $(BUILD)/smolmoe-quantize$(EXE)
 BUNDLE     := $(BUILD)/smolmoe-bundle$(EXE)
 Q8PACK     := tools/q8pack$(EXE)
@@ -80,7 +83,7 @@ OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui stories all-models phi-weights \
 	chat run-gui run-web help
 
-all: $(BIN) $(QUANTIZE) $(BUNDLE)
+all: $(BIN) $(QUANTIZE) $(BUNDLE) $(INVENTARIO)
 scalar: $(BIN_SCALAR)
 tools: $(Q8PACK)
 
@@ -107,6 +110,13 @@ $(QUANTIZE): $(BUILD)/obj/quantize_main.o $(OBJ_LIB)
 
 $(BUNDLE): $(BUILD)/obj/bundle_main.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+# Read-only defensive inventory; depends on nothing else in the runtime.
+$(INVENTARIO): $(BUILD)/obj/inventory_main.o $(OBJ_INV)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@
+
+$(TEST_INV): $(BUILD)/tests/test_inventory.o $(OBJ_INV)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@
 
 $(TEST_TOOLS): $(BUILD)/tests/test_tools.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
@@ -135,13 +145,14 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP) $(TEST_INV)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
 	$(TEST_SHELL)
 	$(TEST_DESKTOP)
+	$(TEST_INV)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
@@ -403,4 +414,4 @@ clean:
 
 -include $(OBJ:.o=.d) $(OBJ_SCALAR:.o=.d) $(BUILD)/tests/test_kernels.d $(BUILD)/tests/test_tokenizer.d $(BUILD)/tests/test_calc.d \
 	$(BUILD)/tests/test_desktop.d $(BUILD)/obj/desktop.d $(GUI_OBJ:.o=.d) \
-	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/mt/web.d $(WASI)/tests/test_kernels.d
+	$(BUILD)/obj/quantize_main.d $(BUILD)/obj/bundle_main.d $(BUILD)/obj/inventory_main.d $(OBJ_INV:.o=.d) $(BUILD)/tests/test_inventory.d $(WASI_OBJ:.o=.d) $(WASI_MT_OBJ:.o=.d) $(WASI)/mt/web.d $(WASI)/tests/test_kernels.d

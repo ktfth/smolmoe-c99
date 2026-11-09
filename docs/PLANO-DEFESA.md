@@ -2,7 +2,18 @@
 
 Objetivo: um executável `smolmoe` que, numa máquina sua, lê o estado dela (usuários, portas, serviços,
 inicialização, permissões, atualizações), explica o que encontrou e grava um relatório comparável com o anterior.
-Uso pessoal, offline, só leitura. Este documento é o plano; nada dele está implementado ainda.
+Uso pessoal, offline, só leitura.
+
+## Estado e revisão (franca)
+
+- **Feito:** o inventário e a comparação (fases 2 e 3) existem como `smolmoe-inventario`, um binário separado,
+  sem modelo. Ver [INVENTARIO.md](INVENTARIO.md). Ele lê arquivos em vez de chamar `systemctl`/`ss`, então não
+  executa nenhum programa.
+- **Rebaixado:** o modelo (fases 1 e 4). Um modelo de 0,5B a 1,5B não acrescenta detecção: o que acha intrusão é
+  o diff determinístico (porta nova, chave SSH nova, cron novo, SUID trocado). O modelo só reformularia em prosa o
+  que o diff já diz, e erraria às vezes. Só vale ligá-lo ao chat quando houver uma pergunta que o diff não responde
+  (ex.: "o que este script de cron novo faz?"), e aí o valor está em ler o arquivo, não em listar o sistema.
+- O restante deste documento é o plano original, mantido como referência.
 
 ## 1. Princípio de segurança
 
