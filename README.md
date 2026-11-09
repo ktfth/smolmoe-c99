@@ -248,6 +248,7 @@ docs/         Documentação detalhada de arquitetura, formato binário, modelos
 ## Documentação Complementar
 
 - **[docs/CAMINHOS.md](docs/CAMINHOS.md)** — Guia completo comparando cada modo de execução (CLI, GUI, Web, pacotes únicos) por sistema operacional.
+- **[docs/PLANO-DEFESA.md](docs/PLANO-DEFESA.md)** — Plano (não implementado) de modelo local para inventário defensivo, só leitura, dos próprios equipamentos.
 - **[docs/INSTALL.md](docs/INSTALL.md)** — Download e verificação dos binários prontos do GitHub Releases.
 - **[docs/DESKTOP.md](docs/DESKTOP.md)** — Uso, atalhos e detalhes técnicos da interface gráfica (Dear ImGui).
 - **[docs/WEB.md](docs/WEB.md)** — Como compilar e servir a versão WebAssembly no navegador.
