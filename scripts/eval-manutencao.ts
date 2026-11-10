@@ -58,6 +58,11 @@ export const CONJUNTOS: readonly Conjunto[] = [
 
 export type Avaliar = (item: ItemNota, resposta: string, regras: Regras) => Nota;
 
+/** The 11 items of the pilots that chose the kit prompt and dropped the tools (DECISIONS): seen before the run. */
+export const ITENS_DO_PILOTO: ReadonlySet<string> = new Set([
+  "cmd-001", "cmd-002", "cmd-003", "cmd-004", "cmd-005", "cmd-006", "cmd-007", "cmd-008", "cmd-009", "pap-001", "pap-002",
+]);
+
 /** The grading function of each set present, by its items file; each module is imported only when its set is there. */
 export async function carregarAvaliadores(dir = SET): Promise<Map<string, Avaliar>> {
   const avaliadores = new Map<string, Avaliar>();
@@ -264,6 +269,21 @@ export function resumo(resultados: readonly Resultado[], pulados = 0): string {
       const rs = bloco === "(todos)" ? deste : deste.filter((r) => r.bloco === bloco);
       const k = rs.filter((r) => r.certa).length, w = wilson(k, rs.length);
       out.push(`- ${bloco}: ${k}/${rs.length} = ${pct(w.taxa)} (IC 95% ${pct(w.baixo)} a ${pct(w.alto)})`);
+    }
+    /* Each set as a whole: the kill rule of the plan looks at the maintenance questions (duvidas.json) alone. */
+    for (const c of CONJUNTOS) {
+      const rs = deste.filter((r) => r.manifesto === c.sha);
+      if (!rs.length) continue;
+      const k = rs.filter((r) => r.certa).length, w = wilson(k, rs.length);
+      out.push(`- conjunto ${c.itens}: ${k}/${rs.length} = ${pct(w.taxa)} (IC 95% ${pct(w.baixo)} a ${pct(w.alto)})`);
+    }
+    /* The prompt was tuned on the pilot's 11 items, so the rate without them is given too (plan, revision 25). */
+    {
+      const rs = deste.filter((r) => !ITENS_DO_PILOTO.has(r.id));
+      if (rs.length < deste.length) {
+        const k = rs.filter((r) => r.certa).length, w = wilson(k, rs.length);
+        out.push(`- sem os ${deste.length - rs.length} itens do piloto: ${k}/${rs.length} = ${pct(w.taxa)} (IC 95% ${pct(w.baixo)} a ${pct(w.alto)})`);
+      }
     }
     const motivos = new Map<string, number>();
     for (const r of deste) if (r.motivo) {

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { testeDeSinal, wilson } from "../scripts/eval/estatistica";
 import { emPortugues } from "../scripts/eval/portugues";
 import {
-  CONJUNTOS, DETECTOR, FROZEN, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
+  CONJUNTOS, DETECTOR, FROZEN, ITENS_DO_PILOTO, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
   conferirArquivo, conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, resumo,
   semLista, sha, sistemaDoItem,
 } from "../scripts/eval-manutencao";
@@ -126,6 +126,15 @@ describe("decision rule", () => {
     expect(texto).toContain("Fora da taxa até a v2 do conjunto: 3 item(ns)");
     expect(texto).toContain("- comando: 9/10");
     expect(texto).toContain("b contra a: conserta 9, quebra 0; b melhor: p = 0.0020 (ganhou); a melhor: p = 1.0000");
+    /* Each set as a whole too: the kill rule looks at the maintenance questions alone. */
+    const duvidas = CONJUNTOS.find((c) => c.itens === "duvidas.json")!.sha!;
+    const porConjunto = resumo([{ ...r("q", "win-001", true), manifesto: duvidas }, { ...r("q", "win-002", false), manifesto: duvidas },
+      { ...r("q", "cmd-001", true), manifesto: CONJUNTOS[0]!.sha! }]);
+    expect(porConjunto).toContain("- conjunto duvidas.json: 1/2 = 50.0%");
+    expect(porConjunto).toContain("- conjunto manutencao.json: 1/1 = 100.0%");
+    /* And without the pilot's 11 items, which the prompt was tuned on. */
+    expect(ITENS_DO_PILOTO.size).toBe(11);
+    expect(porConjunto).toContain("- sem os 1 itens do piloto: 1/2 = 50.0%");
   });
 });
 
