@@ -16,8 +16,8 @@
 - Chat: um log colado forçava uma ferramenta antes de o modelo ler. O fuso de um horário ISO (`11:07:48+03:00`)
   contava como conta e forçava `calcular`, e uma data `10/11/2026` do Event Log forçava `dias_ate`. Texto colado
   (o que o chat reconhece como colagem, ou uma mensagem com mais de uma linha) não força mais ferramenta. O modelo
-  ainda pode chamar uma sozinho, e uma linha digitada segue como antes. Limite: no console do Windows, uma linha
-  colada sozinha não se distingue de uma digitada (`docs/DECISIONS.md`).
+  ainda pode chamar uma sozinho, e uma linha digitada segue como antes. Limite: no console do Windows, na janela e
+  na página no navegador, uma linha colada sozinha não se distingue de uma digitada (`docs/DECISIONS.md`).
 - Inventário: o teste unitário não compilava no Windows (funções só usadas no trecho POSIX).
 - Inventário: itens que não existem não aparecem mais. Linhas longas de `/etc/passwd`, uid vazio ou não numérico,
   opções entre aspas em `authorized_keys` e portas fora do formato geravam contas, alertas de uid 0, chaves ou portas
