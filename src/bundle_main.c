@@ -98,10 +98,11 @@ static OutRecord blob_record(const char *name, const Blob *b) {
 /* Parses config and tokenizer and builds the model once (context 1), so a
  * bundle can never contain an inconsistent set. */
 static void validate(const ModelFile *mf, const Blob *config, const Blob *tok, Pool *pool, Memory *mem) {
-    Config c = config_parse(config->data, (size_t)config->size);
+    Config c;
     Model model;
-    tokenizer_parse(tok->data, (size_t)tok->size, c.vocab, mem);
-    model_init(&model, &c, mf, 1, 1, 1, pool, mem);
+    sm_check(config_parse(config->data, (size_t)config->size, &c));
+    if (!tokenizer_parse(tok->data, (size_t)tok->size, c.vocab, mem)) die("%s", sm_last_error());
+    sm_check(model_init(&model, &c, mf, 1, 1, 1, pool, mem));
 }
 
 static void copy_runtime(FILE *f, const char *exe, uint64_t *written) {
@@ -122,8 +123,8 @@ static void verify_output(const char *path, int is_exe, Pool *pool, Memory *mem)
     map_file(path, &out);
     length = out.size;
     if (is_exe && !bundle_find(out.data, out.size, &offset, &length)) die("internal error: bundle trailer missing");
-    modelfile_parse(&mf, out.data + offset, length, mem);
-    modelfile_verify_payload(&mf, pool);
+    sm_check(modelfile_parse(&mf, out.data + offset, length, mem));
+    sm_check(modelfile_verify_payload(&mf, pool));
     if (!modelfile_blob(&mf, BLOB_CONFIG) || !modelfile_blob(&mf, BLOB_TOKENIZER)) die("internal error: blobs missing");
     unmap_file(&out);
 }
@@ -148,9 +149,10 @@ int main(int argc, char **argv) {
     memset(&tok_file, 0, sizeof(tok_file));
     mem.limit = (size_t)512 << 20;
     pool = pool_create(cpu_physical_cores(), &mem);
+    if (!pool) die("%s", sm_last_error());
     map_file(o.model, &model_file);
-    modelfile_parse(&mf, model_file.data, model_file.size, &mem);
-    modelfile_verify_payload(&mf, pool);
+    sm_check(modelfile_parse(&mf, model_file.data, model_file.size, &mem));
+    sm_check(modelfile_verify_payload(&mf, pool));
     config = resolve_blob(o.config, &mf, BLOB_CONFIG, &config_file);
     tok = resolve_blob(o.tokenizer, &mf, BLOB_TOKENIZER, &tok_file);
     validate(&mf, &config, &tok, pool, &mem);

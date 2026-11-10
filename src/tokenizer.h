@@ -16,7 +16,11 @@
 typedef struct Tokenizer Tokenizer;
 typedef void (*ByteSink)(void *ctx, const unsigned char *bytes, uint32_t n);
 
-/* Parses a tokenizer from memory (a file or an embedded `__tokenizer__` blob). */
+/* Parses a tokenizer from memory (a file or an embedded `__tokenizer__` blob).
+ * NULL on a malformed tokenizer or a failed allocation, with the reason in
+ * sm_last_error(); does not exit. Encode and decode raise the same way when a
+ * library operation (engine_send, model load) is in progress, and exit only
+ * from the CLI. */
 Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t vocab, Memory *mem);
 Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem);
 

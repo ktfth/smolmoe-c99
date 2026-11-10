@@ -69,6 +69,7 @@ TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 TEST_CALC  := $(BUILD)/test-calc$(EXE)
 TEST_SHELL := $(BUILD)/test-shell$(EXE)
 TEST_DESKTOP := $(BUILD)/test-desktop$(EXE)
+TEST_ERR   := $(BUILD)/test-errors$(EXE)
 TEST_INV   := $(BUILD)/test-inventory$(EXE)
 INVENTARIO := $(BUILD)/smolmoe-inventario$(EXE)
 OBJ_INV    := $(BUILD)/obj/inventory.o $(BUILD)/obj/sha256.o
@@ -141,6 +142,9 @@ $(TEST_SHELL): $(BUILD)/tests/test_shell.o $(OBJ_LIB)
 $(TEST_DESKTOP): $(BUILD)/tests/test_desktop.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_ERR): $(BUILD)/tests/test_errors.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 $(BUILD)/console-input.exe: tests/support/console_input.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) $(STD) $(PLATFORM) $< -o $@
@@ -150,13 +154,14 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP) $(TEST_ERR)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
 	$(TEST_SHELL)
 	$(TEST_DESKTOP)
+	$(TEST_ERR)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000

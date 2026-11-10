@@ -22,8 +22,10 @@ typedef struct Config {
 
 #include <stddef.h>
 
+#include "util.h"
+
 /* Parses config text (from a file or an embedded `__config__` blob). */
-Config config_parse(const unsigned char *text, size_t size);
-Config config_read(const char *path);
+sm_status config_parse(const unsigned char *text, size_t size, Config *out);
+sm_status config_read(const char *path, Config *out);
 
 #endif

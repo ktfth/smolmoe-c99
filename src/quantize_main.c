@@ -124,8 +124,8 @@ static void verify_output(const char *path, Pool *pool, Memory *mem) {
     MappedFile mapped;
     ModelFile mf;
     map_file(path, &mapped);
-    modelfile_parse(&mf, mapped.data, mapped.size, mem);
-    modelfile_verify_payload(&mf, pool);
+    sm_check(modelfile_parse(&mf, mapped.data, mapped.size, mem));
+    sm_check(modelfile_verify_payload(&mf, pool));
     unmap_file(&mapped);
 }
 
@@ -147,9 +147,10 @@ int main(int argc, char **argv) {
     memset(&mem, 0, sizeof(mem));
     mem.limit = (size_t)256 << 20;
     pool = pool_create(cpu_physical_cores(), &mem);
+    if (!pool) die("%s", sm_last_error());
     map_file(o.in, &mapped);
-    modelfile_parse(&mf, mapped.data, mapped.size, &mem);
-    modelfile_verify_payload(&mf, pool);
+    sm_check(modelfile_parse(&mf, mapped.data, mapped.size, &mem));
+    sm_check(modelfile_verify_payload(&mf, pool));
 
     records = (OutRecord *)mem_alloc(&mem, mf.count, sizeof(OutRecord));
     jobs = (Convert *)mem_alloc(&mem, mf.count, sizeof(Convert));
