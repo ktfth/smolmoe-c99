@@ -331,15 +331,46 @@ static void test_calculate(void) {
 /* When the model's own call was discarded, the runtime may open the one call the message clearly needs. */
 static void test_forced_choice(void) {
     char prefix[128];
-    CHECK(tools_forced_choice("Um produto de 80 reais com 25% de desconto sai por quanto?") != NULL &&
-              !strcmp(tools_forced_choice("Um produto de 80 reais com 25% de desconto sai por quanto?"), "calcular"),
+    CHECK(tools_forced_choice("Um produto de 80 reais com 25% de desconto sai por quanto?", 0) != NULL &&
+              !strcmp(tools_forced_choice("Um produto de 80 reais com 25% de desconto sai por quanto?", 0), "calcular"),
           "a calculation only: calcular");
-    CHECK(tools_forced_choice("Quantos dias faltam para 25/12?") == NULL, "a date: no forced choice");
-    CHECK(tools_forced_choice("Que horas são? E quanto é 2 + 2?") == NULL, "date and calculation: ambiguous");
-    CHECK(tools_forced_choice("Qual é a capital da França?") == NULL, "no tool fits");
+    CHECK(tools_forced_choice("Quantos dias faltam para 25/12?", 0) == NULL, "a date: no forced choice");
+    CHECK(tools_forced_choice("Que horas são? E quanto é 2 + 2?", 0) == NULL, "date and calculation: ambiguous");
+    CHECK(tools_forced_choice("Qual é a capital da França?", 0) == NULL, "no tool fits");
     /* A bare n/m is a fraction unless the message also talks about dates. */
-    CHECK(tools_forced_choice("Quanto é 3/4 de 200?") != NULL, "3/4 de 200 is a fraction: calcular");
-    CHECK(tools_forced_choice("Quantos dias até 25/01?") == NULL, "dias até 25/01 is a date");
+    CHECK(tools_forced_choice("Quanto é 3/4 de 200?", 0) != NULL, "3/4 de 200 is a fraction: calcular");
+    CHECK(tools_forced_choice("Quantos dias até 25/01?", 0) == NULL, "dias até 25/01 is a date");
+    /* Pasted text (a log) forces nothing: the time zone of an ISO timestamp is not a sum, and an Event Log date is
+     * not a question about days. The model may still call a tool itself. */
+    {
+        static const char *const blocks[] = {
+            "Por que o serviço não sobe?\n2026-11-10T11:07:48+03:00 host sshd[812]: error: Bind to port 22 failed",
+            "Leia o log: Nível: Erro  Data: 10/11/2026 11:07:48  Origem: Service Control Manager\nEvento 7000",
+            "Quanto é 2 + 2?\r\nE 3 + 3?",
+            "Quanto é 2 + 2?\rE 3 + 3?",
+            "Quantos dias faltam para 25/12?\nobrigado",
+            "Que dia é hoje?\n10/11/2026 sshd: error",
+        };
+        /* One line the chat saw pasted (bracketed paste, or arriving with other text). */
+        static const char *const lines[] = {
+            "2026-11-10T11:07:48+03:00 host sshd[812]: error: Bind to port 22 failed",
+            "Por que isso? 2026-11-10T11:07:48+03:00 host sshd[812]: error: Bind to port 22 failed",
+            "Nível: Erro  Data: 10/11/2026 11:07:48  Origem: Service Control Manager  Evento 7000",
+            "Get-WinEvent: 10/11/2026 11:07 Erro 7000 O serviço falhou 2 vezes",
+            "Quanto é 2 + 2?",
+        };
+        size_t i;
+        for (i = 0; i < sizeof(blocks) / sizeof(blocks[0]); ++i)
+            CHECK(!tools_forced_choice(blocks[i], 0) && !tools_date_choice(blocks[i], 0),
+                  "a block of more than one line forced a tool: %s", blocks[i]);
+        for (i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i)
+            CHECK(!tools_forced_choice(lines[i], 1) && !tools_date_choice(lines[i], 1), "a pasted line forced a tool: %s",
+                  lines[i]);
+        CHECK(tools_forced_choice("Quanto é 2 + 2?\n", 0) && !strcmp(tools_forced_choice("Quanto é 2 + 2?\n", 0), "calcular"),
+              "one typed line ending in a newline still forces calcular");
+        CHECK(tools_date_choice("Que dia é hoje?", 0) && !strcmp(tools_date_choice("Que dia é hoje?", 0), "data_atual"),
+              "one typed line still forces data_atual");
+    }
     {
         const char *days = "{\"name\": \"dias_ate\", \"arguments\": {\"data\": \"3/4\"}}";
         CHECK(!tool_call_grounded(days, strlen(days), "Quanto é 3/4 de 200?"), "dias_ate for a fraction: discarded");
@@ -380,11 +411,11 @@ static void test_convert_and_count(void) {
                     "{\"name\": \"contar\", \"arguments\": {\"texto\": \"paralelepípedo\"}}", "contar", 1,
                     "{\"resumo\": \"\\\"paralelepípedo\\\" tem 14 letras, 14 caracteres e 1 palavra.\", "
                     "\"texto\": \"paralelepípedo\", \"letras\": 14, \"caracteres\": 14, \"palavras\": 1}");
-    CHECK(tools_forced_choice("Converta 100 km em milhas") != NULL &&
-              !strcmp(tools_forced_choice("Converta 100 km em milhas"), "converter"),
+    CHECK(tools_forced_choice("Converta 100 km em milhas", 0) != NULL &&
+              !strcmp(tools_forced_choice("Converta 100 km em milhas", 0), "converter"),
           "forced choice converter");
-    CHECK(tools_forced_choice("Quantas letras r tem em morango?") != NULL &&
-              !strcmp(tools_forced_choice("Quantas letras r tem em morango?"), "contar"),
+    CHECK(tools_forced_choice("Quantas letras r tem em morango?", 0) != NULL &&
+              !strcmp(tools_forced_choice("Quantas letras r tem em morango?", 0), "contar"),
           "forced choice contar");
 }
 

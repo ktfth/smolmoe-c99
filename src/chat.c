@@ -154,6 +154,7 @@ void chat_run(const ChatContext *c) {
             continue;
         }
         if (command_line(c, truncated, pasted)) continue;
+        e->pasted = pasted; /* a pasted log line forces no tool */
         engine_send(e, c->line, (uint32_t)len);
     }
 }

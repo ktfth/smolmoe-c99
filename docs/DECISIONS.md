@@ -563,7 +563,11 @@ usuário:** a saída fica só na tela (o modelo não a vê) e o perfil do PowerS
     com o `script`. A linha digitada roda. Não rodam: um bloco colado com o `!` na primeira linha, um `!` escondido
     no meio, uma colagem em dois pedaços e, no Linux, uma linha só colada com as marcas.
   - **Limite honesto, só no console do Windows:** ele não tem as marcas na leitura por linha, então colar uma única
-    linha que já termina com Enter é indistinguível de digitá-la, como seria colá-la direto no PowerShell.
+    linha que já termina com Enter é indistinguível de digitá-la, como seria colá-la direto no PowerShell. O mesmo
+    vale para as ferramentas: texto colado não força ferramenta (um fuso `+03:00` não é conta, uma data do Event Log
+    não é pergunta de dias), mas uma linha de log colada sozinha nesse console ainda pode forçar `calcular` ou
+    `dias_ate`. Colada junto com a pergunta, em duas linhas, não força. Ler as marcas exigiria trocar o modo de
+    entrada do console (`ENABLE_VIRTUAL_TERMINAL_INPUT`, que o console clássico não marca) ou ler tecla a tecla.
   - **Efeito colateral:** o que se digita antes de o chat ficar pronto, ou enquanto ele responde, também conta como
     colado. Na dúvida, o chat não executa, avisa, e o comando é digitado de novo.
 - **O console volta como estava.** Um comando pode mudar o modo do console ou a página de código (`chcp 850`) e não

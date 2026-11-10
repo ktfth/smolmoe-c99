@@ -92,9 +92,9 @@ static uint32_t emit(const Engine *e, Calls *calls, uint32_t token, unsigned cha
     return len;
 }
 
-static const char *chosen_tool(const char *message) {
-    const char *tool = tools_forced_choice(message);
-    return tool ? tool : tools_date_choice(message);
+static const char *chosen_tool(const Engine *e) {
+    const char *tool = tools_forced_choice(e->message, e->pasted);
+    return tool ? tool : tools_date_choice(e->message, e->pasted);
 }
 
 /* Streams one reply; every generated token is fed back, it is history. With a
@@ -125,7 +125,7 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
               ? e->tool_close
               : sampler_next(e->sampler, m->logits);
         if (i == 0 && !prefix && e->tools) {
-            if (!e->banned[e->tool_open] && token != e->tool_open && chosen_tool(e->message)) {
+            if (!e->banned[e->tool_open] && token != e->tool_open && chosen_tool(e)) {
                 aborted = 1;
                 break;
             }
@@ -262,7 +262,7 @@ static int fits(const Engine *e, uint32_t n) {
  * no forced choice or no room for it. */
 static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     char prefix[CALL_BYTES];
-    const char *tool = chosen_tool(e->message);
+    const char *tool = chosen_tool(e);
     Notice note;
     uint32_t n, plen;
     if (!tool || !(plen = (uint32_t)tools_call_prefix(tool, prefix, sizeof(prefix)))) return 0;
@@ -304,7 +304,7 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
         drop_stopped_call(e, calls, start);
         return;
     }
-    if (calls->count ? all_grounded(e, calls) : (!e->tools || !chosen_tool(e->message))) return;
+    if (calls->count ? all_grounded(e, calls) : (!e->tools || !chosen_tool(e))) return;
     e->pos = start;
     if (forced_reply(e, calls, len)) {
         if (e->stopped) {
@@ -389,6 +389,7 @@ int engine_send(Engine *e, const char *text, uint32_t len) {
     if (!fits(e, n)) {
         if (e->system_len + n + e->max_reply + CLOSE_RESERVE > e->model->context) {
             say(e, "(mensagem longa demais para o contexto; aumente --context)");
+            e->pasted = 0;
             return 0;
         }
         e->pos = e->system_len;
@@ -397,6 +398,7 @@ int engine_send(Engine *e, const char *text, uint32_t len) {
     e->message = text;
     answer(e, len);
     e->message = NULL;
+    e->pasted = 0;
     ++e->stats.turns;
     return 1;
 }
