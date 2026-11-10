@@ -49,6 +49,23 @@ Quando uma mudança for sua (atualização de pacote, porta nova de propósito),
 `--raiz /mnt/disco` lê um sistema montado, por exemplo o disco de uma máquina suspeita, sem iniciá-la. Portas
 ficam de fora (não há `/proc`), e o relatório registra isso como nota.
 
+## O que o relatório garante
+
+- **Nada inventado.** Linhas de arquivo do sistema longas demais (mais de 8 KB) ou com byte nulo são descartadas
+  inteiras, nunca partidas; contas com uid vazio ou não numérico, ou campos maiores que o suportado, são ignoradas
+  com nota, em vez de truncadas ou lidas como uid 0; opções entre aspas em `authorized_keys` são lidas como o sshd
+  lê; portas em `/proc/net` precisam ter exatamente 4 dígitos hex.
+- **Linhas limitadas.** Nenhum item passa de 8191 bytes: campos enormes são cortados sem partir caractere UTF-8 e
+  marcados com ` [cortado]`; muitos detalhes na mesma chave terminam em `, ...`. Todo relatório que o programa
+  escreve, o `--comparar` lê.
+- **Relatório danificado é recusado**, nunca lido pela metade: linha sem dois tabs, com byte de controle ou longa demais.
+
+Como é testado (`tests/test_inventory.c`, roda em `make test-unit` e sob ASan/UBSan no CI):
+sistemas aleatórios com o resultado esperado calculado à parte no teste (oráculo: nem item a mais nem a menos);
+fuzz dos arquivos do sistema (passwd, group, shadow, `/proc/net`, `authorized_keys`) com checagem de que cada item
+aponta para algo que está na entrada; fuzz do leitor de relatórios e do diff (aplicar o diff ao relatório antigo
+precisa dar o novo). `SM_FUZZ_ITERS=20000 build/test-inventory` roda uma bateria maior.
+
 ## Limites
 
 - **Como usuário comum** não lê `/etc/shadow`, crontabs de outros usuários nem o dono de sockets de outros processos;
@@ -57,5 +74,7 @@ ficam de fora (não há `/proc`), e o relatório registra isso como nota.
   rode `--raiz` a partir de um sistema limpo (pendrive) contra o disco montado.
 - **Atualizações de pacote mudam hashes** (`~` em `suid`, `inicio`, `config`). Isso é esperado: confira e promova a base.
 - **Portas UDP efêmeras** de alguns programas (clientes mDNS, navegadores) podem aparecer e sumir entre execuções.
+- O **número** de itens não tem teto: uma máquina com milhares de binários SUID gera um relatório grande. Cada linha é
+  limitada; o arquivo inteiro, não.
 - **Guarde a base fora da máquina** (ou assinada): quem tem root pode reescrever `base.txt`.
 - Coleta só em Linux. Em Windows o binário só faz `--comparar`; em macOS lê o que existe e deixa o resto de fora.

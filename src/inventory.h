@@ -15,6 +15,10 @@
 #include <stdio.h>
 
 #define INV_FORMAT "smolmoe-inventario 1"
+/* Longest item line, NUL included. inv_add and inv_finish cut items to fit
+ * (marking " [cortado]" or ", ..."), so inventory_read accepts every report
+ * inventory_write produces. */
+#define INV_ITEM_MAX 8192
 
 typedef struct InvList {
     char **items; /* "categoria\tchave\tdetalhe" */
@@ -23,7 +27,8 @@ typedef struct InvList {
 
 void inv_init(InvList *l);
 void inv_free(InvList *l);
-/* Adds one item; tabs, line breaks and control bytes in a field become '?'. */
+/* Adds one item; tabs, line breaks and control bytes in a field become '?'.
+ * The key is cut to 4096 bytes and the whole item to INV_ITEM_MAX - 1. */
 void inv_add(InvList *l, const char *category, const char *key, const char *detail);
 /* Sorts and merges items with the same category and key (details joined by ", "). */
 void inv_finish(InvList *l);

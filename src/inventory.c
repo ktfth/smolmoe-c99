@@ -21,7 +21,7 @@
 #endif
 
 #define INV_PATH 4096
-#define INV_LINE 8192
+#define INV_LINE 8192 /* longest line read from a system file; longer lines are skipped whole */
 #define HASH_BYTES 8 /* 16 hex digits: enough to notice a change */
 
 /* ---- lists ---------------------------------------------------------------- */
@@ -57,15 +57,41 @@ static void put_clean(char *out, size_t *n, const char *s) {
     for (; *s; ++s) out[(*n)++] = (unsigned char)*s < 32 || *s == 127 ? '?' : *s;
 }
 
+/* Cuts s to at most max bytes without splitting a UTF-8 character. */
+static void cut_utf8(char *s, size_t max) {
+    size_t n = strlen(s);
+    if (n <= max) return;
+    while (max && ((unsigned char)s[max] & 0xC0) == 0x80) --max;
+    s[max] = 0;
+}
+
+#define INV_KEY_MAX 4096 /* a path; longer keys are cut */
+#define INV_CUT " [cortado]"
+#define INV_MORE ", ..."
+
 void inv_add(InvList *l, const char *category, const char *key, const char *detail) {
-    size_t n = 0, len = strlen(category) + strlen(key) + strlen(detail) + 3;
-    char *s = (char *)xrealloc(NULL, len);
+    size_t n = 0, len = strlen(category) + strlen(key) + strlen(detail) + 3, keep;
+    char *s = (char *)xrealloc(NULL, len), *k;
     put_clean(s, &n, category);
     s[n++] = '\t';
+    k = s + n;
     put_clean(s, &n, key);
+    s[n] = 0;
+    if (strlen(k) > INV_KEY_MAX) {
+        cut_utf8(k, INV_KEY_MAX);
+        n = strlen(s);
+    }
     s[n++] = '\t';
+    keep = n;
     put_clean(s, &n, detail);
     s[n] = 0;
+    /* Every item must fit in a report line that inventory_read accepts. */
+    if (n > INV_ITEM_MAX - 1) {
+        size_t room = INV_ITEM_MAX - 1 - strlen(INV_CUT);
+        cut_utf8(s, room > keep ? room : keep); /* cut before shrinking the buffer */
+        s = (char *)xrealloc(s, INV_ITEM_MAX);
+        strcat(s, INV_CUT);
+    }
     push(l, s);
 }
 
@@ -81,6 +107,11 @@ static void note(InvList *notes, const char *fmt, ...) {
     put_clean(s, &n, buf);
     s[n] = 0;
     push(notes, s);
+}
+
+static int ends_with_str(const char *s, const char *tail) {
+    size_t a = strlen(s), b = strlen(tail);
+    return a >= b && !strcmp(s + a - b, tail);
 }
 
 /* Length of "categoria\tchave" (up to the second tab). */
@@ -101,16 +132,30 @@ static int line_cmp(const void *a, const void *b) { return strcmp(*(char *const 
 void inv_finish(InvList *l) {
     size_t i, kept = 0;
     if (l->count > 1) qsort(l->items, l->count, sizeof(*l->items), line_cmp);
+    /* Exact duplicates first, so a merged line never repeats a detail. */
+    for (i = 0; i < l->count; ++i) {
+        if (kept && !strcmp(l->items[kept - 1], l->items[i])) free(l->items[i]);
+        else l->items[kept++] = l->items[i];
+    }
+    l->count = kept;
+    kept = 0;
     for (i = 0; i < l->count; ++i) {
         char *s = l->items[i];
         if (kept && !key_cmp(l->items[kept - 1], s)) {
             char *prev = l->items[kept - 1];
-            if (strcmp(prev, s)) {
-                const char *detail = s + key_len(s) + (s[key_len(s)] ? 1 : 0);
-                size_t pl = strlen(prev);
-                prev = (char *)xrealloc(prev, pl + strlen(detail) + 3);
-                memcpy(prev + pl, ", ", 2);
-                strcpy(prev + pl + 2, detail);
+            const char *detail = s + key_len(s) + 1;
+            size_t pl = strlen(prev), dl = strlen(detail);
+            if (!ends_with_str(prev, INV_MORE)) {
+                if (pl + 2 + dl <= INV_ITEM_MAX - 1) {
+                    prev = (char *)xrealloc(prev, pl + dl + 3);
+                    memcpy(prev + pl, ", ", 2);
+                    strcpy(prev + pl + 2, detail);
+                } else {
+                    /* Too many details for one line: say there are more instead of growing. */
+                    cut_utf8(prev, INV_ITEM_MAX - 1 - strlen(INV_MORE));
+                    prev = (char *)xrealloc(prev, INV_ITEM_MAX);
+                    strcat(prev, INV_MORE);
+                }
                 l->items[kept - 1] = prev;
             }
             free(s);
@@ -119,6 +164,23 @@ void inv_finish(InvList *l) {
         }
     }
     l->count = kept;
+}
+
+/* One line of a system file into buf, without the line ending. Returns 1, 0 at
+ * the end, or -1 for a line that is longer than cap-1 bytes or holds a NUL:
+ * that line is consumed whole and must be skipped, so its tail is never read
+ * as a line of its own (a long gecos field must not become a fake account). */
+static int read_line(FILE *f, char *buf, size_t cap) {
+    size_t n = 0;
+    int ch, bad = 0;
+    while ((ch = getc(f)) != EOF && ch != '\n') {
+        if (ch == 0 || n + 1 >= cap) bad = 1;
+        else buf[n++] = (char)ch;
+    }
+    buf[n] = 0;
+    if (ch == EOF && n == 0 && !bad) return 0;
+    if (n && buf[n - 1] == '\r') buf[--n] = 0;
+    return bad ? -1 : 1;
 }
 
 /* ---- report files --------------------------------------------------------- */
@@ -133,26 +195,24 @@ void inventory_write(FILE *f, const InvList *items, const InvList *notes, const 
 }
 
 int inventory_read(const char *path, InvList *out, char *err, size_t cap) {
-    char line[INV_LINE];
+    char line[INV_ITEM_MAX + 1];
     unsigned long number = 0;
-    int header = 0;
+    int header = 0, r;
     FILE *f = fopen(path, "rb");
     if (!f) {
         snprintf(err, cap, "%s: %s", path, strerror(errno));
         return 0;
     }
-    while (fgets(line, sizeof(line), f)) {
-        size_t n = strlen(line);
+    while ((r = read_line(f, line, sizeof(line))) != 0) {
+        size_t n = strlen(line), i;
         const char *t1, *t2;
         char *s;
         ++number;
-        if (n && line[n - 1] == '\n') line[--n] = 0;
-        else if (!feof(f)) {
-            snprintf(err, cap, "%s:%lu: linha longa demais", path, number);
+        if (r < 0) {
+            snprintf(err, cap, "%s:%lu: linha longa demais ou com byte nulo", path, number);
             fclose(f);
             return 0;
         }
-        if (n && line[n - 1] == '\r') line[--n] = 0;
         if (!header) {
             if (strcmp(line, "# " INV_FORMAT)) {
                 snprintf(err, cap, "%s: não é um relatório do smolmoe-inventario", path);
@@ -163,6 +223,13 @@ int inventory_read(const char *path, InvList *out, char *err, size_t cap) {
             continue;
         }
         if (!n || line[0] == '#') continue;
+        /* inventory_write never writes control bytes besides the two tabs: anything else is damage. */
+        for (i = 0; i < n; ++i)
+            if (((unsigned char)line[i] < 32 && line[i] != '\t') || line[i] == 127) {
+                snprintf(err, cap, "%s:%lu: byte de controle", path, number);
+                fclose(f);
+                return 0;
+            }
         t1 = strchr(line, '\t');
         t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
         if (!t2 || strchr(t2 + 1, '\t')) {
@@ -278,9 +345,14 @@ static int split_colons(char *s, char **fields, int max) {
     return n;
 }
 
-static void chomp(char *s) {
-    size_t n = strlen(s);
-    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r')) s[--n] = 0;
+/* A uid: 1 to 10 decimal digits and nothing else. strtoul alone would read "" or "x" as 0 (root). */
+static int parse_uid(const char *s, unsigned long *out) {
+    size_t n = strlen(s), i;
+    if (!n || n > 10) return 0;
+    for (i = 0; i < n; ++i)
+        if (s[i] < '0' || s[i] > '9') return 0;
+    *out = strtoul(s, NULL, 10);
+    return 1;
 }
 
 static int ends_with(const char *s, const char *tail) {
@@ -297,22 +369,28 @@ static int login_shell(const char *shell) {
 }
 
 static void collect_users(Ctx *c) {
-    char line[INV_LINE], detail[512], key[128];
+    char line[INV_LINE], detail[512], key[INV_LINE + 32];
+    int r;
     FILE *f = open_shown(c, "/etc/passwd");
     if (!f) {
         note(c->notes, "usuários: /etc/passwd ausente");
         return;
     }
-    while (fgets(line, sizeof(line), f)) {
+    while ((r = read_line(f, line, sizeof(line))) != 0) {
         char *fl[7];
         User u;
-        chomp(line);
+        if (r < 0) { note(c->notes, "linha longa ou inválida ignorada: /etc/passwd"); continue; }
         if (!line[0] || line[0] == '#' || split_colons(line, fl, 7) != 7) continue;
         memset(&u, 0, sizeof(u));
+        /* Malformed or oversized fields: skip the account rather than guess or cut it. */
+        if (!fl[0][0] || strlen(fl[0]) >= sizeof(u.name) || strlen(fl[5]) >= sizeof(u.home) ||
+            strlen(fl[6]) >= sizeof(u.shell) || !parse_uid(fl[2], &u.uid)) {
+            note(c->notes, "conta malformada ignorada em /etc/passwd");
+            continue;
+        }
         snprintf(u.name, sizeof(u.name), "%s", fl[0]);
         snprintf(u.home, sizeof(u.home), "%s", fl[5]);
         snprintf(u.shell, sizeof(u.shell), "%s", fl[6][0] ? fl[6] : "/bin/sh");
-        u.uid = strtoul(fl[2], NULL, 10);
         u.login = login_shell(u.shell);
         if (u.login || u.uid == 0) {
             snprintf(detail, sizeof(detail), "uid=%lu shell=%s", u.uid, u.shell);
@@ -329,9 +407,9 @@ static void collect_users(Ctx *c) {
 
     f = open_shown(c, "/etc/shadow");
     if (!f) return;
-    while (fgets(line, sizeof(line), f)) {
+    while ((r = read_line(f, line, sizeof(line))) != 0) {
         char *fl[3];
-        chomp(line);
+        if (r < 0) continue;
         if (split_colons(line, fl, 3) < 2 || fl[1][0]) continue;
         snprintf(key, sizeof(key), "senha_vazia:%s", fl[0]);
         inv_add(c->out, "alerta", key, "entra sem senha");
@@ -342,13 +420,14 @@ static void collect_users(Ctx *c) {
 /* Members of groups that amount to root (or read every disk). */
 static void collect_admins(Ctx *c) {
     static const char *const groups[] = {"root", "sudo", "wheel", "admin", "docker", "lxd", "libvirt", "disk"};
-    char line[INV_LINE], key[256];
+    char line[INV_LINE], key[INV_LINE + 32];
+    int r;
     FILE *f = open_shown(c, "/etc/group");
     if (!f) return;
-    while (fgets(line, sizeof(line), f)) {
+    while ((r = read_line(f, line, sizeof(line))) != 0) {
         char *fl[4], *m, *next;
         size_t g;
-        chomp(line);
+        if (r < 0) { note(c->notes, "linha longa ou inválida ignorada: /etc/group"); continue; }
         if (split_colons(line, fl, 4) != 4) continue;
         for (g = 0; g < sizeof(groups) / sizeof(groups[0]); ++g)
             if (!strcmp(fl[0], groups[g])) break;
@@ -494,7 +573,7 @@ static void collect_ports(Ctx *c) {
         {"/proc/net/udp", "udp", 0, 1}, {"/proc/net/udp6", "udp6", 1, 1}};
     SockMap owners;
     size_t t;
-    int any = 0;
+    int any = 0, r;
     char probe[INV_PATH];
     struct stat st;
     if (!full_path(c, "/proc/net/tcp", probe) || stat(probe, &st)) {
@@ -507,18 +586,24 @@ static void collect_ports(Ctx *c) {
         FILE *f = open_shown(c, tables[t].file);
         if (!f) continue;
         any = 1;
-        if (!fgets(line, sizeof(line), f)) { /* header */
+        if (read_line(f, line, sizeof(line)) == 0) { /* header */
             fclose(f);
             continue;
         }
-        while (fgets(line, sizeof(line), f)) {
-            char local[40], remote[40], addr[64], key[96], detail[128];
+        while ((r = read_line(f, line, sizeof(line))) != 0) {
+            char local[40], remote[40], lhex[8], rhex[8], shex[8], addr[64], key[96], detail[128];
             unsigned lport, rport, state;
             unsigned long uid, inode;
             int loop, k, remote_zero = 1;
-            if (sscanf(line, " %*d: %39[0-9A-Fa-f]:%x %39[0-9A-Fa-f]:%x %x %*s %*s %*s %lu %*d %lu", local, &lport,
-                       remote, &rport, &state, &uid, &inode) != 7)
+            if (r < 0) continue;
+            /* Ports are exactly 4 hex digits and the state 2: a longer field is not this format. */
+            if (sscanf(line, " %*d: %39[0-9A-Fa-f]:%7[0-9A-Fa-f] %39[0-9A-Fa-f]:%7[0-9A-Fa-f] %7[0-9A-Fa-f] %*s %*s %*s %lu %*d %lu",
+                       local, lhex, remote, rhex, shex, &uid, &inode) != 7 ||
+                strlen(lhex) != 4 || strlen(rhex) != 4 || strlen(shex) != 2)
                 continue;
+            lport = (unsigned)strtoul(lhex, NULL, 16);
+            rport = (unsigned)strtoul(rhex, NULL, 16);
+            state = (unsigned)strtoul(shex, NULL, 16);
             for (k = 0; remote[k]; ++k) remote_zero &= remote[k] == '0';
             if (tables[t].udp ? !(state == 0x07 && rport == 0 && remote_zero) : state != 0x0A) continue;
             if (!format_addr(local, tables[t].v6, addr, sizeof(addr), &loop)) continue;
@@ -664,20 +749,31 @@ static void collect_ssh_keys(Ctx *c) {
         for (k = 0; k < 2; ++k) {
             char shown[INV_PATH], line[INV_LINE];
             FILE *f;
+            int r;
             if (snprintf(shown, sizeof(shown), "%s%s", strcmp(us->home, "/") ? us->home : "", files[k]) >=
                 (int)sizeof(shown))
                 continue;
             if (!(f = open_shown(c, shown))) continue;
-            while (fgets(line, sizeof(line), f)) {
+            while ((r = read_line(f, line, sizeof(line))) != 0) {
                 char *tok[64], *s = line, key[256], detail[INV_PATH + 640], hex[2 * HASH_BYTES + 1], comment[256] = "";
                 int n = 0, i;
-                chomp(line);
+                if (r < 0) { note(c->notes, "linha longa ou inválida ignorada: %s", shown); continue; }
+                /* Fields split on blanks, except inside "..." in the options (sshd's rule):
+                 * command="echo ssh-rsa x" is one field, not a key. */
                 while (n < 64) {
+                    char *w;
+                    int quoted = 0;
                     while (*s == ' ' || *s == '\t') ++s;
-                    if (!*s || *s == '#') break;
-                    tok[n++] = s;
-                    while (*s && *s != ' ' && *s != '\t') ++s;
-                    if (*s) *s++ = 0;
+                    if (!*s || (*s == '#' && n == 0)) break;
+                    tok[n++] = w = s;
+                    for (; *s && (quoted || (*s != ' ' && *s != '\t')); ++s) {
+                        if (*s == '\\' && quoted && s[1] == '"') *w++ = *s++;
+                        else if (*s == '"') quoted = !quoted;
+                        *w++ = *s;
+                    }
+                    if (quoted) { n = 0; break; } /* unterminated quote: sshd rejects the line */
+                    if (*s) ++s;
+                    *w = 0;
                 }
                 for (i = 0; i + 1 < n && !key_type(tok[i]); ++i) {}
                 if (i + 1 >= n) continue;
