@@ -32,6 +32,7 @@ const char *self_executable_path(void);
 void make_executable(const char *path);
 
 double now_seconds(void);
+unsigned long current_process_id(void);
 uint64_t rss_peak_bytes(void);
 uint32_t cpu_logical_count(void);
 uint32_t cpu_physical_cores(void);

@@ -150,6 +150,9 @@ A palavra "morango" tem 1 'r'.
 ```
 
 - Use `--no-tools` para abrir o chat instantaneamente (~0,4 s em vez de ~5,5 s) quando não precisar de ferramentas.
+- Use `--prefix-cache ARQUIVO` para guardar o prompt de sistema já processado: a partir do segundo chat, a abertura
+  pula o prefill desse prompt, inclusive o das ferramentas. A cada abertura, o cache é conferido contra o modelo e o
+  prompt (identidade do modelo, hash dos dados e logits da última posição); se não conferir, é refeito.
 - Use `--now AAAA-MM-DDTHH:MM` para fixar o relógio em testes reproduzíveis.
 
 ### Execução de comandos no shell (`!comando`)
@@ -181,6 +184,7 @@ Qualquer linha digitada começando com `!` roda diretamente no shell do sistema 
 | `--prompt TEXTO` | — | Gera uma única resposta e encerra |
 | `--system TEXTO` | PT-BR curto | Define o prompt de sistema do chat |
 | `--no-tools` | ferramentas ligadas | Desativa `data_atual`, `dias_ate`, `calcular`, `converter` e `contar` no chat |
+| `--prefix-cache ARQUIVO` | desligado | Guarda o prompt de sistema processado; os chats seguintes pulam o prefill dele |
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa data/hora para as ferramentas |
 | `--shell NOME\|CAMINHO` | shell pai | Define o shell usado por `!comando` (`pwsh`, `bash`, `cmd`...) |
 | `--tokens N` | `64` (`512` no chat) | Máximo de novos tokens gerados |

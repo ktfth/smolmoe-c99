@@ -202,6 +202,8 @@ void make_executable(const char *path) {
     (void)path;
 }
 
+unsigned long current_process_id(void) { return (unsigned long)GetCurrentProcessId(); }
+
 double now_seconds(void) {
     static LARGE_INTEGER frequency;
     LARGE_INTEGER counter;
@@ -341,7 +343,8 @@ void platform_init(int *argc, char ***argv) {
 #endif
 
 int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
-    int fd = open(path, O_RDONLY);
+    /* O_NONBLOCK: opening a FIFO with no writer would block forever; fstat then refuses it. */
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
     struct stat st;
     void *p = MAP_FAILED;
     memset(m, 0, sizeof(*m));
@@ -406,6 +409,14 @@ void make_executable(const char *path) {
     (void)path; /* no file modes */
 #else
     if (chmod(path, 0755)) die("cannot make %s executable: %s", path, strerror(errno));
+#endif
+}
+
+unsigned long current_process_id(void) {
+#if defined(__wasm__)
+    return 0; /* one process */
+#else
+    return (unsigned long)getpid();
 #endif
 }
 

@@ -14,6 +14,7 @@
 #include "modelfile.h"
 #include "output.h"
 #include "platform.h"
+#include "prefixcache.h"
 #include "process.h"
 #include "sampler.h"
 #include "threadpool.h"
@@ -31,7 +32,7 @@
 
 typedef struct Options {
     const char *model, *config, *tokenizer, *prompt, *prompt_file, *system;
-    const char *stats, *trace, *token_ids;
+    const char *stats, *trace, *token_ids, *prefix_cache;
     const char *shell; /* --shell */
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
@@ -44,6 +45,7 @@ typedef struct Options {
 typedef struct Stats {
     double start, loaded, prefill_end, ended, first;
     uint32_t prompt_tokens, generated, processed, tool_calls;
+    const char *prefix_cache; /* chat: PrefixCacheState name, or NULL */
     uint64_t logits_hash;
     double nll;
     uint32_t nll_tokens;
@@ -70,6 +72,8 @@ static void usage(FILE *out) {
           "  --chat               wrap the prompt in the model's single-turn chat template\n"
           "  --interactive, -i    multi-turn chat on stdin/stdout (default without a prompt)\n"
           "  --system TEXT        chat system message (default: Brazilian Portuguese)\n"
+          "  --prefix-cache FILE  keep the processed system prompt in FILE: later chats skip its prefill\n"
+          "                       (checked against this model and prompt at every start; rebuilt when stale)\n"
           "  --no-tools           chat without the built-in tools (date, days until a date, calc, convert, count)\n"
           "  --now YYYY-MM-DDTHH:MM  fixed local time for the tools (default: the clock)\n"
           "  --shell NAME|PATH    shell for \"!command\" lines in the chat: pwsh, powershell, cmd, bash, sh...\n"
@@ -108,6 +112,7 @@ static void parse_value(Options *o, const char *opt, const char *value) {
     else if (!strcmp(opt, "--system")) o->system = value;
     else if (!strcmp(opt, "--stats")) o->stats = value;
     else if (!strcmp(opt, "--trace")) o->trace = value;
+    else if (!strcmp(opt, "--prefix-cache")) o->prefix_cache = value;
     else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
     else if (!strcmp(opt, "--shell")) o->shell = value;
     else if (!strcmp(opt, "--now")) {
@@ -174,17 +179,18 @@ static void parse_args(int argc, char **argv, Options *o) {
     }
     if (o->interactive && (o->prompt || o->prompt_file || o->trace || o->hash_logits || o->token_ids))
         die("interactive chat cannot be combined with a prompt or with --trace/--hash-logits/--token-ids");
+    if (o->prefix_cache && !o->interactive) die("--prefix-cache is for the interactive chat");
     if (o->interactive && !o->tokens_given) o->tokens = DEFAULT_CHAT_TOKENS;
     if (!o->seed || !o->memory_mib || !o->batch) die("seed, memory budget and batch must be nonzero");
     if (o->perplexity) o->tokens = 0;
 }
 
 static void check_output_paths(const Options *o) {
-    const char *inputs[4], *outputs[3];
+    const char *inputs[4], *outputs[4];
     size_t i, j;
     inputs[0] = o->model; inputs[1] = o->config; inputs[2] = o->tokenizer; inputs[3] = o->prompt_file;
-    outputs[0] = o->stats; outputs[1] = o->trace; outputs[2] = o->token_ids;
-    for (i = 0; i < 3; ++i) {
+    outputs[0] = o->stats; outputs[1] = o->trace; outputs[2] = o->token_ids; outputs[3] = o->prefix_cache;
+    for (i = 0; i < 4; ++i) {
         if (!outputs[i]) continue;
         for (j = 0; j < 4; ++j)
             if (same_file(outputs[i], inputs[j])) die("output path aliases an input: %s", outputs[i]);
@@ -290,6 +296,7 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
         fprintf(f, ",\"perplexity_tokens\":%u,\"nll\":%.6f,\"perplexity\":%.6f", st->nll_tokens, mean, exp(mean));
     }
     if (o->interactive) fprintf(f, ",\"tool_calls\":%u", st->tool_calls);
+    if (st->prefix_cache) fprintf(f, ",\"prefix_cache\":\"%s\"", st->prefix_cache);
     if (o->profile) {
         uint32_t p;
         fputs(",\"profile\":{", f);
@@ -518,6 +525,7 @@ static void run_chat(const Run *r) {
     engine.fixed_clock = r->o->fixed_clock ? &r->o->clock : NULL;
     engine.banned = r->banned;
     engine.max_reply = r->o->tokens;
+    engine.prefix_cache = r->o->prefix_cache;
     cc.engine = &engine;
     cc.out = r->out;
     cc.line = (char *)r->prompt;
@@ -534,6 +542,7 @@ static void run_chat(const Run *r) {
     st->ended = st->prefill_end + cs->decode_seconds;
     st->first = cs->generated ? st->loaded + cs->first_token_seconds : 0;
     st->tool_calls = cs->tool_calls;
+    st->prefix_cache = prefix_cache_state_name((PrefixCacheState)cs->prefix_cache);
 }
 
 /* Chat tools are on when the vocabulary has the call markers, --no-tools is

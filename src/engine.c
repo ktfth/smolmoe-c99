@@ -1,6 +1,7 @@
 #include "engine.h"
 #include "config.h"
 #include "platform.h"
+#include "prefixcache.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -377,8 +378,12 @@ void engine_start(Engine *e) {
     memset(&e->stats, 0, sizeof(e->stats));
     if (n + CLOSE_RESERVE + 16 > e->model->context) die("the system prompt does not fit in --context");
     t0 = now_seconds();
-    model_prefill(e->model, e->ids, n, 0, 0);
+    e->stats.prefix_cache = (int)prefix_cache_prefill(e->model, e->ids, n, e->prefix_cache);
     e->stats.prefill_seconds = now_seconds() - t0;
+    if (e->sink.notice && e->stats.prefix_cache == PREFIX_CACHE_REBUILT)
+        say(e, "(o cache do prompt de sistema não conferiu com este modelo e prompt: refeito)");
+    if (e->sink.notice && e->stats.prefix_cache == PREFIX_CACHE_UNWRITABLE)
+        say(e, "(não consegui gravar o cache do prompt de sistema; o chat segue sem ele)");
     e->stats.prompt_tokens = e->system_len = e->pos = n;
     e->message = NULL;
 }

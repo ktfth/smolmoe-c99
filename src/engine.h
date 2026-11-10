@@ -23,6 +23,7 @@
 typedef struct ChatStats {
     uint32_t turns, prompt_tokens, generated, tool_calls;
     double prefill_seconds, decode_seconds, first_token_seconds;
+    int prefix_cache; /* PrefixCacheState of the system prompt */
 } ChatStats;
 
 typedef struct Engine {
@@ -38,6 +39,7 @@ typedef struct Engine {
     uint32_t tool_open, tool_close;
     unsigned char *banned;  /* the sampler's ban list: the markers are allowed per message */
     const ToolClock *fixed_clock; /* NULL: the tools read the local clock at each call */
+    const char *prefix_cache;     /* NULL, or the file caching the processed system prompt (prefixcache.h) */
     EngineSink sink;
     /* State. */
     uint32_t pos, system_len;

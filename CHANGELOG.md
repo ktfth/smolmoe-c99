@@ -3,6 +3,12 @@
 ## Não lançado
 
 ### Adicionado
+- **`--prefix-cache ARQUIVO`:** o chat guarda o prompt de sistema já processado (o cache KV dele) e, nas aberturas
+  seguintes, pula o prefill desse prompt (com as ferramentas, 666 tokens no Qwen 0,5B). O ganho de tempo ainda não
+  foi medido com `bench.ts --ab`: o cenário de abertura vem com o kit. O cache só é usado depois de conferido, pela
+  identidade do modelo, pelo hash dos dados e pelos logits da última posição, recalculados sobre ele. Um arquivo
+  danificado, outro prompt ou outro modelo de mesma forma fazem o cache ser refeito, com aviso. As respostas são
+  idênticas com e sem cache.
 - **`smolmoe-inventario`:** inventário defensivo só leitura de máquinas Linux (portas em escuta com processo,
   usuários com login, grupos administrativos, binários SUID/SGID com hash, caminhos graváveis por todos, pontos de
   persistência, chaves SSH autorizadas, configurações de segurança e alertas) e `--comparar` entre dois relatórios,
