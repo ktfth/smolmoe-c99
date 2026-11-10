@@ -17,6 +17,14 @@
 - Inventário: itens que não existem não aparecem mais. Linhas longas de `/etc/passwd`, uid vazio ou não numérico,
   opções entre aspas em `authorized_keys` e portas fora do formato geravam contas, alertas de uid 0, chaves ou portas
   falsas.
+- Inventário, a partir do review do PR: relatório gravado com `0600` por arquivo temporário exclusivo; `--raiz` não
+  segue links que saem da imagem; raiz inexistente ou sem `/etc/passwd` é erro; membros de grupo administrativo por
+  grupo primário; SHA-256 completo; modo e dono dos arquivos acompanhados; hash do destino dos links (serviços
+  habilitados); opções das chaves SSH por extenso; dono de socket com todos os processos, em ordem fixa; portas
+  lidas antes dos donos; endereços corretos em máquinas big-endian; mais pontos de persistência (`rc?.d`,
+  `.bash_login`, `~/.local/share/systemd/user`); notas de cobertura comparadas pelo `--comparar`; montagens internas
+  e erros de leitura registrados como nota; arquivo ilegível vira nota em vez de valor `?`; relatório cortado ou
+  erro de escrita na comparação dão erro.
 - Inventário: itens grandes demais (link com destino longo, centenas de sockets na mesma porta) tornavam o relatório
   ilegível para o próprio `--comparar`; agora são cortados e marcados. Detalhes repetidos na mesma chave aparecem uma
   vez só.

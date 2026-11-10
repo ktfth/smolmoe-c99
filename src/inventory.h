@@ -36,15 +36,19 @@ void inv_finish(InvList *l);
 /* Reads the system under root ("" or "/" for this machine; a mounted disk
  * otherwise). Items go to out (finished); notes (unreadable paths, missing
  * sources) go to notes as plain text lines. Linux layout; elsewhere the parts
- * that exist are read. */
-void inventory_collect(const char *root, InvList *out, InvList *notes);
+ * that exist are read. With a root, nothing outside it is read: symlinks that
+ * lead out are noted, not followed. Returns 0 (nothing usable) when the root
+ * does not exist or has no readable /etc/passwd. */
+int inventory_collect(const char *root, InvList *out, InvList *notes);
 
 /* Writes a report: header comments, notes as comments, then the items. */
 void inventory_write(FILE *f, const InvList *items, const InvList *notes, const char *host, const char *when,
                      const char *root);
 
-/* Reads a report written by inventory_write. 1 on success; 0 with err filled. */
-int inventory_read(const char *path, InvList *out, char *err, size_t cap);
+/* Reads a report written by inventory_write; its notes, as items "nota\t<texto>\t",
+ * go to notes when not NULL. 1 on success; 0 with err filled, also for a report
+ * whose item count does not match its header (cut short). */
+int inventory_read(const char *path, InvList *out, InvList *notes, char *err, size_t cap);
 
 /* Writes "+\tline" (new), "-\tline" (gone) and "~\tcategoria\tchave\tantes -> depois"
  * (changed detail) to f. Both lists must be finished. Returns the number of changes. */

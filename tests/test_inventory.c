@@ -210,7 +210,7 @@ static void test_bounds(void) {
     CHECK(strlen(l.items[1]) > 5 && !strcmp(l.items[1] + strlen(l.items[1]) - 5, ", ..."), "merge overflow not marked");
     /* The program can always read back what it wrote. */
     write_report(path, &l);
-    CHECK(inventory_read(path, &back, err, sizeof(err)), "own report rejected: %s", err);
+    CHECK(inventory_read(path, &back, NULL, err, sizeof(err)), "own report rejected: %s", err);
     CHECK(same_list(&l, &back), "round trip changed the items");
     remove(path);
     inv_free(&l);
@@ -247,7 +247,7 @@ static void test_diff_and_roundtrip(void) {
     if (f) {
         inventory_write(f, &b, &notes, "host", "2026-11-09T10:00", "");
         fclose(f);
-        CHECK(inventory_read(path, &back, err, sizeof(err)), "read: %s", err);
+        CHECK(inventory_read(path, &back, NULL, err, sizeof(err)), "read: %s", err);
         CHECK(same_list(&b, &back), "round trip");
     }
     f = fopen(path, "wb");
@@ -255,14 +255,14 @@ static void test_diff_and_roundtrip(void) {
         fputs("# smolmoe-inventario 1\nporta\tsem detalhe\n", f);
         fclose(f);
         inv_free(&back);
-        CHECK(!inventory_read(path, &back, err, sizeof(err)) && strstr(err, ":2:"), "bad line accepted: %s", err);
+        CHECK(!inventory_read(path, &back, NULL, err, sizeof(err)) && strstr(err, ":2:"), "bad line accepted: %s", err);
     }
     f = fopen(path, "wb");
     if (f) {
         fputs("qualquer coisa\n", f);
         fclose(f);
         inv_free(&back);
-        CHECK(!inventory_read(path, &back, err, sizeof(err)), "foreign file accepted");
+        CHECK(!inventory_read(path, &back, NULL, err, sizeof(err)), "foreign file accepted");
     }
     remove(path);
     inv_free(&a);
@@ -334,10 +334,10 @@ static void fuzz_report_reader(void) {
                 fwrite(buf, 1, len, f);
                 fclose(f);
             }
-            if (inventory_read(path, &back, err, sizeof(err))) {
+            if (inventory_read(path, &back, NULL, err, sizeof(err))) {
                 for (k = 0; k < back.count; ++k) CHECK(well_formed(back.items[k]), "accepted: [%s]", back.items[k]);
                 write_report(path, &back);
-                CHECK(inventory_read(path, &again, err, sizeof(err)) && same_list(&back, &again),
+                CHECK(inventory_read(path, &again, NULL, err, sizeof(err)) && same_list(&back, &again),
                       "accepted report not stable: %s", err);
             }
         } else if (f) {
@@ -610,19 +610,19 @@ static void test_collect(void) {
     CHECK(has(&items, "gravavel\t/usr/share/drop\tpasta gravável por todos, sem sticky bit"), "writable dir");
     CHECK(has(&items, "gravavel\t/etc/badperm\tarquivo gravável por todos"), "writable file");
 
-    CHECK(has_prefix(&items, "inicio\t/etc/crontab\tsha256="), "crontab");
-    CHECK(has_prefix(&items, "inicio\t/etc/cron.d/backup\tsha256="), "cron.d");
+    CHECK(has_prefix(&items, "inicio\t/etc/crontab\tmodo=0644 dono="), "crontab");
+    CHECK(has_prefix(&items, "inicio\t/etc/cron.d/backup\tmodo=0644 "), "cron.d");
     CHECK(has(&items, "inicio\t/etc/systemd/system/multi-user.target.wants/ssh.service\t-> "
                       "/lib/systemd/system/ssh.service"),
           "systemd link");
-    CHECK(has_prefix(&items, "inicio\t/home/ana/.zshrc\tsha256="), "home rc");
+    CHECK(has_prefix(&items, "inicio\t/home/ana/.zshrc\tmodo=0644 "), "home rc");
     CHECK(has_prefix(&items, "alerta\tld.so.preload\t"), "preload alert");
-    CHECK(has_prefix(&items, "config\t/etc/sudoers\tsha256="), "sudoers");
+    CHECK(has_prefix(&items, "config\t/etc/sudoers\tmodo=0440 "), "sudoers");
 
     for (i = 0; i < items.count; ++i)
         if (!strncmp(items.items[i], "chave_ssh\tana:", 14)) {
             ++keys;
-            with_opts += strstr(items.items[i], "tipo=ssh-rsa comentario=- opcoes=sim") != NULL;
+            with_opts += strstr(items.items[i], "tipo=ssh-rsa comentario=- arquivo=/home/ana/.ssh/authorized_keys opcoes=from=\"10.0.0.0/8\"") != NULL;
         }
     CHECK(keys == 2 && with_opts == 1, "keys %zu with options %zu", keys, with_opts);
 
@@ -700,7 +700,8 @@ static void test_no_invented_items(void) {
     CHECK(has(&items, "usuario\troot\tuid=0 shell=/bin/bash"), "valid account before the bad lines lost");
     CHECK(has(&items, "usuario\tana2\tuid=1002 shell=/bin/bash"), "valid account after the bad lines lost");
     CHECK(!has_prefix(&items, "alerta\tuid0:"), "invented uid 0 alert");
-    CHECK(!any_contains(&items, "FAKE"), "fake key from quoted options");
+    /* The fake keys may appear inside the recorded options text, never as a key of their own. */
+    CHECK(!any_contains(&items, "tipo=ssh-rsa") && !any_contains(&items, "tipo=ssh-dss"), "fake key from quoted options");
     {
         size_t i, keys = 0;
         for (i = 0; i < items.count; ++i) keys += !strncmp(items.items[i], "chave_ssh\t", 10);
@@ -957,6 +958,7 @@ static void test_long_paths(void) {
     size_t i;
     new_root();
     if (!root[0]) return;
+    put("/etc/passwd", "root:x:0:0:root:/root:/bin/bash\n", 0644);
     dir("/etc/cron.d", 0755);
     memset(target, 'T', sizeof(target) - 1);
     target[0] = '/';
@@ -988,12 +990,163 @@ static void test_long_paths(void) {
     for (i = 0; i < items.count; ++i) CHECK(well_formed(items.items[i]), "item %zu too long or malformed", i);
     CHECK(has_prefix(&items, "porta\ttcp 0.0.0.0:443\t"), "merged port missing");
     write_report(path, &items);
-    CHECK(inventory_read(path, &back, err, sizeof(err)) && same_list(&items, &back), "long report unreadable: %s", err);
+    CHECK(inventory_read(path, &back, NULL, err, sizeof(err)) && same_list(&items, &back), "long report unreadable: %s", err);
     remove(path);
     inv_free(&items);
     inv_free(&notes);
     inv_free(&back);
     remove_root();
+}
+
+static const char *item_detail(const InvList *l, const char *prefix) {
+    size_t i;
+    for (i = 0; i < l->count; ++i)
+        if (!strncmp(l->items[i], prefix, strlen(prefix))) return l->items[i] + strlen(prefix);
+    return NULL;
+}
+
+/* Fixes from the PR review, one check each. */
+static void test_review_fixes(void) {
+    InvList a, na, b, nb, back;
+    char outside[512], cwd[400], text[8192], err[256], path[] = "inv-test-meta.txt";
+    const char *d;
+    FILE *f;
+    size_t i;
+
+    /* A root that does not exist, or has no /etc/passwd, is an error: no empty baseline from a typo. */
+    inv_init(&a);
+    inv_init(&na);
+    CHECK(!inventory_collect("inv-root-does-not-exist", &a, &na) && a.count == 0, "missing root accepted");
+    inv_free(&a);
+    inv_free(&na);
+
+    new_root();
+    if (!root[0]) return;
+    CHECK(!inventory_collect(root, &a, &na), "root without /etc/passwd accepted");
+    inv_free(&a);
+    inv_free(&na);
+
+    /* Symlinks in the image must not lead to the machine doing the scan. */
+    if (!getcwd(cwd, sizeof(cwd))) cwd[0] = 0;
+    snprintf(outside, sizeof(outside), "%s/inv-outside-XXXXXX", cwd);
+    if (mkdtemp(outside)) {
+        char p[700], linkp[700];
+        FILE *o;
+        snprintf(p, sizeof(p), "%s/passwd", outside);
+        if ((o = fopen(p, "wb"))) fputs("hostuser:x:0:0::/:/bin/sh\n", o), fclose(o);
+        snprintf(p, sizeof(p), "%s/ana", outside);
+        mkdir(p, 0755);
+        snprintf(p, sizeof(p), "%s/ana/.ssh", outside);
+        mkdir(p, 0700);
+        snprintf(p, sizeof(p), "%s/ana/.ssh/authorized_keys", outside);
+        if ((o = fopen(p, "wb"))) fputs("ssh-ed25519 HOSTKEY host@outside\n", o), fclose(o);
+        snprintf(p, sizeof(p), "%s/passwd", outside);
+        snprintf(linkp, sizeof(linkp), "%s/etc/passwd", root);
+        CHECK(!symlink(p, linkp), "symlink passwd");
+        collect(&a, &na);
+        CHECK(!any_contains(&a, "hostuser"), "--raiz followed /etc/passwd out of the image");
+        inv_free(&a);
+        inv_free(&na);
+        unlink(linkp);
+        put("/etc/passwd", "root:x:0:0:root:/root:/bin/bash\nana:x:1000:27::/home/ana:/bin/bash\n", 0644);
+        put("/etc/group", "sudo:x:27:\nusers:x:100:\n", 0644);
+        snprintf(linkp, sizeof(linkp), "%s/home", root);
+        CHECK(!symlink(outside, linkp), "symlink home");
+        collect(&a, &na);
+        CHECK(!any_contains(&a, "HOSTKEY") && !has_prefix(&a, "chave_ssh\t"), "--raiz followed /home out of the image");
+        {
+            size_t noted = 0;
+            for (i = 0; i < na.count; ++i) noted += strstr(na.items[i], "fora da raiz") != NULL;
+            CHECK(noted > 0, "escape not noted");
+        }
+        /* Primary group: ana's gid is sudo's, though sudo lists no members. */
+        CHECK(has(&a, "admin\tsudo:ana\tgrupo primário"), "admin by primary group missing");
+        inv_free(&a);
+        inv_free(&na);
+        unlink(linkp);
+        remove_tree(outside);
+    }
+
+    /* Changes that used to leave the report identical. */
+    dir("/home", 0755);
+    dir("/home/ana", 0755);
+    dir("/home/ana/.ssh", 0700);
+    dir("/lib", 0755);
+    dir("/etc/systemd", 0755);
+    dir("/etc/systemd/system", 0755);
+    dir("/etc/systemd/system/multi-user.target.wants", 0755);
+    put("/lib/x.service", "[Service]\nExecStart=/bin/true\n", 0644);
+    link_to("/lib/x.service", "/etc/systemd/system/multi-user.target.wants/x.service");
+    put("/etc/crontab", "* * * * * root true\n", 0644);
+    put("/home/ana/.ssh/authorized_keys", "from=\"10.0.0.1\" ssh-ed25519 KEY ana@pc\n", 0600);
+    collect(&a, &na);
+    d = item_detail(&a, "inicio\t/etc/crontab\t");
+    CHECK(d && strstr(d, "sha256=") && strlen(strstr(d, "sha256=") + 7) == 64, "hash is not the full SHA-256: %s", d ? d : "-");
+    d = item_detail(&a, "inicio\t/etc/systemd/system/multi-user.target.wants/x.service\t");
+    CHECK(d && strstr(d, "-> /lib/x.service sha256="), "link target not hashed: %s", d ? d : "-");
+    put("/lib/x.service", "[Service]\nExecStart=/tmp/evil\n", 0644); /* the unit, not the link */
+    {
+        char p[600];
+        snprintf(p, sizeof(p), "%s/etc/crontab", root);
+        chmod(p, 0666); /* mode only, same content */
+    }
+    put("/home/ana/.ssh/authorized_keys", "from=\"0.0.0.0/0\" ssh-ed25519 KEY ana@pc\n", 0600); /* options only */
+    collect(&b, &nb);
+    diff_text(&a, &b, text, sizeof(text));
+    CHECK(strstr(text, "~\tinicio\t/etc/systemd/system/multi-user.target.wants/x.service\t") != NULL,
+          "unit change behind a link not seen:\n%s", text);
+    CHECK(strstr(text, "~\tinicio\t/etc/crontab\tmodo=0644") != NULL, "mode change not seen:\n%s", text);
+    CHECK(strstr(text, "from=\"0.0.0.0/0\"") != NULL && strstr(text, "~\tchave_ssh\t") != NULL,
+          "ssh option change not seen:\n%s", text);
+    inv_free(&a);
+    inv_free(&na);
+    inv_free(&b);
+    inv_free(&nb);
+
+    /* Shared sockets: every owner, in a fixed order. */
+    dir("/proc/net", 0755);
+    dir("/proc/10", 0755);
+    dir("/proc/10/fd", 0755);
+    dir("/proc/20", 0755);
+    dir("/proc/20/fd", 0755);
+    put("/proc/10/comm", "zeta\n", 0644);
+    put("/proc/20/comm", "alfa\n", 0644);
+    link_to("socket:[777]", "/proc/10/fd/3");
+    link_to("socket:[777]", "/proc/20/fd/4");
+    put("/proc/net/tcp",
+        "  sl  local_address rem_address   st\n"
+        "   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 777 1 0\n",
+        0644);
+    collect(&a, &na);
+    CHECK(has(&a, "porta\ttcp 0.0.0.0:80\tprocesso=alfa+zeta uid=0 exposta=sim"), "shared socket owners");
+    inv_free(&a);
+    inv_free(&na);
+    remove_root();
+
+    /* A report cut after a whole line, and metadata with a newline. */
+    inv_init(&a);
+    inv_init(&back);
+    inv_add(&a, "porta", "k1", "d");
+    inv_add(&a, "porta", "k2", "d");
+    inv_finish(&a);
+    f = fopen(path, "wb");
+    if (f) {
+        inventory_write(f, &a, NULL, "host\nporta\tfake\tx", "t", "/mnt/a\nb");
+        fclose(f);
+        CHECK(inventory_read(path, &back, NULL, err, sizeof(err)) && same_list(&a, &back),
+              "metadata broke the report: %s", err);
+    }
+    f = fopen(path, "wb");
+    if (f) {
+        fputs("# smolmoe-inventario 1\n# itens: 2\nporta\tk1\td\n", f);
+        fclose(f);
+        inv_free(&back);
+        CHECK(!inventory_read(path, &back, NULL, err, sizeof(err)) && strstr(err, "incompleto"),
+              "truncated report accepted: %s", err);
+    }
+    remove(path);
+    inv_free(&a);
+    inv_free(&back);
 }
 
 #endif
@@ -1011,6 +1164,7 @@ int main(void) {
     test_oracle();
     fuzz_collection();
     test_long_paths();
+    test_review_fixes();
 #endif
     if (failures) {
         fprintf(stderr, "test-inventory: %d failure(s)\n", failures);

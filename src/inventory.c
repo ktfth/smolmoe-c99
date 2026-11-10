@@ -22,7 +22,7 @@
 
 #define INV_PATH 4096
 #define INV_LINE 8192 /* longest line read from a system file; longer lines are skipped whole */
-#define HASH_BYTES 8 /* 16 hex digits: enough to notice a change */
+#define HASH_BYTES 32 /* the whole SHA-256: a cut digest can be collided on purpose */
 
 /* ---- lists ---------------------------------------------------------------- */
 
@@ -185,19 +185,29 @@ static int read_line(FILE *f, char *buf, size_t cap) {
 
 /* ---- report files --------------------------------------------------------- */
 
+/* Report metadata comes from outside (a --raiz path, the host name): never let it break a line. */
+static void put_meta(FILE *f, const char *label, const char *s) {
+    fprintf(f, "# %s: ", label);
+    for (; *s; ++s) fputc((unsigned char)*s < 32 || *s == 127 ? '?' : *s, f);
+    fputc('\n', f);
+}
+
 void inventory_write(FILE *f, const InvList *items, const InvList *notes, const char *host, const char *when,
                      const char *root) {
     size_t i;
-    fprintf(f, "# %s\n# host: %s\n# data: %s\n# raiz: %s\n# itens: %zu\n", INV_FORMAT, host, when,
-            root && *root ? root : "/", items->count);
-    for (i = 0; notes && i < notes->count; ++i) fprintf(f, "# nota: %s\n", notes->items[i]);
+    fprintf(f, "# %s\n", INV_FORMAT);
+    put_meta(f, "host", host);
+    put_meta(f, "data", when);
+    put_meta(f, "raiz", root && *root ? root : "/");
+    fprintf(f, "# itens: %zu\n", items->count);
+    for (i = 0; notes && i < notes->count; ++i) put_meta(f, "nota", notes->items[i]);
     for (i = 0; i < items->count; ++i) fprintf(f, "%s\n", items->items[i]);
 }
 
-int inventory_read(const char *path, InvList *out, char *err, size_t cap) {
+int inventory_read(const char *path, InvList *out, InvList *notes, char *err, size_t cap) {
     char line[INV_ITEM_MAX + 1];
-    unsigned long number = 0;
-    int header = 0, r;
+    unsigned long number = 0, declared = 0, seen = 0;
+    int header = 0, counted = 0, r;
     FILE *f = fopen(path, "rb");
     if (!f) {
         snprintf(err, cap, "%s: %s", path, strerror(errno));
@@ -222,6 +232,16 @@ int inventory_read(const char *path, InvList *out, char *err, size_t cap) {
             header = 1;
             continue;
         }
+        if (!strncmp(line, "# itens: ", 9) && !counted) {
+            char *end;
+            declared = strtoul(line + 9, &end, 10);
+            counted = !*end;
+            continue;
+        }
+        if (!strncmp(line, "# nota: ", 8)) {
+            if (notes) inv_add(notes, "nota", line + 8, "");
+            continue;
+        }
         if (!n || line[0] == '#') continue;
         /* inventory_write never writes control bytes besides the two tabs: anything else is damage. */
         for (i = 0; i < n; ++i)
@@ -240,13 +260,25 @@ int inventory_read(const char *path, InvList *out, char *err, size_t cap) {
         s = (char *)xrealloc(NULL, n + 1);
         memcpy(s, line, n + 1);
         push(out, s);
+        ++seen;
+    }
+    if (ferror(f)) {
+        snprintf(err, cap, "%s: erro de leitura", path);
+        fclose(f);
+        return 0;
     }
     fclose(f);
     if (!header) {
         snprintf(err, cap, "%s: arquivo vazio", path);
         return 0;
     }
+    /* A report cut after a whole line still parses: the declared count tells it is incomplete. */
+    if (!counted || declared != seen) {
+        snprintf(err, cap, "%s: relatório incompleto (%lu itens declarados, %lu lidos)", path, declared, seen);
+        return 0;
+    }
     inv_finish(out);
+    if (notes) inv_finish(notes);
     return 1;
 }
 
@@ -277,22 +309,24 @@ size_t inventory_diff(const InvList *before, const InvList *after, FILE *f) {
 
 #if defined(_WIN32)
 
-void inventory_collect(const char *root, InvList *out, InvList *notes) {
+int inventory_collect(const char *root, InvList *out, InvList *notes) {
     (void)root;
     (void)out;
     note(notes, "coleta disponível só em Linux (e parcial em outros sistemas POSIX)");
+    return 0;
 }
 
 #else
 
 typedef struct User {
     char name[64], home[512], shell[256];
-    unsigned long uid;
+    unsigned long uid, gid;
     int login;
 } User;
 
 typedef struct Ctx {
-    char root[INV_PATH];
+    char root[INV_PATH];      /* "" for this machine */
+    char root_real[INV_PATH]; /* realpath(root) with --raiz */
     InvList *out, *notes;
     User *users;
     size_t nusers;
@@ -303,16 +337,53 @@ static int full_path(const Ctx *c, const char *shown, char *out) {
     return n > 0 && n < INV_PATH;
 }
 
+/* With --raiz, whether a resolved path stays inside the mounted system. */
+static int under_root(const Ctx *c, const char *resolved) {
+    size_t n = strlen(c->root_real);
+    if (!c->root[0]) return 1;
+    if (n == 1 && c->root_real[0] == '/') return 1;
+    return !strncmp(resolved, c->root_real, n) && (resolved[n] == 0 || resolved[n] == '/');
+}
+
+/* With --raiz, a symlink in the image (/etc -> /etc, /home -> /mnt/x) must not
+ * lead out of it: the report would then describe the machine doing the scan.
+ * follow_last: the last component is opened too (fopen, opendir), not only lstat'ed.
+ * Returns 1 when safe; 0 when the path is missing or escapes (escapes are noted). */
+static int confined(Ctx *c, const char *p, const char *shown, int follow_last) {
+    char tmp[INV_PATH], resolved[INV_PATH * 2];
+    char *slash;
+    if (!c->root[0]) return 1;
+    if (follow_last) {
+        if (!realpath(p, resolved)) return errno != ENOENT && errno != ENOTDIR;
+    } else {
+        snprintf(tmp, sizeof(tmp), "%s", p);
+        slash = strrchr(tmp, '/');
+        if (!slash) return 1;
+        if (slash == tmp) slash[1] = 0;
+        else *slash = 0;
+        if (!realpath(tmp, resolved)) return errno != ENOENT && errno != ENOTDIR;
+    }
+    if (under_root(c, resolved)) return 1;
+    note(c->notes, "fora da raiz, não lido: %s", shown);
+    return 0;
+}
+
 static FILE *open_shown(Ctx *c, const char *shown) {
     char p[INV_PATH];
     FILE *f;
-    if (!full_path(c, shown, p)) return NULL;
+    if (!full_path(c, shown, p) || !confined(c, p, shown, 1)) return NULL;
     f = fopen(p, "rb");
     if (!f && errno == EACCES) note(c->notes, "sem acesso: %s", shown);
     return f;
 }
 
-/* 16 hex digits of the file's SHA-256 into hex; 0 when it cannot be read. */
+/* Closes a file read with read_line; a read error leaves a note (the data may be partial). */
+static void close_read(Ctx *c, FILE *f, const char *shown) {
+    if (ferror(f)) note(c->notes, "erro de leitura, dados talvez incompletos: %s", shown);
+    fclose(f);
+}
+
+/* The file's full SHA-256 in hex; 0 when it cannot be read. */
 static int hash_file(const char *path, char hex[2 * HASH_BYTES + 1]) {
     static const char digits[] = "0123456789abcdef";
     unsigned char buf[65536], d[32];
@@ -345,7 +416,7 @@ static int split_colons(char *s, char **fields, int max) {
     return n;
 }
 
-/* A uid: 1 to 10 decimal digits and nothing else. strtoul alone would read "" or "x" as 0 (root). */
+/* A uid or gid: 1 to 10 decimal digits and nothing else. strtoul alone would read "" or "x" as 0 (root). */
 static int parse_uid(const char *s, unsigned long *out) {
     size_t n = strlen(s), i;
     if (!n || n > 10) return 0;
@@ -368,14 +439,12 @@ static int login_shell(const char *shell) {
     return 1;
 }
 
-static void collect_users(Ctx *c) {
+/* 0 when /etc/passwd cannot be read: without it there is no system to describe. */
+static int collect_users(Ctx *c) {
     char line[INV_LINE], detail[512], key[INV_LINE + 32];
     int r;
     FILE *f = open_shown(c, "/etc/passwd");
-    if (!f) {
-        note(c->notes, "usuários: /etc/passwd ausente");
-        return;
-    }
+    if (!f) return 0;
     while ((r = read_line(f, line, sizeof(line))) != 0) {
         char *fl[7];
         User u;
@@ -384,7 +453,7 @@ static void collect_users(Ctx *c) {
         memset(&u, 0, sizeof(u));
         /* Malformed or oversized fields: skip the account rather than guess or cut it. */
         if (!fl[0][0] || strlen(fl[0]) >= sizeof(u.name) || strlen(fl[5]) >= sizeof(u.home) ||
-            strlen(fl[6]) >= sizeof(u.shell) || !parse_uid(fl[2], &u.uid)) {
+            strlen(fl[6]) >= sizeof(u.shell) || !parse_uid(fl[2], &u.uid) || !parse_uid(fl[3], &u.gid)) {
             note(c->notes, "conta malformada ignorada em /etc/passwd");
             continue;
         }
@@ -403,10 +472,10 @@ static void collect_users(Ctx *c) {
         c->users = (User *)xrealloc(c->users, (c->nusers + 1) * sizeof(*c->users));
         c->users[c->nusers++] = u;
     }
-    fclose(f);
+    close_read(c, f, "/etc/passwd");
 
     f = open_shown(c, "/etc/shadow");
-    if (!f) return;
+    if (!f) return 1;
     while ((r = read_line(f, line, sizeof(line))) != 0) {
         char *fl[3];
         if (r < 0) continue;
@@ -414,24 +483,33 @@ static void collect_users(Ctx *c) {
         snprintf(key, sizeof(key), "senha_vazia:%s", fl[0]);
         inv_add(c->out, "alerta", key, "entra sem senha");
     }
-    fclose(f);
+    close_read(c, f, "/etc/shadow");
+    return 1;
 }
 
-/* Members of groups that amount to root (or read every disk). */
+/* Members of groups that amount to root (or read every disk): listed members and
+ * accounts whose primary group it is (their gid in /etc/passwd). */
 static void collect_admins(Ctx *c) {
     static const char *const groups[] = {"root", "sudo", "wheel", "admin", "docker", "lxd", "libvirt", "disk"};
-    char line[INV_LINE], key[INV_LINE + 32];
+    char line[INV_LINE], key[INV_LINE + 128];
     int r;
     FILE *f = open_shown(c, "/etc/group");
     if (!f) return;
     while ((r = read_line(f, line, sizeof(line))) != 0) {
         char *fl[4], *m, *next;
-        size_t g;
+        size_t g, u;
+        unsigned long gid;
         if (r < 0) { note(c->notes, "linha longa ou inválida ignorada: /etc/group"); continue; }
         if (split_colons(line, fl, 4) != 4) continue;
         for (g = 0; g < sizeof(groups) / sizeof(groups[0]); ++g)
             if (!strcmp(fl[0], groups[g])) break;
         if (g == sizeof(groups) / sizeof(groups[0])) continue;
+        if (parse_uid(fl[2], &gid))
+            for (u = 0; u < c->nusers; ++u)
+                if (c->users[u].gid == gid) {
+                    snprintf(key, sizeof(key), "%s:%s", fl[0], c->users[u].name);
+                    inv_add(c->out, "admin", key, "grupo primário");
+                }
         for (m = fl[3]; m && *m; m = next) {
             next = strchr(m, ',');
             if (next) *next++ = 0;
@@ -440,7 +518,7 @@ static void collect_admins(Ctx *c) {
             inv_add(c->out, "admin", key, "membro");
         }
     }
-    fclose(f);
+    close_read(c, f, "/etc/group");
 }
 
 /* ---- ports from /proc/net ---- */
@@ -448,13 +526,18 @@ static void collect_admins(Ctx *c) {
 typedef struct Sock {
     unsigned long inode;
     char comm[32];
-    unsigned long pid;
 } Sock;
 
 typedef struct SockMap {
     Sock *v;
     size_t n;
 } SockMap;
+
+typedef struct Listen {
+    char key[96];
+    unsigned long uid, inode;
+    int loopback;
+} Listen;
 
 static int is_digits(const char *s) {
     if (!*s) return 0;
@@ -464,12 +547,11 @@ static int is_digits(const char *s) {
 }
 
 static void read_comm(Ctx *c, const char *pid, char *out, size_t cap) {
-    char p[INV_PATH], *nl;
+    char shown[320], *nl;
     FILE *f;
     snprintf(out, cap, "?");
-    if (snprintf(p, sizeof(p), "%s/proc/%s/comm", c->root, pid) >= (int)sizeof(p)) return;
-    f = fopen(p, "rb");
-    if (!f) return;
+    snprintf(shown, sizeof(shown), "/proc/%s/comm", pid);
+    if (!(f = open_shown(c, shown))) return;
     if (fgets(out, (int)cap, f)) {
         nl = strchr(out, '\n');
         if (nl) *nl = 0;
@@ -478,20 +560,22 @@ static void read_comm(Ctx *c, const char *pid, char *out, size_t cap) {
     fclose(f);
 }
 
-/* Socket inode -> process, from /proc/<pid>/fd. Other users' processes need root. */
+/* Socket inode -> process names, from /proc/<pid>/fd. Other users' processes need root. */
 static SockMap socket_owners(Ctx *c) {
     SockMap m = {NULL, 0};
     char p[INV_PATH], link[128];
     DIR *proc, *fds;
     struct dirent *e, *fe;
-    unsigned long denied = 0;
-    if (snprintf(p, sizeof(p), "%s/proc", c->root) >= (int)sizeof(p) || !(proc = opendir(p))) return m;
+    int denied = 0;
+    if (snprintf(p, sizeof(p), "%s/proc", c->root) >= (int)sizeof(p) || !confined(c, p, "/proc", 1) ||
+        !(proc = opendir(p)))
+        return m;
     while ((e = readdir(proc)) != NULL) {
         char comm[32] = "";
         if (!is_digits(e->d_name)) continue;
         if (snprintf(p, sizeof(p), "%s/proc/%s/fd", c->root, e->d_name) >= (int)sizeof(p)) continue;
         if (!(fds = opendir(p))) {
-            if (errno == EACCES) ++denied;
+            if (errno == EACCES) denied = 1;
             continue;
         }
         while ((fe = readdir(fds)) != NULL) {
@@ -507,37 +591,64 @@ static SockMap socket_owners(Ctx *c) {
             if (!comm[0]) read_comm(c, e->d_name, comm, sizeof(comm));
             m.v = (Sock *)xrealloc(m.v, (m.n + 1) * sizeof(*m.v));
             m.v[m.n].inode = inode;
-            m.v[m.n].pid = strtoul(e->d_name, NULL, 10);
             snprintf(m.v[m.n].comm, sizeof(m.v[m.n].comm), "%s", comm);
             ++m.n;
         }
         closedir(fds);
     }
     closedir(proc);
-    if (denied) note(c->notes, "portas: dono de socket desconhecido para %lu processos (rode como root)", denied);
+    /* No count in the text: notes are compared between reports, and the number of processes always varies. */
+    if (denied) note(c->notes, "portas: dono de alguns sockets desconhecido (rode como root)");
     return m;
 }
 
-static const char *owner_of(const SockMap *m, unsigned long inode) {
-    size_t i;
-    for (i = 0; i < m->n; ++i)
-        if (m->v[i].inode == inode) return m->v[i].comm;
-    return "?";
+static int comm_cmp(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
 }
 
-/* /proc/net address (hex, 32-bit words in host order, i.e. little-endian on Linux targets) to text. */
+/* Every distinct process name holding the socket, sorted and joined by '+' (a socket
+ * shared by systemd and sshd, or by a server's workers): the same text whatever
+ * order /proc lists the processes in. "?" when none is known. */
+static void owners_of(const SockMap *m, unsigned long inode, char *out, size_t cap) {
+    const char *names[64];
+    size_t i, k, n = 0, len = 0;
+    for (i = 0; i < m->n && n < 64; ++i)
+        if (m->v[i].inode == inode) {
+            for (k = 0; k < n && strcmp(names[k], m->v[i].comm); ++k) {}
+            if (k == n) names[n++] = m->v[i].comm;
+        }
+    if (!n) {
+        snprintf(out, cap, "?");
+        return;
+    }
+    qsort(names, n, sizeof(names[0]), comm_cmp);
+    out[0] = 0;
+    for (k = 0; k < n; ++k) {
+        int w = snprintf(out + len, cap - len, "%s%s", k ? "+" : "", names[k]);
+        if (w < 0 || (size_t)w >= cap - len) break;
+        len += (size_t)w;
+    }
+}
+
+static int host_little_endian(void) {
+    const unsigned one = 1;
+    return *(const unsigned char *)&one == 1;
+}
+
+/* /proc/net address to text. The kernel prints each 32-bit word of the address as
+ * the host reads it, so the byte order of the hex follows the host's endianness. */
 static int format_addr(const char *hex, int v6, char *out, size_t cap, int *loopback) {
     unsigned char b[16];
-    int words = v6 ? 4 : 1, i, allzero = 1;
+    int words = v6 ? 4 : 1, i, allzero = 1, little = host_little_endian();
     if (strlen(hex) != (size_t)(8 * words)) return 0;
     for (i = 0; i < words; ++i) {
         char w[9];
         unsigned long x;
+        int k;
         memcpy(w, hex + 8 * i, 8);
         w[8] = 0;
         x = strtoul(w, NULL, 16);
-        b[4 * i] = (unsigned char)x, b[4 * i + 1] = (unsigned char)(x >> 8);
-        b[4 * i + 2] = (unsigned char)(x >> 16), b[4 * i + 3] = (unsigned char)(x >> 24);
+        for (k = 0; k < 4; ++k) b[4 * i + k] = (unsigned char)(x >> (little ? 8 * k : 8 * (3 - k)));
     }
     if (!v6) {
         *loopback = b[0] == 127;
@@ -572,7 +683,8 @@ static void collect_ports(Ctx *c) {
         {"/proc/net/tcp", "tcp", 0, 0}, {"/proc/net/tcp6", "tcp6", 1, 0},
         {"/proc/net/udp", "udp", 0, 1}, {"/proc/net/udp6", "udp6", 1, 1}};
     SockMap owners;
-    size_t t;
+    Listen *ls = NULL;
+    size_t t, nls = 0, i;
     int any = 0, r;
     char probe[INV_PATH];
     struct stat st;
@@ -580,7 +692,7 @@ static void collect_ports(Ctx *c) {
         note(c->notes, "portas: /proc/net indisponível");
         return;
     }
-    owners = socket_owners(c);
+    /* Tables first, owners after: a listener opened during the scan still finds its process. */
     for (t = 0; t < sizeof(tables) / sizeof(tables[0]); ++t) {
         char line[1024];
         FILE *f = open_shown(c, tables[t].file);
@@ -591,7 +703,7 @@ static void collect_ports(Ctx *c) {
             continue;
         }
         while ((r = read_line(f, line, sizeof(line))) != 0) {
-            char local[40], remote[40], lhex[8], rhex[8], shex[8], addr[64], key[96], detail[128];
+            char local[40], remote[40], lhex[8], rhex[8], shex[8], addr[64];
             unsigned lport, rport, state;
             unsigned long uid, inode;
             int loop, k, remote_zero = 1;
@@ -607,13 +719,24 @@ static void collect_ports(Ctx *c) {
             for (k = 0; remote[k]; ++k) remote_zero &= remote[k] == '0';
             if (tables[t].udp ? !(state == 0x07 && rport == 0 && remote_zero) : state != 0x0A) continue;
             if (!format_addr(local, tables[t].v6, addr, sizeof(addr), &loop)) continue;
-            snprintf(key, sizeof(key), "%s %s:%u", tables[t].proto, addr, lport);
-            snprintf(detail, sizeof(detail), "processo=%s uid=%lu exposta=%s", owner_of(&owners, inode), uid,
-                     loop ? "nao" : "sim");
-            inv_add(c->out, "porta", key, detail);
+            ls = (Listen *)xrealloc(ls, (nls + 1) * sizeof(*ls));
+            snprintf(ls[nls].key, sizeof(ls[nls].key), "%s %s:%u", tables[t].proto, addr, lport);
+            ls[nls].uid = uid;
+            ls[nls].inode = inode;
+            ls[nls].loopback = loop;
+            ++nls;
         }
-        fclose(f);
+        close_read(c, f, tables[t].file);
     }
+    owners = socket_owners(c);
+    for (i = 0; i < nls; ++i) {
+        char who[256], detail[384];
+        owners_of(&owners, ls[i].inode, who, sizeof(who));
+        snprintf(detail, sizeof(detail), "processo=%s uid=%lu exposta=%s", who, ls[i].uid,
+                 ls[i].loopback ? "nao" : "sim");
+        inv_add(c->out, "porta", ls[i].key, detail);
+    }
+    free(ls);
     free(owners.v);
     if (!any) note(c->notes, "portas: tabelas de /proc/net ilegíveis");
 }
@@ -622,19 +745,30 @@ static void collect_ports(Ctx *c) {
 
 /* SUID/SGID binaries and world-writable paths (sticky directories like /tmp excepted). */
 static void scan_perms(Ctx *c, const char *shown, int depth, dev_t dev) {
-    char p[INV_PATH], detail[128], hex[2 * HASH_BYTES + 1];
+    char p[INV_PATH], detail[256], hex[2 * HASH_BYTES + 1];
     struct stat st;
     DIR *d;
     struct dirent *e;
-    if (!full_path(c, shown, p) || lstat(p, &st)) return;
+    if (!full_path(c, shown, p)) return;
+    if (dev == (dev_t)-1 && !confined(c, p, shown, 0)) return; /* the top of each walk; below it no link is followed */
+    if (lstat(p, &st)) {
+        if (errno == EACCES) note(c->notes, "sem acesso: %s", shown);
+        return;
+    }
     if (S_ISLNK(st.st_mode)) return;
-    if (dev != (dev_t)-1 && st.st_dev != dev) return; /* another file system */
+    if (dev != (dev_t)-1 && st.st_dev != dev) {
+        if (S_ISDIR(st.st_mode)) note(c->notes, "outro sistema de arquivos, não verificado: %s", shown);
+        return;
+    }
     if (S_ISREG(st.st_mode)) {
         if (st.st_mode & (S_ISUID | S_ISGID)) {
-            if (!hash_file(p, hex)) snprintf(hex, sizeof(hex), "?");
-            snprintf(detail, sizeof(detail), "modo=%04o dono=%lu sha256=%s", (unsigned)(st.st_mode & 07777),
-                     (unsigned long)st.st_uid, hex);
-            inv_add(c->out, "suid", shown, detail);
+            /* An unknown hash is not a value to compare: the binary becomes a note instead. */
+            if (!hash_file(p, hex)) note(c->notes, "sem acesso: %s", shown);
+            else {
+                snprintf(detail, sizeof(detail), "modo=%04o dono=%lu sha256=%s", (unsigned)(st.st_mode & 07777),
+                         (unsigned long)st.st_uid, hex);
+                inv_add(c->out, "suid", shown, detail);
+            }
         }
         if (st.st_mode & S_IWOTH) inv_add(c->out, "gravavel", shown, "arquivo gravável por todos");
         return;
@@ -656,29 +790,51 @@ static void scan_perms(Ctx *c, const char *shown, int depth, dev_t dev) {
     closedir(d);
 }
 
-/* Records every file under shown with its hash (links with their target). */
-static void track(Ctx *c, const char *category, const char *shown, int depth) {
-    char p[INV_PATH], detail[INV_PATH + 16], hex[2 * HASH_BYTES + 1];
+/* The hash of what a link points to, when it is a regular file inside the system
+ * read: a unit enabled by a link changes when its target changes, not the link. */
+static void link_target_hash(Ctx *c, const char *p, const char *target, char *out, size_t cap) {
+    char path[INV_PATH * 2], resolved[INV_PATH * 2], hex[2 * HASH_BYTES + 1];
+    struct stat st;
+    out[0] = 0;
+    if (target[0] == '/') snprintf(path, sizeof(path), "%s%s", c->root, target);
+    else {
+        const char *slash = strrchr(p, '/');
+        snprintf(path, sizeof(path), "%.*s/%s", slash ? (int)(slash - p) : 0, p, target);
+    }
+    if (!realpath(path, resolved) || !under_root(c, resolved)) return;
+    if (stat(resolved, &st) || !S_ISREG(st.st_mode) || !hash_file(resolved, hex)) return;
+    snprintf(out, cap, " sha256=%s", hex);
+}
+
+/* Records every file under shown: mode, owner and hash (links: target and the target's hash). */
+static void track(Ctx *c, const char *category, const char *shown, int depth, int top) {
+    char p[INV_PATH], detail[INV_PATH + 200], hex[2 * HASH_BYTES + 1];
     struct stat st;
     DIR *d;
     struct dirent *e;
     if (!full_path(c, shown, p)) return;
+    if (top && !confined(c, p, shown, 0)) return; /* below the top, directories come from lstat: never links */
     if (lstat(p, &st)) {
         if (errno == EACCES) note(c->notes, "sem acesso: %s", shown);
         return;
     }
     if (S_ISLNK(st.st_mode)) {
-        char target[INV_PATH];
+        char target[INV_PATH], th[2 * HASH_BYTES + 16];
         ssize_t n = readlink(p, target, sizeof(target) - 1);
         if (n < 0) n = 0;
         target[n] = 0;
-        snprintf(detail, sizeof(detail), "-> %s", target);
+        link_target_hash(c, p, target, th, sizeof(th));
+        snprintf(detail, sizeof(detail), "-> %s%s", target, th);
         inv_add(c->out, category, shown, detail);
         return;
     }
     if (S_ISREG(st.st_mode)) {
-        if (hash_file(p, hex)) snprintf(detail, sizeof(detail), "sha256=%s", hex);
-        else snprintf(detail, sizeof(detail), "sem acesso");
+        if (!hash_file(p, hex)) {
+            note(c->notes, "sem acesso: %s", shown);
+            return;
+        }
+        snprintf(detail, sizeof(detail), "modo=%04o dono=%lu sha256=%s", (unsigned)(st.st_mode & 07777),
+                 (unsigned long)st.st_uid, hex);
         inv_add(c->out, category, shown, detail);
         return;
     }
@@ -691,7 +847,7 @@ static void track(Ctx *c, const char *category, const char *shown, int depth) {
         char child[INV_PATH];
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
         if (snprintf(child, sizeof(child), "%s/%s", shown, e->d_name) >= (int)sizeof(child)) continue;
-        track(c, category, child, depth - 1);
+        track(c, category, child, depth - 1, 0);
     }
     closedir(d);
 }
@@ -703,18 +859,24 @@ static void collect_tracked(Ctx *c) {
         {"inicio", "/etc/cron.hourly", 1}, {"inicio", "/etc/cron.daily", 1}, {"inicio", "/etc/cron.weekly", 1},
         {"inicio", "/etc/cron.monthly", 1}, {"inicio", "/var/spool/cron", 2}, {"inicio", "/etc/systemd/system", 3},
         {"inicio", "/etc/systemd/user", 3}, {"inicio", "/etc/rc.local", 0}, {"inicio", "/etc/init.d", 1},
+        {"inicio", "/etc/rcS.d", 1}, {"inicio", "/etc/rc0.d", 1}, {"inicio", "/etc/rc1.d", 1},
+        {"inicio", "/etc/rc2.d", 1}, {"inicio", "/etc/rc3.d", 1}, {"inicio", "/etc/rc4.d", 1},
+        {"inicio", "/etc/rc5.d", 1}, {"inicio", "/etc/rc6.d", 1},
         {"inicio", "/etc/xdg/autostart", 1}, {"inicio", "/etc/profile", 0}, {"inicio", "/etc/profile.d", 1},
         {"inicio", "/etc/bash.bashrc", 0}, {"inicio", "/etc/environment", 0}, {"inicio", "/etc/ld.so.preload", 0},
         /* security configuration */
         {"config", "/etc/ssh/sshd_config", 0}, {"config", "/etc/ssh/sshd_config.d", 1}, {"config", "/etc/sudoers", 0},
         {"config", "/etc/sudoers.d", 1}, {"config", "/etc/pam.d", 1}, {"config", "/etc/hosts", 0},
         {"config", "/etc/ld.so.conf", 0}, {"config", "/etc/ld.so.conf.d", 1}};
-    static const char *const home_files[] = {"/.bashrc", "/.bash_profile", "/.profile", "/.zshrc"};
+    static const struct { const char *path; int depth; } home[] = {
+        {"/.bashrc", 0}, {"/.bash_profile", 0}, {"/.bash_login", 0}, {"/.profile", 0}, {"/.zshrc", 0},
+        {"/.config/autostart", 1}, {"/.config/systemd/user", 3}, {"/.local/share/systemd/user", 3}};
     size_t i, u, h;
     char p[INV_PATH];
     struct stat st;
-    for (i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) track(c, paths[i].category, paths[i].path, paths[i].depth);
-    if (full_path(c, "/etc/ld.so.preload", p) && !lstat(p, &st))
+    for (i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i)
+        track(c, paths[i].category, paths[i].path, paths[i].depth, 1);
+    if (full_path(c, "/etc/ld.so.preload", p) && confined(c, p, "/etc/ld.so.preload", 0) && !lstat(p, &st))
         inv_add(c->out, "alerta", "ld.so.preload", "biblioteca carregada em todo programa; raro em sistema normal");
 
     for (u = 0; u < c->nusers; ++u) {
@@ -724,14 +886,10 @@ static void collect_tracked(Ctx *c) {
         for (h = 0; h < u && !seen; ++h)
             seen = (c->users[h].login || c->users[h].uid == 0) && !strcmp(c->users[h].home, us->home);
         if (seen) continue;
-        for (h = 0; h < sizeof(home_files) / sizeof(home_files[0]); ++h) {
-            snprintf(p, sizeof(p), "%s%s", us->home, home_files[h]);
-            track(c, "inicio", p, 0);
+        for (h = 0; h < sizeof(home) / sizeof(home[0]); ++h) {
+            snprintf(p, sizeof(p), "%s%s", us->home, home[h].path);
+            track(c, "inicio", p, home[h].depth, 1);
         }
-        snprintf(p, sizeof(p), "%s/.config/autostart", us->home);
-        track(c, "inicio", p, 1);
-        snprintf(p, sizeof(p), "%s/.config/systemd/user", us->home);
-        track(c, "inicio", p, 3);
     }
 }
 
@@ -739,7 +897,7 @@ static int key_type(const char *t) {
     return !strncmp(t, "ssh-", 4) || !strncmp(t, "ecdsa-", 6) || !strncmp(t, "sk-", 3);
 }
 
-/* One item per authorized key: who can log in without a password. */
+/* One item per authorized key: who can log in without a password, and under which options. */
 static void collect_ssh_keys(Ctx *c) {
     static const char *const files[] = {"/.ssh/authorized_keys", "/.ssh/authorized_keys2"};
     size_t u, k;
@@ -755,8 +913,10 @@ static void collect_ssh_keys(Ctx *c) {
                 continue;
             if (!(f = open_shown(c, shown))) continue;
             while ((r = read_line(f, line, sizeof(line))) != 0) {
-                char *tok[64], *s = line, key[256], detail[INV_PATH + 640], hex[2 * HASH_BYTES + 1], comment[256] = "";
-                int n = 0, i;
+                char *tok[64], *s = line, key[256], hex[2 * HASH_BYTES + 1], comment[256] = "";
+                char detail[INV_LINE + INV_PATH + 512], options[INV_LINE] = "";
+                int n = 0, i, j;
+                size_t ol = 0;
                 if (r < 0) { note(c->notes, "linha longa ou inválida ignorada: %s", shown); continue; }
                 /* Fields split on blanks, except inside "..." in the options (sshd's rule):
                  * command="echo ssh-rsa x" is one field, not a key. */
@@ -777,39 +937,56 @@ static void collect_ssh_keys(Ctx *c) {
                 }
                 for (i = 0; i + 1 < n && !key_type(tok[i]); ++i) {}
                 if (i + 1 >= n) continue;
+                for (j = 0; j < i; ++j) {
+                    int w = snprintf(options + ol, sizeof(options) - ol, "%s%s", j ? " " : "", tok[j]);
+                    if (w < 0 || (size_t)w >= sizeof(options) - ol) break;
+                    ol += (size_t)w;
+                }
                 sha256_hex(tok[i + 1], strlen(tok[i + 1]), HASH_BYTES, hex);
                 if (i + 2 < n) snprintf(comment, sizeof(comment), "%s", tok[i + 2]);
                 snprintf(key, sizeof(key), "%s:%s", us->name, hex);
-                snprintf(detail, sizeof(detail), "tipo=%s comentario=%s opcoes=%s arquivo=%s", tok[i],
-                         comment[0] ? comment : "-", i ? "sim" : "nao", shown);
+                /* The options go last and whole: command="...", from="..." change what the key can do. */
+                snprintf(detail, sizeof(detail), "tipo=%s comentario=%s arquivo=%s opcoes=%s", tok[i],
+                         comment[0] ? comment : "-", shown, options[0] ? options : "-");
                 inv_add(c->out, "chave_ssh", key, detail);
             }
-            fclose(f);
+            close_read(c, f, shown);
         }
     }
 }
 
-void inventory_collect(const char *root, InvList *out, InvList *notes) {
+int inventory_collect(const char *root, InvList *out, InvList *notes) {
     static const char *const perm_roots[] = {"/bin", "/sbin", "/usr", "/opt", "/etc"};
     Ctx c;
     size_t i, n;
+    int ok;
     memset(&c, 0, sizeof(c));
     snprintf(c.root, sizeof(c.root), "%s", root ? root : "");
     n = strlen(c.root);
     while (n && c.root[n - 1] == '/') c.root[--n] = 0;
     c.out = out;
     c.notes = notes;
+    if (c.root[0] && !realpath(c.root, c.root_real)) {
+        note(notes, "raiz inexistente: %s", c.root);
+        return 0;
+    }
 
-    collect_users(&c);
-    collect_admins(&c);
-    collect_ports(&c);
-    for (i = 0; i < sizeof(perm_roots) / sizeof(perm_roots[0]); ++i) scan_perms(&c, perm_roots[i], 24, (dev_t)-1);
-    collect_tracked(&c);
-    collect_ssh_keys(&c);
+    ok = collect_users(&c);
+    if (ok) {
+        collect_admins(&c);
+        collect_ports(&c);
+        for (i = 0; i < sizeof(perm_roots) / sizeof(perm_roots[0]); ++i)
+            scan_perms(&c, perm_roots[i], 24, (dev_t)-1);
+        collect_tracked(&c);
+        collect_ssh_keys(&c);
+    } else {
+        note(notes, "sem /etc/passwd legível: não parece um sistema Linux");
+    }
 
     free(c.users);
     inv_finish(out);
     inv_finish(notes);
+    return ok;
 }
 
 #endif
