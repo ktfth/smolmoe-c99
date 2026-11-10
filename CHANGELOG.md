@@ -28,6 +28,44 @@
 - Inventário: itens grandes demais (link com destino longo, centenas de sockets na mesma porta) tornavam o relatório
   ilegível para o próprio `--comparar`; agora são cortados e marcados. Detalhes repetidos na mesma chave aparecem uma
   vez só.
+- Inventário: contas que a glibc trata como root sumiam do relatório. Uid `-0`, `+0`, ` 0` ou `00000000000`, linha
+  sem os últimos campos, espaço antes do nome, byte nulo depois de uma conta válida, nome, home ou shell grandes e
+  linha de mais de 8 KB descartavam a conta. O `/etc/passwd` agora é lido como o `nss_files` da glibc lê, e a conta
+  estranha vira alerta `conta_anormal` com nome, uid e linha. Um teste antigo exigia esconder `neg:x:-0:0`; ele foi
+  invertido. Um comentário depois de espaços (`  #x:x:0:0...`) não vira mais uma conta.
+- Inventário: o `--comparar` não acusava uma segunda linha ruim no `/etc/passwd`, porque todas recebiam a mesma nota e
+  notas iguais viram uma só. Cada nota agora leva o número da linha.
+- Inventário: um usuário comum travava a execução do root. Um FIFO no lugar de `authorized_keys` bloqueava na
+  abertura, um FIFO com bytes nulos ou um link para `/dev/zero` faziam a leitura nunca acabar, e um arquivo esparso de
+  terabytes era lido ou passado no hash inteiro. Só arquivo comum é lido, conferido no descritor aberto, com limite de
+  bytes por arquivo (64 MiB de texto, 256 MiB de hash). O resto vira alerta `nao_regular` ou nota. Corrigidos por
+  revisão, sem teste que falhe antes (reproduzir exigiria um ponto de injeção no código): a troca do arquivo por um
+  FIFO entre o `lstat` e a abertura no hash, o link para `/dev/zero` na máquina viva e a leitura com o euid do dono
+  (os testes não rodam como root).
+- Inventário: linha longa de `authorized_keys` ou de grupo de admin escondia a chave ou o membro com uma nota
+  genérica; agora é alerta. Falha de abertura que não seja "não existe" vira nota com o motivo.
+- Inventário: milhares de brancos antes de uma linha escondiam uma conta root no `/etc/passwd` e uma senha vazia no
+  `/etc/shadow`. Os brancos agora são pulados como a glibc pula, sem ocupar a linha. O shadow passa a seguir o
+  parser da glibc: campos até `sp_max` e nome maior que a linha como alerta `shadow_anormal`. O `\r` final fica no
+  último campo, e a última linha recuada e sem `\n` é lida como a glibc 2.30+ a lê (com os últimos bytes
+  repetidos).
+- Inventário: pertencer a um grupo de admin por gid passava batido (`sudo2:x:27:ana`, ` sudo:x:27:bia`) e já existia
+  antes deste trabalho. Agora vale o gid, como para o `initgroups` e o sudo, e um nome ou gid diferente do canônico
+  vira alerta `grupo_anormal`.
+- Inventário: o tipo do arquivo é conferido antes de abrir, e não só depois, porque abrir um dispositivo já tem
+  efeito (`/dev/watchdog` arma na abertura). O hash abre com `O_NOFOLLOW`. Na máquina viva, os arquivos das homes
+  são abertos como o dono (grupos, egid e euid), como o sshd faz, e não são abertos se a troca não pegar.
+- Inventário: os membros de grupo de admin agora são lidos como o `initgroups` lê, que é quem dá o privilégio.
+  Uma linha comentada (`#x:x:27:ana`) dá o sudo e não aparecia; um membro depois de `, ` aparecia com o espaço; e a
+  última linha recuada aparecia com o membro trocado (`anana`). O shadow segue o parser da glibc campo a campo, e uma
+  linha com 10 campos não inventa mais `senha_vazia`. A cauda repetida da glibc vale também para linhas recuadas com
+  byte nulo. Um membro com branco ou `\r` no fim (`ana `), que não é a conta `ana`, vem marcado no detalhe.
+- Inventário: o `--comparar` aceita um pipe como relatório (`<(ssh host ...)`). O `/etc/nsswitch.conf` entrou na
+  lista de `config`.
+
+### Mudado
+- `smolmoe-inventario` saiu de `make` e de `make test-unit`: `make inventario` compila e roda os testes dele. O CI
+  roda esse alvo no Linux, ARM64, macOS e Windows, e o `make sanitize` também.
 
 ## 0.5.0 — 2026-11-08
 
