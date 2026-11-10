@@ -186,6 +186,7 @@ Qualquer linha digitada começando com `!` roda diretamente no shell do sistema 
 | `--prompt TEXTO` | — | Gera uma única resposta e encerra |
 | `--system TEXTO` | PT-BR curto | Define o prompt de sistema do chat |
 | `--no-tools` | ferramentas ligadas | Desativa `data_atual`, `dias_ate`, `calcular`, `converter` e `contar` no chat |
+| `--tools LISTA` | todas | Oferece só as ferramentas da lista, separadas por vírgula (ex.: `--tools data_atual`) |
 | `--prefix-cache ARQUIVO` | desligado | Guarda o prompt de sistema processado; os chats seguintes pulam o prefill dele |
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa data/hora para as ferramentas |
 | `--shell NOME\|CAMINHO` | shell pai | Define o shell usado por `!comando` (`pwsh`, `bash`, `cmd`...) |

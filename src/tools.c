@@ -903,9 +903,63 @@ static int calculate(const Call *c, const char *user_text, char result[TOOL_RESU
     return 1;
 }
 
+/* ---- the tools on offer (--tools) ------------------------------------------ */
+
+/* Same order as TOOL_SPECS. */
+static const char *const TOOL_NAMES[] = {"data_atual", "dias_ate", "calcular", "converter", "contar"};
+#define TOOL_COUNT (sizeof(TOOL_NAMES) / sizeof(TOOL_NAMES[0]))
+#define ALL_TOOLS ((1u << TOOL_COUNT) - 1)
+static unsigned tools_on = ALL_TOOLS;
+
+static int tool_index(const char *name, size_t len) {
+    size_t i;
+    for (i = 0; i < TOOL_COUNT; ++i)
+        if (strlen(TOOL_NAMES[i]) == len && !strncmp(TOOL_NAMES[i], name, len)) return (int)i;
+    return -1;
+}
+
+static int on(const char *name) {
+    int i = tool_index(name, strlen(name));
+    return i >= 0 && (tools_on >> i & 1u);
+}
+
+int tools_select(const char *list) {
+    unsigned mask = 0;
+    const char *p = list;
+    if (!list) {
+        tools_on = ALL_TOOLS;
+        return 1;
+    }
+    while (*p) {
+        size_t len = strcspn(p, ",");
+        int i = tool_index(p, len);
+        if (i < 0) return 0;
+        mask |= 1u << i;
+        p += len;
+        if (*p == ',') ++p;
+    }
+    if (!mask) return 0;
+    tools_on = mask;
+    return 1;
+}
+
+void tools_on_offer(char *out, size_t cap) {
+    size_t i, n = 0;
+    if (!cap) return;
+    out[0] = 0;
+    for (i = 0; i < TOOL_COUNT; ++i) {
+        int w;
+        if (!(tools_on >> i & 1u)) continue;
+        w = snprintf(out + n, cap - n, "%s%s", n ? ", " : "", TOOL_NAMES[i]);
+        if (w < 0 || (size_t)w >= cap - n) return;
+        n += (size_t)w;
+    }
+}
+
 int tools_relevant(const char *user_text) {
-    return date_or_time_mentioned(user_text) || calc_relevant(user_text) || convert_relevant(user_text) ||
-           count_relevant(user_text);
+    return ((on("data_atual") || on("dias_ate")) && date_or_time_mentioned(user_text)) ||
+           (on("calcular") && calc_relevant(user_text)) || (on("converter") && convert_relevant(user_text)) ||
+           (on("contar") && count_relevant(user_text));
 }
 
 static int current_date_question(const char *user_text) {
@@ -918,11 +972,12 @@ static int current_date_question(const char *user_text) {
 }
 
 const char *tools_forced_choice(const char *user_text) {
+    const char *tool = NULL;
     if (date_question(user_text)) return NULL;
-    if (count_relevant(user_text)) return "contar";
-    if (convert_relevant(user_text)) return "converter";
-    if (calc_relevant(user_text)) return "calcular";
-    return NULL;
+    if (count_relevant(user_text)) tool = "contar";
+    else if (convert_relevant(user_text)) tool = "converter";
+    else if (calc_relevant(user_text)) tool = "calcular";
+    return tool && on(tool) ? tool : NULL;
 }
 
 const char *tools_date_choice(const char *user_text) {
@@ -933,8 +988,8 @@ const char *tools_date_choice(const char *user_text) {
     if (!date_question(user_text) || calc_relevant(user_text) || convert_relevant(user_text) ||
         count_relevant(user_text))
         return NULL;
-    if (date_find(user_text, reference, &named, 1) > 0) return "dias_ate";
-    if (current_date_question(user_text)) return "data_atual";
+    if (date_find(user_text, reference, &named, 1) > 0) return on("dias_ate") ? "dias_ate" : NULL;
+    if (current_date_question(user_text)) return on("data_atual") ? "data_atual" : NULL;
     return NULL;
 }
 
@@ -963,7 +1018,7 @@ int tool_call_grounded(const char *call, size_t n, const char *user_text) {
     reference.year = 2000; /* any valid day: only whether a date is named matters */
     reference.month = 1;
     reference.day = 1;
-    if (!parse_call(call, n, &c)) return 0;
+    if (!parse_call(call, n, &c) || !on(c.name)) return 0; /* a tool not on offer is never grounded */
     if (!strcmp(c.name, "data_atual")) return 1;
     if (!strcmp(c.name, "calcular")) return expression_arg(&c) && calc_grounded(expression_arg(&c), user_text);
     if (!strcmp(c.name, "converter"))
@@ -982,6 +1037,7 @@ int tool_run(const char *call, size_t n, const char *user_text, const ToolClock 
         return error_result(result, "chamada inválida: use {\"name\": ..., \"arguments\": {...}}");
     }
     snprintf(name, TOOL_NAME_MAX, "%s", c.name);
+    if (!on(c.name)) return error_result(result, "função desconhecida: %s", c.name);
     if (!strcmp(c.name, "data_atual")) return current_date(now, result);
     if (!strcmp(c.name, "dias_ate")) return days_until(&c, user_text, now, result);
     if (!strcmp(c.name, "calcular")) return calculate(&c, user_text, result);
@@ -1031,6 +1087,7 @@ size_t tools_system_prompt(const char *system, char *out, size_t cap) {
     if (w < 0 || (size_t)w >= cap) return 0;
     n = (size_t)w;
     for (i = 0; i < sizeof(TOOL_SPECS) / sizeof(TOOL_SPECS[0]); ++i) {
+        if (!(tools_on >> i & 1u)) continue;
         w = snprintf(out + n, cap - n, "\n%s", TOOL_SPECS[i]);
         if (w < 0 || (size_t)w >= cap - n) return 0;
         n += (size_t)w;

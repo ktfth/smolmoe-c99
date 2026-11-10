@@ -34,6 +34,7 @@ typedef struct Options {
     const char *model, *config, *tokenizer, *prompt, *prompt_file, *system;
     const char *stats, *trace, *token_ids, *prefix_cache;
     const char *shell; /* --shell */
+    const char *tools; /* --tools: the names on offer, or NULL for all */
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
     int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock, profile;
@@ -75,6 +76,7 @@ static void usage(FILE *out) {
           "  --prefix-cache FILE  keep the processed system prompt in FILE: later chats skip its prefill\n"
           "                       (checked against this model and prompt at every start; rebuilt when stale)\n"
           "  --no-tools           chat without the built-in tools (date, days until a date, calc, convert, count)\n"
+          "  --tools LIST         only these tools, comma-separated: data_atual,dias_ate,calcular,converter,contar\n"
           "  --now YYYY-MM-DDTHH:MM  fixed local time for the tools (default: the clock)\n"
           "  --shell NAME|PATH    shell for \"!command\" lines in the chat: pwsh, powershell, cmd, bash, sh...\n"
           "                       (default: the shell that started smolmoe, else the system's)\n"
@@ -115,6 +117,10 @@ static void parse_value(Options *o, const char *opt, const char *value) {
     else if (!strcmp(opt, "--prefix-cache")) o->prefix_cache = value;
     else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
     else if (!strcmp(opt, "--shell")) o->shell = value;
+    else if (!strcmp(opt, "--tools")) {
+        if (!tools_select(value)) die("--tools takes names among data_atual,dias_ate,calcular,converter,contar");
+        o->tools = value;
+    }
     else if (!strcmp(opt, "--now")) {
         if (!tool_clock_parse(value, &o->clock)) die("--now must be a local date and time as YYYY-MM-DDTHH:MM");
         o->fixed_clock = 1;
@@ -180,6 +186,7 @@ static void parse_args(int argc, char **argv, Options *o) {
     if (o->interactive && (o->prompt || o->prompt_file || o->trace || o->hash_logits || o->token_ids))
         die("interactive chat cannot be combined with a prompt or with --trace/--hash-logits/--token-ids");
     if (o->prefix_cache && !o->interactive) die("--prefix-cache is for the interactive chat");
+    if (o->tools && o->no_tools) die("--tools and --no-tools contradict each other");
     if (o->interactive && !o->tokens_given) o->tokens = DEFAULT_CHAT_TOKENS;
     if (!o->seed || !o->memory_mib || !o->batch) die("seed, memory budget and batch must be nonzero");
     if (o->perplexity) o->tokens = 0;
