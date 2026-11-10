@@ -65,7 +65,8 @@ nenhum relatório é gravado.
   - os brancos antes da linha são pulados, quantos forem, e comentários também;
   - campos que faltam ficam vazios, e a linha termina no primeiro byte nulo;
   - o `\r` final fica no último campo;
-  - o uid e o gid passam pelo `strtou32` (`-0`, `+0`, ` 0` e `000` são 0; `-1` é 4294967295);
+  - o uid, o gid e os números do shadow passam pelo `strtoul` e precisam caber em 32 bits (`-0`, `+0`, ` 0` e
+    `000` são 0; `4294967296` e `-1`, que dá a volta para além de 32 bits, fazem a glibc recusar a linha);
   - o shadow segue o parser da glibc (de 5 a 9 campos, conferido campo a campo com a `fgetspent`);
   - até um defeito da glibc 2.30+ é reproduzido: uma linha recuada que termina sem `\n` (a última) ou que tem byte
     nulo é lida com os últimos bytes repetidos, como o PAM a lê.
@@ -126,7 +127,9 @@ antigo precisa dar o novo). `SM_FUZZ_ITERS=20000 build/test-inventory` roda uma 
   não tem comentário no `/etc/passwd`: para ela, `#evil:x:0:0::/root:/bin/sh` (sete campos, uid e gid só com
   dígitos ou vazios) é uma conta que o `getpwnam` acha, de qualquer comprimento, com o uid módulo 2^32. O inventário
   a registra como nota (`comentário para a glibc, mas conta uid=0 para a musl`, com o uid que a musl lê), não como
-  alerta nem como `usuario`, e não confere a senha dela no shadow.
+  alerta nem como `usuario`, e não confere a senha dela no shadow. O mesmo vale para uma linha com uid ou gid vazio
+  (`vazio:x::0::/root:/bin/sh`), que a glibc recusa e a musl lê como 0: a nota diz `não é conta para a glibc, mas
+  conta uid=0 para a musl`.
 - **Só os arquivos locais.** Contas vindas de outro módulo NSS (LDAP, SSSD, um `libnss_*.so` plantado) não aparecem;
   o `/etc/nsswitch.conf` é acompanhado em `config`, então uma mudança nele aparece no `--comparar`. Linhas `+`/`-`
   do nss_compat em `/etc/passwd` são lidas como contas comuns; o que elas incluem do NIS/LDAP não é consultado.

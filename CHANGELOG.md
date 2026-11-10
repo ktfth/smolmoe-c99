@@ -64,7 +64,12 @@
   lista de `config`.
 - Inventário: na musl, uma linha `#evil:x:0:0::/root:/bin/sh` do `/etc/passwd` é conta uid 0, que o `getpwnam`
   acha, e o inventário a descartava em silêncio como comentário. Agora ela deixa uma nota com o número da linha e o
-  uid que a musl lê (módulo 2^32), também quando a linha passa de 8 KB.
+  uid que a musl lê (módulo 2^32), também quando a linha passa de 8 KB. Uma linha com uid vazio
+  (`vazio:x::0:...`), que a glibc recusa e a musl lê como uid 0, também diz isso na nota.
+- Inventário: um uid, gid ou número do shadow acima de 4294967295 (ou `-1`) era lido como 4294967295, e a linha
+  virava conta. A glibc 2.39 recusa essas linhas (conferido com `fgetpwent`, `fgetgrent` e `fgetspent`), e a musl lê
+  `4294967296` como uid 0: agora é nota, com o uid da musl. O fuzz confere também que todo `usuario` listado é uma
+  conta que a `fgetpwent` lê, com o mesmo uid.
 
 ### Mudado
 - `smolmoe-inventario` saiu de `make` e de `make test-unit`: `make inventario` compila e roda os testes dele. O CI

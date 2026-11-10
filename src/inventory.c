@@ -665,10 +665,11 @@ static int read_entry(FILE *f, char *buf, size_t cap, unsigned long long *left, 
     return r;
 }
 
-/* A uid or gid field read the way glibc's nss_files reads it (INT_FIELD over
- * strtou32): blanks, a sign and decimal digits, then nothing. "-1" wraps to
- * 4294967295 and anything above that saturates, as strtoul then the 32-bit clamp do.
- * Returns 0 when glibc rejects the line ("", "x", "1x": strtoul alone would say 0).
+/* A uid, gid or shadow number read the way glibc's nss_files reads it (INT_FIELD):
+ * blanks, a sign and decimal digits, then nothing, and strtoul's value must fit 32 bits.
+ * Returns 0 when glibc rejects the line: "", "x", "1x", and above 4294967295 or an
+ * overflow, which with the sign wrapping includes "-1" ("-18446744073709551615" is 1).
+ * Checked against glibc 2.39's fgetpwent, fgetgrent and fgetspent.
  * *canonical: the field is the number as printed, not "-0", "+0", " 0" or "007". */
 static int glibc_id(const char *s, unsigned long *out, int *canonical) {
     const char *p = s;
@@ -682,10 +683,9 @@ static int glibc_id(const char *s, unsigned long *out, int *canonical) {
         if (v > (ULLONG_MAX - d) / 10) over = 1;
         else v = v * 10 + d;
     }
-    if (!digits || *p) return 0;
-    if (over) v = ULLONG_MAX; /* strtoul's ERANGE value, whatever the sign */
-    else if (neg) v = 0 - v;
-    if (v > 0xFFFFFFFFull) v = 0xFFFFFFFFull;
+    if (!digits || *p || over) return 0;
+    if (neg) v = 0 - v;
+    if (v > 0xFFFFFFFFull) return 0;
     *out = (unsigned long)v;
     snprintf(printed, sizeof(printed), "%lu", *out);
     *canonical = !strcmp(printed, s);
@@ -729,6 +729,17 @@ static int musl_id(const char *s, unsigned long *out) {
     return !*s;
 }
 
+/* Whether musl reads a passwd line split into n (at most 7) fields as an account: seven fields with a
+ * digits-only (or empty, so 0) uid and gid. uid_text gets the uid musl reads, or keeps "?" when not seen.
+ * musl reads the whole line: in one cut here, only the fields seen are checked. */
+static int musl_account(char **fl, int n, int cut, char uid_text[24]) {
+    unsigned long uid = 0, gid = 0;
+    int ok = cut ? (n < 3 || musl_id(fl[2], &uid)) && (n < 4 || musl_id(fl[3], &gid))
+                 : n == 7 && musl_id(fl[2], &uid) && musl_id(fl[3], &gid);
+    if (ok && (!cut || n > 3)) snprintf(uid_text, 24, "%lu", uid);
+    return ok;
+}
+
 /* One /etc/passwd line (after the blanks read_entry skipped), read the way glibc's
  * nss_files reads it: comments skipped, missing fields empty, the line ending at a NUL. An account glibc
  * accepts is never dropped: one that does not fit the report or is not written the
@@ -742,19 +753,12 @@ static void passwd_line(Ctx *c, char *line, int r, int blanks, unsigned long no)
     int uid_known, gid_known;
     if (!*line) return;
     if (*line == '#') {
-        /* musl has no comments here: seven fields with a digits-only (or empty, so 0) uid and gid are an
-         * account named "#..." that its getpwnam finds. glibc skips the line, so a note keeps it in sight.
-         * musl reads the whole line: in one cut here, only the fields seen are checked. */
-        unsigned long muid = 0, mgid = 0;
-        int musl;
+        /* musl has no comments here: the line may be an account named "#..." that its getpwnam finds.
+         * glibc skips the line, so a note keeps it in sight. */
         n = split_colons(line, fl, 7);
-        musl = cut ? (n < 3 || musl_id(fl[2], &muid)) && (n < 4 || musl_id(fl[3], &mgid))
-                   : n == 7 && musl_id(fl[2], &muid) && musl_id(fl[3], &mgid);
-        if (musl) {
-            if (!cut || n > 3) snprintf(uid_text, sizeof(uid_text), "%lu", muid);
+        if (musl_account(fl, n, cut, uid_text))
             note(c->notes, "/etc/passwd linha %lu: comentário para a glibc, mas conta uid=%s para a musl%s", no,
                  uid_text, cut ? " (linha longa demais)" : "");
-        }
         return;
     }
     n = split_colons(line, fl, 7);
@@ -766,7 +770,12 @@ static void passwd_line(Ctx *c, char *line, int r, int blanks, unsigned long no)
     if (uid_known) uid_ok = glibc_id(fl[2], &u.uid, &uid_canon);
     if (gid_known) gid_ok = glibc_id(fl[3], &u.gid, &gid_canon);
     if ((uid_known && !uid_ok) || (gid_known && !gid_ok) || (!cut && n < 4)) {
-        note(c->notes, "/etc/passwd linha %lu: não é conta para a glibc, ignorada", no);
+        /* An empty uid or gid: glibc rejects it, musl reads 0. */
+        if (musl_account(fl, n, cut, uid_text))
+            note(c->notes, "/etc/passwd linha %lu: não é conta para a glibc, mas conta uid=%s para a musl%s", no,
+                 uid_text, cut ? " (linha longa demais)" : "");
+        else
+            note(c->notes, "/etc/passwd linha %lu: não é conta para a glibc, ignorada", no);
         return;
     }
     fits = !cut && fl[0][0] && strlen(fl[0]) < sizeof(u.name) && strlen(fl[5]) < sizeof(u.home) &&

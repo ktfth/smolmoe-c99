@@ -1077,6 +1077,25 @@ static void fuzz_collection(void) {
                               pw->pw_name, it);
                 fclose(pf);
             }
+            /* The other way: every user listed is an account glibc reads, with the same uid. Names
+             * shown with '?' (a control byte) and nss_compat lines are left out. */
+            for (i = 0; i < items.count; ++i) {
+                const char *s = items.items[i], *tab = strchr(s + 8, '\t');
+                char name[INV_ITEM_MAX];
+                unsigned long uid = 0;
+                int found = 0;
+                if (strncmp(s, "usuario\t", 8) || !tab || s[8] == '+' || s[8] == '-') continue;
+                memcpy(name, s + 8, (size_t)(tab - s - 8));
+                name[tab - s - 8] = 0;
+                if (strchr(name, '?')) continue;
+                CHECK(sscanf(tab + 1, "uid=%lu", &uid) == 1, "user item without a uid: [%s]", s);
+                if ((pf = fopen(p, "rb")) != NULL) {
+                    while ((pw = fgetpwent(pf)) != NULL)
+                        if (!strcmp(pw->pw_name, name) && (unsigned long)pw->pw_uid == uid) found = 1;
+                    fclose(pf);
+                }
+                CHECK(found, "user [%s] uid=%lu is not an account glibc reads (iteration %u)", name, uid, it);
+            }
             /* And every empty password glibc reads from the shadow file is an alert. */
             snprintf(p, sizeof(p), "%s/etc/shadow", root);
             if ((pf = fopen(p, "rb")) != NULL) {
@@ -1342,6 +1361,9 @@ static void test_hidden_accounts(void) {
     n += (size_t)sprintf(text + n, "#musl:x::0::/root:/bin/sh\n# a comment: x:0:0\n");         /* 16, 17 */
     n += (size_t)sprintf(text + n, "#wrap:x:4294967296:0::/root:/bin/sh\n");                     /* 18 */
     n += (size_t)sprintf(text + n, "#longo:x:0:0:%s:/root:/bin/sh\n", gecos);                    /* 19 */
+    n += (size_t)sprintf(text + n, "vazio:x::0::/root:/bin/sh\nword:x:abc:0::/:/bin/sh\n");     /* 20, 21 */
+    n += (size_t)sprintf(text + n, "wrap:x:4294967296:0::/root:/bin/sh\ntop:x:4294967295:0::/:/bin/sh\n"); /* 22, 23 */
+    n += (size_t)sprintf(text + n, "g1:x:0:4294967296::/root:/bin/sh\n");                         /* 24 */
     put_bytes("/etc/passwd", text, n, 0644);
     collect(&items, &notes);
 
@@ -1354,10 +1376,9 @@ static void test_hidden_accounts(void) {
     CHECK(has_prefix(&items, "alerta\tconta_anormal:plus\t") && has_prefix(&items, "alerta\tconta_anormal:sp\t") &&
               has_prefix(&items, "alerta\tconta_anormal:zeros\t"),
           "uid 0 written as +0, \" 0\" or with leading zeros not flagged");
-    /* strtoul wraps -1 and strtou32 saturates it: glibc's uid is 4294967295, not root. */
-    CHECK(has(&items, "usuario\tminus1\tuid=4294967295 shell=/bin/bash"), "uid -1 not read as glibc does");
-    d = item_detail(&items, "alerta\tconta_anormal:minus1\t");
-    CHECK(d && strstr(d, "uid=4294967295"), "uid -1 not flagged: %s", d ? d : "-");
+    /* strtoul wraps -1 past 32 bits, and glibc 2.39 rejects the line; musl stops at the sign and rejects it too. */
+    CHECK(!any_contains(&items, "minus1") && any_contains(&notes, "linha 6: não é conta para a glibc, ignorada"),
+          "uid -1 not rejected as glibc does");
     CHECK(has_prefix(&items, "alerta\tuid0:short\t"), "account without its last fields hidden");
     CHECK(!any_contains(&items, "hidden"), "a comment after blanks read as an account");
     /* musl reads a comment shaped like an account as one: glibc does not, so it is a note, not an item. */
@@ -1369,6 +1390,17 @@ static void test_hidden_accounts(void) {
     CHECK(any_contains(&notes, "linha 18: comentário para a glibc, mas conta uid=0 para a musl") &&
               any_contains(&notes, "linha 19: comentário para a glibc, mas conta uid=0 para a musl (linha longa"),
           "a wrapped uid or a long comment line hid a musl uid 0 account");
+    /* An empty uid: glibc rejects the line, musl reads uid 0. */
+    CHECK(any_contains(&notes, "linha 20: não é conta para a glibc, mas conta uid=0 para a musl") &&
+              any_contains(&notes, "linha 21: não é conta para a glibc, ignorada"),
+          "an empty uid that musl reads as 0 not told apart in the note");
+    /* Past 32 bits glibc rejects the line, and musl wraps 4294967296 to root; 4294967295 still fits. */
+    CHECK(!any_contains(&items, "wrap") &&
+              any_contains(&notes, "linha 22: não é conta para a glibc, mas conta uid=0 para a musl") &&
+              has(&items, "usuario\ttop\tuid=4294967295 shell=/bin/sh"),
+          "a uid past 32 bits read as an account, or 4294967295 lost");
+    CHECK(!has_prefix(&items, "usuario\tg1\t") && !has_prefix(&items, "alerta\tuid0:g1\t") && any_contains(&notes, "linha 24: não é conta para a glibc, mas conta uid=0"),
+          "a gid past 32 bits read as an account");
     CHECK(has_prefix(&items, "alerta\tuid0:lead\t"), "blanks before a name: glibc reads the name without them");
     CHECK(has_prefix(&items, "alerta\tuid0:nulroot\t"), "account before a NUL hidden");
     CHECK(!has_prefix(&items, "usuario\tbighome") && !has_prefix(&items, "usuario\tevil") &&
@@ -1454,6 +1486,9 @@ static void test_shadow_and_groups(void) {
     memset(text + n, ' ', 9000);
     n += 9000;
     n += (size_t)sprintf(text + n, "bob::19000:0:99999:7:::\n");
+    /* Numbers past 32 bits: glibc 2.39 rejects big and neg1; "-18446744073709551615" wraps to 1. */
+    n += (size_t)sprintf(text + n, "big::4294967296:0:99999:7:::\nneg1::19000:-1:99999:7:::\n");
+    n += (size_t)sprintf(text + n, "one::-18446744073709551615:0:99999:7:::\n");
     /* Lines glibc's shadow parser rejects (it needs the fields up to sp_max): no password to report. */
     memcpy(text + n, rejected, sizeof(rejected) - 1);
     n += sizeof(rejected) - 1;
@@ -1466,6 +1501,9 @@ static void test_shadow_and_groups(void) {
               !has_prefix(&items, "alerta\tsenha_vazia:ten"),
           "empty password invented from a shadow line glibc rejects");
     CHECK(has(&items, "alerta\tsenha_vazia:nine\tentra sem senha"), "9-field shadow line with an empty flag hidden");
+    CHECK(!has_prefix(&items, "alerta\tsenha_vazia:big") && !has_prefix(&items, "alerta\tsenha_vazia:neg1") &&
+              has(&items, "alerta\tsenha_vazia:one\tentra sem senha"),
+          "a shadow number past 32 bits not read as glibc does");
     /* An indented line with a NUL also keeps its last byte twice: " nul2::1::" is read as "nul2::1:::". */
     CHECK(has(&items, "alerta\tsenha_vazia:nul2\tentra sem senha"), "indented shadow line with a NUL hidden");
     CHECK(has(&items, "alerta\tsenha_vazia:zed\tentra sem senha"), "indented last shadow line without a newline hidden");
