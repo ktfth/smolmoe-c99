@@ -1,0 +1,1235 @@
+{
+  "versao": 2,
+  "itens": [
+    {
+      "id": "win-001",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O disco C: do meu Windows está quase cheio. O que posso apagar com segurança, e com qual ferramenta do próprio Windows?",
+      "obrigatorios": [
+        "Limpeza de Disco|cleanmgr|Sensor de Armazenamento|Storage Sense|Sistema\\s*>\\s*Armazenamento"
+      ],
+      "proibidos": [
+        "Remove-Item[^\\n]*\\\\Windows\\\\(System32|WinSxS)",
+        "\\brd\\s+/s[^\\n]*WinSxS"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-002",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "A pasta C:\\Windows\\WinSxS está com 12 GB. Posso apagá-la? Como reduzo o tamanho dela?",
+      "obrigatorios": [
+        "n[a\\u00E3]o\\b.{0,40}(apag|delet|remov)|nunca\\b.{0,20}(apag|delet|remov)",
+        "StartComponentCleanup|\\bDISM\\b|Limpeza de Disco|cleanmgr"
+      ],
+      "proibidos": [
+        "Remove-Item[^\\n]*WinSxS",
+        "\\b(rd|rmdir|del)\\b[^\\n]*WinSxS"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-003",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Windows Update fica travado em 0% ao baixar. Qual é o procedimento padrão para destravar?",
+      "obrigatorios": [
+        "SoftwareDistribution|solu[c\\u00E7][a\\u00E3]o de problemas|solucionador"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-004",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Depois de uma atualização, o Windows não inicia e cai no reparo automático. O que tentar primeiro?",
+      "obrigatorios": [
+        "Restaura[c\\u00E7][a\\u00E3]o do Sistema|ponto de restaura|desinstalar (as )?atualiza|modo de seguran[c\\u00E7]a|Inicializa[c\\u00E7][a\\u00E3]o Avan[c\\u00E7]ada|Op[c\\u00E7][o\\u00F5]es avan[c\\u00E7]adas|WinRE"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-005",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como vejo qual programa está usando a porta 8080 no Windows?",
+      "obrigatorios": [
+        "netstat[^\\n]*-a?n?o|Get-NetTCPConnection",
+        "\\bPID\\b|OwningProcess|tasklist|Get-Process"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-006",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Windows entra com um perfil temporário e diz que o perfil do usuário não pôde ser carregado. Onde fica a configuração dos perfis no registro?",
+      "obrigatorios": [
+        "ProfileList"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-007",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O computador está lento e o Gerenciador de Tarefas mostra o disco a 100%. Quais são as causas comuns e onde investigo?",
+      "obrigatorios": [
+        "Monitor de Recursos|resmon|perfmon",
+        "Search|SysMain|Superfetch|antiv[i\\u00ED]rus|Defender|Windows Update|HDD|disco (r[i\\u00ED]gido|mec[a\\u00E2]nico)|SMART|chkdsk"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-008",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como confiro a saúde do SSD no Windows sem baixar nenhum programa?",
+      "obrigatorios": [
+        "Get-PhysicalDisk|Get-StorageReliabilityCounter|HealthStatus|Integridade d[oa] (disco|unidade)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-009",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Windows Defender bloqueia um programa em que eu confio. Como libero só esse programa?",
+      "obrigatorios": [
+        "exclus[a\\u00E3]o|Add-MpPreference|ExclusionPath|Permitir (um )?aplicativo"
+      ],
+      "proibidos": [
+        "DisableRealtimeMonitoring\\s+\\$?true"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-010",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como encontro a chave de recuperação do BitLocker do meu computador?",
+      "obrigatorios": [
+        "account\\.microsoft\\.com|conta Microsoft|aka\\.ms/myrecoverykey|manage-bde[^\\n]*-protectors|Get-BitLockerVolume|Active Directory|Entra|Azure"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-011",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "A impressora parou e a fila de impressão não esvazia. Como limpo a fila?",
+      "obrigatorios": [
+        "[Ss]pooler",
+        "PRINTERS"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-012",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Windows mostra um endereço IP 169.254.x.x e fica sem internet. O que isso significa e o que faço?",
+      "obrigatorios": [
+        "APIPA|DHCP",
+        "ipconfig\\s+/(release|renew)|roteador|modem|servidor DHCP"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-013",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como reseto a pilha de rede do Windows (Winsock e TCP/IP)?",
+      "obrigatorios": [
+        "netsh\\s+winsock\\s+reset",
+        "netsh\\s+int(erface)?\\s+ip\\s+reset"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-014",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Um site abre pelo endereço IP, mas não pelo nome. Onde está o problema e como testo?",
+      "obrigatorios": [
+        "\\bDNS\\b",
+        "nslookup|Resolve-DnsName|flushdns"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-015",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como vejo no Windows os eventos de desligamento inesperado, como queda de energia ou travamento?",
+      "obrigatorios": [
+        "Kernel-Power|\\b41\\b|\\b6008\\b"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-016",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Deu tela azul com CRITICAL_PROCESS_DIED. Onde ficam os arquivos de despejo para investigar?",
+      "obrigatorios": [
+        "Minidump|MEMORY\\.DMP"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-017",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "A Microsoft Store sumiu do Windows. Como reinstalo?",
+      "obrigatorios": [
+        "Get-AppxPackage|Add-AppxPackage|wsreset|winget"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-018",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como agendo uma verificação de disco (chkdsk) no C: para a próxima inicialização?",
+      "obrigatorios": [
+        "chkdsk(\\.exe)?\\s+C:\\s*/[fr]"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-019",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O que é o arquivo pagefile.sys, e posso apagá-lo para liberar espaço?",
+      "obrigatorios": [
+        "mem[o\\u00F3]ria virtual|arquivo de pagina[c\\u00E7][a\\u00E3]o",
+        "n[a\\u00E3]o\\b.{0,40}(apag|delet|remov)|Op[c\\u00E7][o\\u00F5]es de desempenho|sysdm\\.cpl|Configura[c\\u00E7][o\\u00F5]es avan[c\\u00E7]adas do sistema"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-020",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como desativo programas que iniciam com o Windows sem usar programa externo?",
+      "obrigatorios": [
+        "Gerenciador de Tarefas|Aplicativos de inicializa[c\\u00E7][a\\u00E3]o|Inicializar|Inicializa[c\\u00E7][a\\u00E3]o"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-021",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como crio um usuário local administrador pelo PowerShell?",
+      "obrigatorios": [
+        "New-LocalUser|net\\s+user\\s+\\S+[^\\n]*/add",
+        "Add-LocalGroupMember|net\\s+localgroup\\s+(Administradores|Administrators)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-022",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Esqueci a senha de um usuário local, mas tenho outra conta administradora. Como troco a senha dele?",
+      "obrigatorios": [
+        "Set-LocalUser|net\\s+user\\s+\\S+\\s|lusrmgr|Gerenciamento do Computador|Contas de usu[a\\u00E1]rio"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-023",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O relógio do Windows está errado e não sincroniza sozinho. Como forço a sincronização?",
+      "obrigatorios": [
+        "w32tm\\s+/resync|Sincronizar agora|w32time"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-024",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como vejo a versão e o número exato do build do Windows?",
+      "obrigatorios": [
+        "winver|Get-ComputerInfo|systeminfo|OSVersion|OsBuildNumber|CurrentBuild|\\bver\\b"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-025",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Onde fica o arquivo hosts no Windows, e como o edito?",
+      "obrigatorios": [
+        "drivers\\\\etc\\\\hosts",
+        "administrador"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-026",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como mapeio a pasta de rede \\\\servidor\\dados como a unidade Z: pelo terminal?",
+      "obrigatorios": [
+        "net\\s+use\\s+Z:|New-PSDrive[^\\n]*-Name\\s+Z"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-027",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Windows não reconhece um pendrive. Como vejo se o disco aparece e dou uma letra para ele?",
+      "obrigatorios": [
+        "Gerenciamento de Disco|diskmgmt|Get-Disk|diskpart",
+        "Alterar letra|NewDriveLetter|assign\\s+letter"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-028",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como exporto para um arquivo a lista de programas instalados no Windows?",
+      "obrigatorios": [
+        "winget\\s+(list|export)|Get-ItemProperty[^\\n]*Uninstall|Get-Package",
+        "Out-File|Export-Csv|\\s>\\s|-o\\s|--output"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-029",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como crio um ponto de restauração antes de mexer no registro?",
+      "obrigatorios": [
+        "Checkpoint-Computer|Prote[c\\u00E7][a\\u00E3]o do Sistema|SystemPropertiesProtection|rstrui"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-030",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como faço backup de uma chave do registro antes de alterá-la?",
+      "obrigatorios": [
+        "reg(\\.exe)?\\s+export|Exportar"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-031",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Explorador de Arquivos travou e a barra de tarefas sumiu. Como reinicio só o Explorador?",
+      "obrigatorios": [
+        "explorer",
+        "Gerenciador de Tarefas|taskkill|Stop-Process|Reiniciar"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-032",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como vejo a saúde da bateria do notebook no Windows?",
+      "obrigatorios": [
+        "powercfg(\\.exe)?\\s+/batteryreport"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-033",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como confiro pelo terminal se o meu Windows está ativado?",
+      "obrigatorios": [
+        "slmgr(\\.vbs)?\\s+/(xpr|dli|dlv)|Ativa[c\\u00E7][a\\u00E3]o"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-034",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Uma atualização específica (KB) está causando problema. Como desinstalo só ela?",
+      "obrigatorios": [
+        "wusa(\\.exe)?\\s+/uninstall\\s+/kb:?\\d*|Desinstalar atualiza[c\\u00E7][o\\u00F5]es|Hist[o\\u00F3]rico de atualiza[c\\u00E7][o\\u00F5]es"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-035",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O sfc não conseguiu corrigir os arquivos do sistema. Qual é o passo seguinte?",
+      "obrigatorios": [
+        "DISM(\\.exe)?\\s+/Online\\s+/Cleanup-Image\\s+/RestoreHealth"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-036",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Onde fica o log detalhado do sfc depois de uma verificação?",
+      "obrigatorios": [
+        "CBS\\.log|Logs\\\\CBS"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-037",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como desligo a Inicialização Rápida do Windows, que atrapalha o dual boot com Linux?",
+      "obrigatorios": [
+        "powercfg(\\.exe)?\\s+/h(ibernate)?\\s+off|HiberbootEnabled|fun[c\\u00E7][a\\u00E3]o dos bot[o\\u00F5]es|Ligar inicializa[c\\u00E7][a\\u00E3]o r[a\\u00E1]pida"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-038",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O teclado digita símbolos trocados no Windows (o ç vira ;). Como corrijo o layout?",
+      "obrigatorios": [
+        "ABNT2?|Set-WinUserLanguageList|Portugu[e\\u00EA]s \\(Brasil"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-039",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como vejo e encerro pelo terminal um processo travado no Windows?",
+      "obrigatorios": [
+        "tasklist|Get-Process",
+        "taskkill|Stop-Process"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "win-040",
+      "bloco": "windows",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O Windows diz que um arquivo está em uso e não deixa apagar. Como descubro qual processo o prende?",
+      "obrigatorios": [
+        "Monitor de Recursos|resmon|Identificadores Associados|handle(64)?(\\.exe)?|openfiles"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-001",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O disco raiz do meu Ubuntu encheu. Como descubro o que está ocupando espaço?",
+      "obrigatorios": [
+        "\\bdu\\b|ncdu",
+        "\\bdf\\b"
+      ],
+      "proibidos": [
+        "\\brm\\s+-[a-zA-Z]*r[a-zA-Z]*\\s+/(\\s|$)"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-002",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O /var/log/journal está enorme no Debian. Como reduzo sem apagar os arquivos à mão?",
+      "obrigatorios": [
+        "journalctl\\s+--vacuum-(size|time)|SystemMaxUse"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*/var/log/journal"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-003",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O apt diz 'Could not get lock /var/lib/dpkg/lock-frontend'. O que faço?",
+      "obrigatorios": [
+        "\\b(lsof|fuser|ps)\\b|outro (apt|processo)|unattended-upgrades|aguard|espere"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*lock"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-004",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Uma instalação pelo apt foi interrompida e agora o dpkg reclama. Como termino a configuração?",
+      "obrigatorios": [
+        "dpkg\\s+--configure\\s+-a"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-005",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O apt update dá erro de assinatura (NO_PUBKEY) num repositório de terceiros. Qual é o jeito atual de resolver?",
+      "obrigatorios": [
+        "signed-by|/etc/apt/keyrings|keyrings"
+      ],
+      "proibidos": [
+        "\\bapt-key\\s+add\\b"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-006",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Um serviço não sobe no Debian. Como vejo por que ele falhou?",
+      "obrigatorios": [
+        "systemctl\\s+status",
+        "journalctl[^\\n]*-u|journalctl\\s+-xe"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-007",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como faço um serviço systemd iniciar sozinho no boot?",
+      "obrigatorios": [
+        "systemctl\\s+enable"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-008",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Mudei um arquivo .service em /etc/systemd/system. O que preciso rodar para o systemd ler a mudança?",
+      "obrigatorios": [
+        "systemctl\\s+daemon-reload"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-009",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como vejo quais portas estão abertas e qual programa escuta em cada uma no Ubuntu?",
+      "obrigatorios": [
+        "\\bss\\s+-[a-z]*[tl][a-z]*|netstat\\s+-[a-z]*[tl]|lsof\\s+-i"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-010",
+      "bloco": "debian",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Como libero a porta 443 no firewall ufw do Ubuntu?",
+      "obrigatorios": [
+        "ufw\\s+allow\\s+(443|https)"
+      ],
+      "proibidos": [
+        "ufw\\s+disable"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-011",
+      "bloco": "debian",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Ativei o ufw por SSH num servidor remoto. O que preciso liberar antes para não perder o acesso?",
+      "obrigatorios": [
+        "ufw\\s+allow\\s+(OpenSSH|ssh|22)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-012",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O sistema ficou lento e uso de memória está alto. Como vejo quem consome memória e se está usando swap?",
+      "obrigatorios": [
+        "ps\\s+[^\\n]*--sort|\\btop\\b|htop|smem",
+        "\\bfree\\b|swapon\\s+--show|/proc/swaps|vmstat"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-013",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Um processo foi morto e o dmesg fala em 'Out of memory: Killed process'. O que aconteceu?",
+      "obrigatorios": [
+        "OOM|oom",
+        "aument|limit|MemoryMax|cgroup|reduz|swap"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-014",
+      "bloco": "debian",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Como vejo a temperatura e a saúde do disco (SMART) no Debian?",
+      "obrigatorios": [
+        "smartctl",
+        "smartmontools"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-015",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O sistema monta um disco como somente leitura depois de erros. O que provavelmente aconteceu e o que faço?",
+      "obrigatorios": [
+        "fsck|e2fsck",
+        "corromp|inconsist|superbloco|dmesg|journal"
+      ],
+      "proibidos": [
+        "\\bmkfs\\b"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-016",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como adiciono uma linha no /etc/fstab de forma segura, sem correr o risco de o sistema não subir?",
+      "obrigatorios": [
+        "UUID|blkid",
+        "mount\\s+-a|findmnt\\s+--verify|nofail"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-017",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como vejo qual versão do kernel estou usando e quais kernels estão instalados no Ubuntu?",
+      "obrigatorios": [
+        "uname\\s+-r",
+        "dpkg\\s+(-l|--list)[^\\n]*linux-image|apt\\s+list\\s+--installed[^\\n]*linux-image"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-018",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O /boot encheu no Ubuntu e as atualizações falham. Como libero espaço com segurança?",
+      "obrigatorios": [
+        "apt(-get)?\\s+autoremove"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*/boot"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-019",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Depois de uma atualização, o Ubuntu não sobe com o kernel novo. Como inicio com o kernel anterior?",
+      "obrigatorios": [
+        "GRUB|grub",
+        "Op[c\\u00E7][o\\u00F5]es avan[c\\u00E7]adas|Advanced options|Shift|\\bEsc\\b"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-020",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como faço o Ubuntu instalar sozinho as atualizações de segurança?",
+      "obrigatorios": [
+        "unattended-upgrades"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-021",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como vejo o log de quem entrou por SSH no servidor Debian?",
+      "obrigatorios": [
+        "auth\\.log|journalctl[^\\n]*(ssh|sshd)|\\blast\\b|lastlog"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-022",
+      "bloco": "debian",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Como desativo o login por senha no SSH e deixo só por chave?",
+      "obrigatorios": [
+        "PasswordAuthentication\\s+no",
+        "sshd_config"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-023",
+      "bloco": "debian",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Mudei o sshd_config. Como testo a configuração antes de reiniciar o serviço, para não me trancar fora?",
+      "obrigatorios": [
+        "sshd\\s+-t"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-024",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como mudo o fuso horário do servidor Debian para São Paulo?",
+      "obrigatorios": [
+        "timedatectl\\s+set-timezone\\s+America/Sao_Paulo|dpkg-reconfigure\\s+tzdata"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-025",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como agendo um script para rodar todo dia às 3h no Ubuntu?",
+      "obrigatorios": [
+        "crontab\\s+-e|/etc/cron|OnCalendar|systemd timer|timer",
+        "\\b0\\s+3\\s+\\*\\s+\\*\\s+\\*|03:00|3:00"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-026",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como adiciono um usuário ao grupo docker no Ubuntu para ele usar o Docker sem sudo?",
+      "obrigatorios": [
+        "usermod\\s+-aG\\s+docker|gpasswd\\s+-a\\s+\\S+\\s+docker",
+        "(sair|logout|nova sess[a\\u00E3]o|newgrp|relogar|entrar de novo|login)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-027",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "A rede não sobe no Ubuntu Server. Onde fica a configuração de rede e como a aplico?",
+      "obrigatorios": [
+        "netplan",
+        "netplan\\s+(apply|try)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-028",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como vejo o histórico do que o apt instalou ou removeu no Debian?",
+      "obrigatorios": [
+        "/var/log/apt/history\\.log|/var/log/dpkg\\.log"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-029",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O comando sudo diz que meu usuário não está no arquivo sudoers. Como dou sudo a ele, tendo acesso root?",
+      "obrigatorios": [
+        "usermod\\s+-aG\\s+sudo|adduser\\s+\\S+\\s+sudo|visudo"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "deb-030",
+      "bloco": "debian",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como faço um backup simples de uma pasta para um disco externo, copiando só o que mudou?",
+      "obrigatorios": [
+        "rsync"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-001",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Num container Docker sem systemd, como faço um serviço continuar rodando depois que eu saio do shell?",
+      "obrigatorios": [
+        "processo principal|PID 1|CMD|ENTRYPOINT|primeiro plano|foreground|-D\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-002",
+      "bloco": "container",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O WSL diz que a virtualização não está habilitada. O que verifico?",
+      "obrigatorios": [
+        "BIOS|UEFI|VT-x|AMD-V|SVM",
+        "Plataforma de M[a\\u00E1]quina Virtual|VirtualMachinePlatform|wsl\\s+--install"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-003",
+      "bloco": "container",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O WSL2 está ocupando muita memória no Windows. Como limito?",
+      "obrigatorios": [
+        "\\.wslconfig",
+        "memory\\s*="
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-004",
+      "bloco": "container",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "Como desligo todas as distribuições do WSL de uma vez para aplicar uma configuração?",
+      "obrigatorios": [
+        "wsl(\\.exe)?\\s+--shutdown"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-005",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Dentro do WSL, onde ficam os arquivos do disco C: do Windows, e por que é lento compilar ali?",
+      "obrigatorios": [
+        "/mnt/c",
+        "9P|Plan 9|sistema de arquivos do Linux|~/|/home|ext4"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-006",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como ativo o systemd numa distribuição do WSL?",
+      "obrigatorios": [
+        "/etc/wsl\\.conf",
+        "systemd\\s*=\\s*true"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-007",
+      "bloco": "container",
+      "familia": "powershell",
+      "alvo": "resposta",
+      "pergunta": "O disco virtual do WSL2 (ext4.vhdx) não diminui depois que apago arquivos. Como recupero o espaço?",
+      "obrigatorios": [
+        "Optimize-VHD|diskpart|compact\\s+vdisk|sparse|--set-sparse"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-008",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Um container sai logo depois de iniciar. Como vejo por quê?",
+      "obrigatorios": [
+        "docker\\s+logs",
+        "docker\\s+(ps\\s+-a|inspect)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-009",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Os dados do meu banco somem toda vez que recrio o container. O que está faltando?",
+      "obrigatorios": [
+        "volume|-v\\s|--mount|bind"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-010",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como entro num container que está rodando para investigar?",
+      "obrigatorios": [
+        "docker\\s+exec\\s+-(it|ti)"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-011",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "O Docker diz 'permission denied' no /var/run/docker.sock. O que significa e como resolvo com segurança?",
+      "obrigatorios": [
+        "grupo docker|usermod\\s+-aG\\s+docker"
+      ],
+      "proibidos": [
+        "chmod\\s+(666|777)\\s+/var/run/docker\\.sock"
+      ],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-012",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como limito a memória e a CPU de um container com Docker?",
+      "obrigatorios": [
+        "--memory|-m\\s|mem_limit|deploy:",
+        "--cpus|cpus:"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-013",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Dentro de um container, o /proc/meminfo mostra a memória do host. Como vejo o limite real do container?",
+      "obrigatorios": [
+        "/sys/fs/cgroup/memory\\.max|memory\\.limit_in_bytes|cgroup"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-014",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como vejo quanto de CPU e de memória cada container está usando agora?",
+      "obrigatorios": [
+        "docker\\s+stats"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-015",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Uma VM no VirtualBox ou no Hyper-V ficou sem rede. O que verifico primeiro?",
+      "obrigatorios": [
+        "NAT|bridge|ponte|Comutador Virtual|switch virtual|adaptador"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-016",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como aumento o disco de uma VM Linux depois de aumentar o disco virtual no hipervisor?",
+      "obrigatorios": [
+        "growpart|parted|fdisk|resize2fs|xfs_growfs|lvextend"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-017",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como sei, de dentro do Linux, se estou numa VM ou num container?",
+      "obrigatorios": [
+        "systemd-detect-virt|/\\.dockerenv|/run/\\.containerenv|hypervisor|dmidecode|/sys/class/dmi"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-018",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "A imagem Docker do meu app está com 2 GB. Como reduzo o tamanho?",
+      "obrigatorios": [
+        "multi-?stage|v[a\\u00E1]rios est[a\\u00E1]gios|alpine|slim|distroless|\\.dockerignore"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-019",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como copio um arquivo de dentro de um container para o host?",
+      "obrigatorios": [
+        "docker\\s+cp"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    },
+    {
+      "id": "ctn-020",
+      "bloco": "container",
+      "familia": "apt",
+      "alvo": "resposta",
+      "pergunta": "Como faço um container reiniciar sozinho se cair ou se o servidor reiniciar?",
+      "obrigatorios": [
+        "--restart|restart:",
+        "unless-stopped|always|on-failure"
+      ],
+      "proibidos": [],
+      "tokens": 160,
+      "fonte": "documentação oficial do sistema"
+    }
+  ]
+}

@@ -773,8 +773,12 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
 - **Regra de decisão, fixada antes de rodar:** toda taxa sai com o IC 95% de Wilson; toda comparação entre dois
   modelos é pareada nas mesmas perguntas, com teste de sinal exato unilateral e p < 0,05 sobre os pares
   discordantes; empate não muda nada sem decisão do dono.
-- **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono) e as respostas do dono viram o bloco v2. A
-  escolha do modelo espera todos os blocos.
+- **Dúvidas, congeladas em 2026-11-10** (escritas pelo adversário, liberadas pelo revisor): `duvidas.json`, 90
+  itens (40 de Windows, 30 de Debian/Ubuntu, 20 de container/WSL/VM), corrigidos pelo `nota-duvidas.ts`, que importa
+  o `nota.ts` da v1 sem mudá-lo. sha256 do `MANIFEST-duvidas.sha256`:
+  `4f16d072d2d8aa0b4838b292f1a78959fbbc6a9da1c02d1f8c9c04ac2e561282`. A v1 não mudou.
+- **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
+  log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]
   [--piloto]`. Ele recusa rodar se os conjuntos presentes, o detector, o prompt do kit ou a linha de data não forem os
   congelados aqui. Lê todos os conjuntos copiados para `tests/evals/manutencao/` (o v1 e, quando congelado, o das

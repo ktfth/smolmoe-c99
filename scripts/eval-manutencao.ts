@@ -52,7 +52,8 @@ export interface Conjunto {
 export const CONJUNTOS: readonly Conjunto[] = [
   { itens: "manutencao.json", manifesto: "MANIFEST.sha256", nota: "nota.ts",
     sha: "f4caf5b2cde9f1fdfeb92ff3d451fa12b2d4054fdd3ef59a2fe7a0b447a40b32" },
-  { itens: "duvidas.json", manifesto: "MANIFEST-duvidas.sha256", nota: "nota-duvidas.ts", sha: null },
+  { itens: "duvidas.json", manifesto: "MANIFEST-duvidas.sha256", nota: "nota-duvidas.ts",
+    sha: "4f16d072d2d8aa0b4838b292f1a78959fbbc6a9da1c02d1f8c9c04ac2e561282" },
 ];
 
 export type Avaliar = (item: ItemNota, resposta: string, regras: Regras) => Nota;
