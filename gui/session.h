@@ -22,7 +22,7 @@ enum class Phase {
     Opening,  // the worker is loading the model
     Ready,
     Busy,     // answering a message
-    Failed    // die() ran: the worker is parked and only closing helps
+    Failed    // a fatal error on the worker; the thread has finished and can be joined
 };
 
 enum class Role { User, Assistant, Notice };
@@ -77,13 +77,11 @@ public:
     // The state, if it changed since `seen` (a version number).
     std::optional<SessionState> changed_since(uint64_t seen) const;
 
-    // Stops the worker and closes the model. Returns false when the worker
-    // could not finish (still loading, or parked by die()): the caller then
-    // ends the process without waiting for it.
+    // Stops the worker and closes the model. Waits until the thread has finished.
     bool shutdown();
 
-    // Installs the die() handler that parks a worker thread and reports the
-    // message (call once, from the window's thread).
+    // Installs the die() handler for a failure on the window's own thread
+    // (bad arguments, before a model is open). Call once, from that thread.
     static void install_die_handler(void (*on_window_thread)(const char *message));
 
 private:
@@ -107,7 +105,6 @@ private:
     const std::function<void()> wake_;
     mutable std::mutex mutex_;
     std::condition_variable requests_ready_;
-    std::condition_variable worker_done_;
     std::deque<Request> requests_;
     SessionState state_;
     std::atomic<bool> stop_{false};

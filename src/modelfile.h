@@ -31,16 +31,18 @@ typedef struct ModelFile {
     Tensor *tensors;
 } ModelFile;
 
-/* Validates header, sorted directory and extents. */
-void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Memory *mem);
+/* Validates header, sorted directory and extents. SM_OK, or a format/memory
+ * error in sm_last_error(); does not exit. */
+sm_status modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Memory *mem);
 
 /* Checks every Q8 scale (finite, >= 0) and every F32 value (finite) once, in
  * parallel, so the hot path never needs per-access validation. */
-void modelfile_verify_payload(const ModelFile *mf, Pool *pool);
+sm_status modelfile_verify_payload(const ModelFile *mf, Pool *pool);
 
 /* Embedded blob by name, or NULL. */
 const Tensor *modelfile_blob(const ModelFile *mf, const char *name);
 
+/* NULL on a missing or mismatched tensor, with the reason in sm_last_error(). */
 const Tensor *modelfile_find(const ModelFile *mf, const char *name, uint32_t rows, uint32_t cols,
                              uint32_t dtype);
 

@@ -54,13 +54,13 @@ static uint32_t piece_lookup(const Tokenizer *t, const unsigned char *p, uint32_
 static void score_load(Tokenizer *t, ByteReader *f, Memory *mem) {
     unsigned char header[20], rec[8], *data;
     uint32_t i, total, used = 0, vocab = t->vocab;
-    if (!br_read(f, header, 20) || memcmp(header, "SMSPB1\0\1", 8)) die("invalid score-BPE header");
+    if (!br_read(f, header, 20) || memcmp(header, "SMSPB1\0\1", 8)) sm_fail(SM_ERR_FORMAT, "invalid score-BPE header");
     t->kind = TOK_SCORE;
     t->count = vocab - 258;
     t->max_piece = rd_u32(header + 12);
     total = rd_u32(header + 16);
     if (rd_u32(header + 8) != vocab || !t->max_piece || t->max_piece > MAX_PIECE || total > MAX_PAYLOAD)
-        die("invalid score-BPE dimensions");
+        sm_fail(SM_ERR_FORMAT, "invalid score-BPE dimensions");
     t->pieces = (unsigned char **)mem_alloc(mem, vocab, sizeof(*t->pieces));
     t->lengths = (uint32_t *)mem_alloc(mem, vocab, sizeof(uint32_t));
     t->scores = (float *)mem_alloc(mem, vocab, sizeof(float));
@@ -71,21 +71,21 @@ static void score_load(Tokenizer *t, ByteReader *f, Memory *mem) {
     t->hash = (uint32_t *)mem_alloc(mem, t->hash_size, sizeof(uint32_t));
     for (i = 0; i < vocab; ++i) {
         uint32_t n, slot;
-        if (!br_read(f, rec, 8)) die("truncated score-BPE record");
+        if (!br_read(f, rec, 8)) sm_fail(SM_ERR_FORMAT, "truncated score-BPE record");
         t->scores[i] = rd_f32(rec);
         n = rd_u32(rec + 4);
-        if (!isfinite(t->scores[i]) || !n || n > t->max_piece || n > total - used) die("invalid score-BPE record");
+        if (!isfinite(t->scores[i]) || !n || n > t->max_piece || n > total - used) sm_fail(SM_ERR_FORMAT, "invalid score-BPE record");
         t->pieces[i] = data + used;
         t->lengths[i] = n;
         used += n;
-        if (!br_read(f, t->pieces[i], n)) die("truncated score-BPE piece");
-        if (piece_lookup(t, t->pieces[i], n) != UINT32_MAX) die("duplicate score-BPE piece");
+        if (!br_read(f, t->pieces[i], n)) sm_fail(SM_ERR_FORMAT, "truncated score-BPE piece");
+        if (piece_lookup(t, t->pieces[i], n) != UINT32_MAX) sm_fail(SM_ERR_FORMAT, "duplicate score-BPE piece");
         slot = (uint32_t)fnv1a(t->pieces[i], n) & (t->hash_size - 1);
         while (t->hash[slot]) slot = (slot + 1) & (t->hash_size - 1);
         t->hash[slot] = i + 1;
     }
-    if (used != total || !br_at_end(f)) die("invalid score-BPE payload size");
-    if (piece_lookup(t, (const unsigned char *)" ", 1) == UINT32_MAX) die("score-BPE missing dummy prefix");
+    if (used != total || !br_at_end(f)) sm_fail(SM_ERR_FORMAT, "invalid score-BPE payload size");
+    if (piece_lookup(t, (const unsigned char *)" ", 1) == UINT32_MAX) sm_fail(SM_ERR_FORMAT, "score-BPE missing dummy prefix");
 }
 
 /* BOS, dummy-space prefix, UTF-8 code points (byte fallback), then repeatedly
@@ -136,7 +136,7 @@ static uint32_t merge_rank(const Tokenizer *t, uint32_t a, uint32_t b) {
 static void bpe_load(Tokenizer *t, ByteReader *f, Memory *mem) {
     char line[128];
     uint32_t i;
-    if (!br_line(f, line, sizeof(line), "tokenizer") || strcmp(trim(line), "SMBPE1")) die("invalid tokenizer magic");
+    if (!br_line(f, line, sizeof(line), "tokenizer") || strcmp(trim(line), "SMBPE1")) sm_fail(SM_ERR_FORMAT, "invalid tokenizer magic");
     t->kind = TOK_BPE;
     t->count = t->vocab - 258;
     t->max_piece = MAX_PIECE;
@@ -150,21 +150,21 @@ static void bpe_load(Tokenizer *t, ByteReader *f, Memory *mem) {
         uint32_t p;
         Merge *m = &t->merges[i];
         if (!br_line(f, line, sizeof(line), "tokenizer") || sscanf(line, "%31s %31s %c", a, b, &extra) != 2)
-            die("invalid tokenizer merge %u", i);
+            sm_fail(SM_ERR_FORMAT, "invalid tokenizer merge %u", i);
         m->a = parse_u32(a, 257 + i, "merge token");
         m->b = parse_u32(b, 257 + i, "merge token");
-        if (m->a == BOS_ID || m->a == EOS_ID || m->b == BOS_ID || m->b == EOS_ID) die("special token in BPE merge");
+        if (m->a == BOS_ID || m->a == EOS_ID || m->b == BOS_ID || m->b == EOS_ID) sm_fail(SM_ERR_FORMAT, "special token in BPE merge");
         m->bytes = (m->a < 256 ? 1 : t->merges[m->a - 258].bytes) + (m->b < 256 ? 1 : t->merges[m->b - 258].bytes);
-        if (m->bytes > MAX_PIECE) die("BPE token expands beyond %u bytes", MAX_PIECE);
+        if (m->bytes > MAX_PIECE) sm_fail(SM_ERR_FORMAT, "BPE token expands beyond %u bytes", MAX_PIECE);
         for (p = (uint32_t)mix64(((uint64_t)m->a << 32) | m->b) & (t->hash_size - 1); t->hash[p];
              p = (p + 1) & (t->hash_size - 1)) {
             const Merge *old = &t->merges[t->hash[p] - 1];
-            if (old->a == m->a && old->b == m->b) die("duplicate BPE pair");
+            if (old->a == m->a && old->b == m->b) sm_fail(SM_ERR_FORMAT, "duplicate BPE pair");
         }
         t->hash[p] = i + 1;
     }
     while (br_line(f, line, sizeof(line), "tokenizer"))
-        if (*trim(line)) die("extra tokenizer merges");
+        if (*trim(line)) sm_fail(SM_ERR_FORMAT, "extra tokenizer merges");
 }
 
 /* Leftmost lowest-rank merge first, deliberately simple O(n^2). */
@@ -196,11 +196,11 @@ static uint32_t bpe_decode(Tokenizer *t, uint32_t id, unsigned char *buf) {
             buf[out++] = (unsigned char)x;
         } else if (x >= 258 && x - 258 < t->count) {
             const Merge *m = &t->merges[x - 258];
-            if (n + 2 > t->count + 2) die("BPE decode stack overflow");
+            if (n + 2 > t->count + 2) sm_fail(SM_ERR_FORMAT, "BPE decode stack overflow");
             t->stack[n++] = m->b;
             t->stack[n++] = m->a;
         } else if (x != BOS_ID && x != EOS_ID) {
-            die("invalid output token %u", x);
+            sm_fail(SM_ERR_FORMAT, "invalid output token %u", x);
         }
     }
     return out;
@@ -208,7 +208,7 @@ static uint32_t bpe_decode(Tokenizer *t, uint32_t id, unsigned char *buf) {
 
 /* ---- dispatch ---------------------------------------------------------- */
 
-Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t vocab, Memory *mem) {
+static Tokenizer *tokenizer_parse_body(const unsigned char *data, size_t size, uint32_t vocab, Memory *mem) {
     Tokenizer *t = (Tokenizer *)mem_alloc(mem, 1, sizeof(*t));
     ByteReader r = byte_reader(data, size);
     t->vocab = vocab;
@@ -224,11 +224,39 @@ Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t voca
     return t;
 }
 
+typedef struct TokParseArgs {
+    const unsigned char *data;
+    size_t size;
+    uint32_t vocab;
+    Memory *mem;
+    Tokenizer *out;
+} TokParseArgs;
+
+static void tokenizer_parse_protected(void *ctx) {
+    TokParseArgs *a = (TokParseArgs *)ctx;
+    a->out = tokenizer_parse_body(a->data, a->size, a->vocab, a->mem);
+}
+
+Tokenizer *tokenizer_parse(const unsigned char *data, size_t size, uint32_t vocab, Memory *mem) {
+    TokParseArgs a;
+    a.data = data;
+    a.size = size;
+    a.vocab = vocab;
+    a.mem = mem;
+    a.out = NULL;
+    if (sm_protect(tokenizer_parse_protected, &a) != SM_OK) return NULL;
+    return a.out;
+}
+
 /* Every loader copies what it keeps, so the file can be unmapped afterwards. */
 Tokenizer *tokenizer_load(const char *path, uint32_t vocab, Memory *mem) {
     MappedFile f;
     Tokenizer *t;
-    map_file(path, &f);
+    char err[512];
+    if (!try_map_file(path, &f, err, sizeof(err))) {
+        sm_set(SM_ERR_IO, "%s", err);
+        return NULL;
+    }
     t = tokenizer_parse(f.data, (size_t)f.size, vocab, mem);
     unmap_file(&f);
     return t;
@@ -242,7 +270,7 @@ uint32_t tokenizer_prepare(Tokenizer *t, uint32_t max_bytes, Memory *mem) {
 uint32_t tokenizer_encode(Tokenizer *t, const unsigned char *s, uint32_t n, uint32_t *ids,
                           int chat, const char *system) {
     if (t->kind == TOK_BBPE) return qwen_encode(t->qwen, s, n, ids, chat, system);
-    if (chat) die("--chat requires a tokenizer with a chat template");
+    if (chat) sm_fail(SM_ERR_FORMAT, "--chat requires a tokenizer with a chat template");
     return t->kind == TOK_SCORE ? score_encode(t, s, n, ids) : bpe_encode(t, s, n, ids);
 }
 
@@ -251,7 +279,7 @@ uint32_t tokenizer_decode(Tokenizer *t, uint32_t id, unsigned char *buf) {
     case TOK_BBPE:
         return qwen_decode(t->qwen, id, buf);
     case TOK_SCORE:
-        if (id >= t->vocab) die("invalid score-BPE token ID %u", id);
+        if (id >= t->vocab) sm_fail(SM_ERR_FORMAT, "invalid score-BPE token ID %u", id);
         if (id < 256) { buf[0] = (unsigned char)id; return 1; }
         if (id == BOS_ID || id == EOS_ID) return 0;
         memcpy(buf, t->pieces[id], t->lengths[id]);
@@ -288,11 +316,11 @@ int tokenizer_is_control(const Tokenizer *t, uint32_t id) {
 
 uint32_t tokenizer_chat_turn(Tokenizer *t, const char *role, const unsigned char *text, uint32_t n,
                              int open_assistant, uint32_t *ids) {
-    if (t->kind != TOK_BBPE) die("chat requires a tokenizer with a chat template");
+    if (t->kind != TOK_BBPE) sm_fail(SM_ERR_FORMAT, "chat requires a tokenizer with a chat template");
     return qwen_chat_turn(t->qwen, role, text, n, open_assistant, ids);
 }
 
 uint32_t tokenizer_chat_close(Tokenizer *t, uint32_t *ids) {
-    if (t->kind != TOK_BBPE) die("chat requires a tokenizer with a chat template");
+    if (t->kind != TOK_BBPE) sm_fail(SM_ERR_FORMAT, "chat requires a tokenizer with a chat template");
     return qwen_chat_close(t->qwen, ids);
 }

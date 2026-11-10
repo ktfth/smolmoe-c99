@@ -372,10 +372,7 @@ int main(int argc, char **argv) {
     }
 
     g_view = nullptr;
-    const bool clean = session.shutdown();
-    // A worker still loading, or parked by an error, may still call the window
-    // (its wake-up): end the process before tearing anything down.
-    if (!clean) std::_Exit(EXIT_SUCCESS);
+    session.shutdown();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

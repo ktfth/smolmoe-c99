@@ -36,15 +36,15 @@ static inline uint32_t combining_class(uint32_t cp) {
 }
 static inline uint32_t read_utf8(const unsigned char *s,uint32_t bytes,uint32_t *pos) {
     uint32_t c,n,k,minimum;
-    if(*pos>=bytes)die("invalid UTF-8 position");
+    if(*pos>=bytes)sm_fail(SM_ERR_FORMAT, "invalid UTF-8 position");
     c=s[(*pos)++];if(c<128)return c;
     if(c>=194 && c<=223){n=1;c&=31;minimum=128;}
     else if(c>=224 && c<=239){n=2;c&=15;minimum=2048;}
     else if(c>=240 && c<=244){n=3;c&=7;minimum=65536;}
-    else {die("the tokenizer requires valid UTF-8");return 0;}
-    if(bytes-*pos<n)die("truncated UTF-8");
-    for(k=0;k<n;++k){uint32_t b=s[(*pos)++];if((b&192)!=128)die("invalid UTF-8 continuation");c=(c<<6)|(b&63);}
-    if(c<minimum || c>0x10ffff || (c>=0xd800 && c<=0xdfff))die("invalid UTF-8 code point");
+    else {sm_fail(SM_ERR_FORMAT, "the tokenizer requires valid UTF-8");return 0;}
+    if(bytes-*pos<n)sm_fail(SM_ERR_FORMAT, "truncated UTF-8");
+    for(k=0;k<n;++k){uint32_t b=s[(*pos)++];if((b&192)!=128)sm_fail(SM_ERR_FORMAT, "invalid UTF-8 continuation");c=(c<<6)|(b&63);}
+    if(c<minimum || c>0x10ffff || (c>=0xd800 && c<=0xdfff))sm_fail(SM_ERR_FORMAT, "invalid UTF-8 code point");
     return c;
 }
 static inline uint32_t write_utf8(uint32_t cp,unsigned char *p) {
@@ -57,7 +57,7 @@ static inline uint32_t write_utf8(uint32_t cp,unsigned char *p) {
 static inline uint32_t decode_utf8(const unsigned char *s, uint32_t bytes, uint32_t *cp, uint32_t cap) {
     uint32_t pos = 0, n = 0;
     while (pos < bytes) {
-        if (n >= cap) die("decoding workspace exceeded");
+        if (n >= cap) sm_fail(SM_ERR_FORMAT, "decoding workspace exceeded");
         cp[n++] = read_utf8(s, bytes, &pos);
     }
     return n;
@@ -67,7 +67,7 @@ static inline void canonical_decompose(uint32_t cp,uint32_t *out,uint32_t *n,uin
     if(cp>=0xac00 && cp<0xd7a4){uint32_t s=cp-0xac00;canonical_decompose(0x1100+s/588,out,n,cap);canonical_decompose(0x1161+(s%588)/28,out,n,cap);if(s%28)canonical_decompose(0x11a7+s%28,out,n,cap);return;}
     while(lo<hi){size_t m=lo+(hi-lo)/2;if(unicode_decomp[m].a<cp)lo=m+1;else hi=m;}
     if(lo<sizeof(unicode_decomp)/sizeof(*unicode_decomp) && unicode_decomp[lo].a==cp){canonical_decompose(unicode_decomp[lo].b,out,n,cap);if(unicode_decomp[lo].value)canonical_decompose(unicode_decomp[lo].value,out,n,cap);return;}
-    if(*n>=cap)die("normalization workspace exceeded");
+    if(*n>=cap)sm_fail(SM_ERR_FORMAT, "normalization workspace exceeded");
     out[(*n)++]=cp;
     {uint32_t j=*n-1,cc=combining_class(cp);while(cc && j && combining_class(out[j-1])>cc){out[j]=out[j-1];--j;}out[j]=cp;}
 }

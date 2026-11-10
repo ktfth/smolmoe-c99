@@ -3,10 +3,10 @@
 #include <math.h>
 #include <stdlib.h>
 
-void sampler_init(Sampler *s, uint32_t vocab, const unsigned char *banned, float temperature,
-                  uint32_t top_k, float top_p, uint32_t seed, Memory *mem) {
+static void sampler_init_body(Sampler *s, uint32_t vocab, const unsigned char *banned, float temperature,
+                             uint32_t top_k, float top_p, uint32_t seed, Memory *mem) {
     uint32_t cap;
-    if (!seed) die("seed must be nonzero");
+    if (!seed) sm_fail(SM_ERR_RANGE, "seed must be nonzero");
     s->vocab = vocab;
     s->banned = banned;
     s->temperature = temperature;
@@ -16,6 +16,33 @@ void sampler_init(Sampler *s, uint32_t vocab, const unsigned char *banned, float
     cap = s->top_k ? s->top_k : vocab;
     s->ranked = (SamplerRank *)mem_alloc(mem, cap, sizeof(SamplerRank));
     s->probs = (double *)mem_alloc(mem, cap, sizeof(double));
+}
+
+typedef struct SamplerInitArgs {
+    Sampler *s;
+    uint32_t vocab, top_k, seed;
+    const unsigned char *banned;
+    float temperature, top_p;
+    Memory *mem;
+} SamplerInitArgs;
+
+static void sampler_init_protected(void *ctx) {
+    SamplerInitArgs *a = (SamplerInitArgs *)ctx;
+    sampler_init_body(a->s, a->vocab, a->banned, a->temperature, a->top_k, a->top_p, a->seed, a->mem);
+}
+
+sm_status sampler_init(Sampler *s, uint32_t vocab, const unsigned char *banned, float temperature,
+                       uint32_t top_k, float top_p, uint32_t seed, Memory *mem) {
+    SamplerInitArgs a;
+    a.s = s;
+    a.vocab = vocab;
+    a.banned = banned;
+    a.temperature = temperature;
+    a.top_k = top_k;
+    a.top_p = top_p;
+    a.seed = seed;
+    a.mem = mem;
+    return sm_protect(sampler_init_protected, &a);
 }
 
 static uint32_t xorshift32(uint32_t *state) {
@@ -31,7 +58,7 @@ static uint32_t argmax(const Sampler *s, const float *logits) {
     uint32_t i, best = UINT32_MAX;
     for (i = 0; i < s->vocab; ++i)
         if (!s->banned[i] && (best == UINT32_MAX || logits[i] > logits[best])) best = i;
-    if (best == UINT32_MAX) die("every token is banned");
+    if (best == UINT32_MAX) sm_fail(SM_ERR_STATE, "every token is banned");
     return best;
 }
 
@@ -73,12 +100,12 @@ static uint32_t collect_all(Sampler *s, const float *logits) {
     return n;
 }
 
-uint32_t sampler_next(Sampler *s, const float *logits) {
+static uint32_t sampler_next_body(Sampler *s, const float *logits) {
     uint32_t n, i, kept;
     double total = 0, cumulative = 0, target;
     if (s->temperature == 0) return argmax(s, logits);
     n = s->top_k ? collect_top_k(s, logits) : collect_all(s, logits);
-    if (!n) die("every token is banned");
+    if (!n) sm_fail(SM_ERR_STATE, "every token is banned");
     for (i = 0; i < n; ++i) {
         s->probs[i] = exp(((double)s->ranked[i].logit - (double)s->ranked[0].logit) / (double)s->temperature);
         total += s->probs[i];
@@ -97,4 +124,26 @@ uint32_t sampler_next(Sampler *s, const float *logits) {
         if (target < 0) return s->ranked[i].id;
     }
     return s->ranked[kept - 1].id;
+}
+
+typedef struct SamplerNextArgs {
+    Sampler *s;
+    const float *logits;
+    uint32_t token;
+} SamplerNextArgs;
+
+static void sampler_next_protected(void *ctx) {
+    SamplerNextArgs *a = (SamplerNextArgs *)ctx;
+    a->token = sampler_next_body(a->s, a->logits);
+}
+
+sm_status sampler_next(Sampler *s, const float *logits, uint32_t *token) {
+    SamplerNextArgs a;
+    sm_status st;
+    a.s = s;
+    a.logits = logits;
+    a.token = 0;
+    st = sm_protect(sampler_next_protected, &a);
+    if (st == SM_OK) *token = a.token;
+    return st;
 }
