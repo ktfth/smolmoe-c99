@@ -14,6 +14,7 @@
 #include "sampler.h"
 #include "tokenizer.h"
 #include "tools.h"
+#include "util.h"
 
 /* The chat's system prompt unless the user gives one (--system). */
 #define CHAT_DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
@@ -23,6 +24,8 @@
 typedef struct ChatStats {
     uint32_t turns, prompt_tokens, generated, tool_calls;
     double prefill_seconds, decode_seconds, first_token_seconds;
+    /* 0: no disk cache, 1: the system prompt was prefilled, 2: loaded from disk. */
+    int system_kv;
 } ChatStats;
 
 typedef struct Engine {
@@ -39,8 +42,12 @@ typedef struct Engine {
     unsigned char *banned;  /* the sampler's ban list: the markers are allowed per message */
     const ToolClock *fixed_clock; /* NULL: the tools read the local clock at each call */
     EngineSink sink;
+    Memory *mem; /* turn log; set before engine_start() */
     /* State. */
     uint32_t pos, system_len;
+    uint32_t *hist, *turns; /* tokens after the system prompt, and each committed turn's length */
+    uint32_t hist_cap, hist_len, nturns;
+    uint32_t anchor; /* history index where the current message starts; older turns may be dropped */
     int stopped;            /* the last engine_send() was ended by sink.stop */
     const char *message;    /* the user message being answered */
     ChatStats stats;
@@ -59,8 +66,9 @@ const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t con
 void engine_start(Engine *e);
 
 /* Answers one user message: len bytes followed by a NUL (the tools read it as a
- * string). When the conversation no longer fits, it restarts from the system
- * prompt first. Returns 0, with a notice, when the message alone does not fit.
+ * string). When the conversation no longer fits, the oldest turns are dropped
+ * and the rest is replayed after the system prompt. Returns 0, with a notice,
+ * when the message alone does not fit.
  * When sink.stop ends a reply, e->stopped is set and the reply stays in the
  * history as far as it got, unless it was inside a tool call: then the whole
  * message leaves the history, so it never holds a call without its result. */

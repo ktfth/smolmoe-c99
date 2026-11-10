@@ -31,6 +31,13 @@ const char *self_executable_path(void);
 /* Marks a file executable (chmod 0755); no-op on Windows. */
 void make_executable(const char *path);
 
+/* Creates every missing directory along path. Returns 1 on success. */
+int ensure_directory(const char *path);
+/* The per-user cache directory, without a trailing slash. 0 when there is
+ * nowhere persistent to put one (no home directory, or WebAssembly). */
+int user_cache_dir(char *buf, size_t cap);
+uint32_t process_id(void);
+
 double now_seconds(void);
 uint64_t rss_peak_bytes(void);
 uint32_t cpu_logical_count(void);
