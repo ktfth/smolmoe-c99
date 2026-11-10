@@ -719,8 +719,8 @@
       "alvo": "resposta",
       "pergunta": "Um processo foi morto e o dmesg fala em 'Out of memory: Killed process'. O que aconteceu?",
       "obrigatorios": [
-        "OOM|oom",
-        "aument|limit|MemoryMax|cgroup|reduz|swap"
+        "OOM|oom|falta de mem[o\\u00F3]ria|sem mem[o\\u00F3]ria|mem[o\\u00F3]ria (acabou|esgot)",
+        "aument|limit|MemoryMax|cgroup|reduz|swap|\\bmat(a|ou|ar|ando)\\b|termin|encerr"
       ],
       "proibidos": [],
       "tokens": 160,

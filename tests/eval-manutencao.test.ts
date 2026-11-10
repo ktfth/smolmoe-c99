@@ -11,8 +11,8 @@ import { testeDeSinal, wilson } from "../scripts/eval/estatistica";
 import { emPortugues } from "../scripts/eval/portugues";
 import {
   CONJUNTOS, DETECTOR, FROZEN, ITENS_DO_PILOTO, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
-  conferirArquivo, conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, resumo,
-  semLista, sha, sistemaDoItem,
+  conferirArquivo, conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, renotar, resumo,
+  semLista, sha, sistemaDoItem, viradas,
 } from "../scripts/eval-manutencao";
 import { avaliar } from "./evals/manutencao/nota";
 import { ROOT, bundledModel, tempDir } from "./support/run";
@@ -67,6 +67,21 @@ describe("what was frozen", () => {
     expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002" })], itens)).not.toThrow();
     expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002", piloto: true })], itens)).toThrow(/piloto/);
     expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002", modelo_sha: "bb" })], itens)).toThrow(/model\.smoe/);
+  });
+
+  test("a regrade grades the stored answers again with today's sets, and refuses a changed question", async () => {
+    const regras = carregarRegras(), avaliadores = await carregarAvaliadores();
+    const item = carregarItens().find((i) => i.id === "cmd-001")!;
+    const linha = (extra: Partial<Resultado>): Resultado => ({ modelo: "m", id: "cmd-001", bloco: "comando", certa: false,
+      motivo: "x", segundos: 1, resposta: "Use:\n```powershell\nGet-Volume\n```", manifesto: "antigo", congelado: FROZEN,
+      modelo_sha: "aa", ...extra });
+    const [novo] = renotar([linha({})], [item], avaliadores, regras);
+    expect(novo).toMatchObject({ certa: true, motivo: null, manifesto: item.manifesto, modelo_sha: "aa" });
+    expect(viradas([linha({})], [novo!])).toBe("- m: 0 de certa para errada, 1 de errada para certa");
+    expect(() => renotar([linha({ pergunta_sha: "0".repeat(64) })], [item], avaliadores, regras)).toThrow(/a pergunta mudou/);
+    expect(() => renotar([linha({ id: "nao-existe" })], [item], avaliadores, regras)).toThrow(/não existe/);
+    expect(() => renotar([linha({ congelado: { ...FROZEN, sistema: "x" } as typeof FROZEN })], [item], avaliadores, regras))
+      .toThrow(/outro congelamento/);
   });
 
   test("the kit prompt asks for Brazilian Portuguese and a code block; a role item adds its frozen line, then the date", () => {

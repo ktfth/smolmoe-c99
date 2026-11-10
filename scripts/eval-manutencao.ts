@@ -37,6 +37,7 @@ export const KIT_DATE = join(ROOT, "kit", "linha-data.txt");
 const EXE = process.platform === "win32" ? ".exe" : "";
 export const NOW = "2026-11-10T10:00"; /* the clock of the date line, fixed for reproducible answers */
 const CONTEXT = 4096;
+const MEMORY_MIB = 4096;
 const TOKENS = 256;
 const TIMEOUT_MS = 15 * 60_000;
 
@@ -51,9 +52,9 @@ export interface Conjunto {
 }
 export const CONJUNTOS: readonly Conjunto[] = [
   { itens: "manutencao.json", manifesto: "MANIFEST.sha256", nota: "nota.ts",
-    sha: "f4caf5b2cde9f1fdfeb92ff3d451fa12b2d4054fdd3ef59a2fe7a0b447a40b32" },
+    sha: "7290a81a19e8310e978c14d6e3c57aad6a10d34670f73e8f68c3616ddd9cb755" },
   { itens: "duvidas.json", manifesto: "MANIFEST-duvidas.sha256", nota: "nota-duvidas.ts",
-    sha: "4f16d072d2d8aa0b4838b292f1a78959fbbc6a9da1c02d1f8c9c04ac2e561282" },
+    sha: "fd20a5e8aa6485fdc809320793cbdf038c9a3cb675115fe6451e75060d8671c4" },
 ];
 
 export type Avaliar = (item: ItemNota, resposta: string, regras: Regras) => Nota;
@@ -99,6 +100,47 @@ export interface Resultado {
   readonly congelado?: typeof FROZEN;      /* the dev's frozen files the answer was asked and graded with */
   readonly modelo_sha?: string;            /* SHA-256 of the model.smoe that answered */
   readonly piloto?: boolean;
+  readonly pergunta_sha?: string;          /* SHA-256 of the question asked, so a regrade can check it is the same */
+}
+
+const shaTexto = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/**
+ * Grades answers already in a JSONL again, with the sets frozen now (the one revision of the rubric the plan allows,
+ * after the blind reading): cheap and deterministic, no model runs. Each line must have been asked under today's
+ * freeze of the dev's files, its item must still exist, and when the line records the question's SHA-256 it must
+ * match: a changed question would grade an answer to another question. Returns the regraded lines, with the
+ * manifest of the set each item comes from now.
+ */
+export function renotar(anteriores: readonly Resultado[], itens: readonly ItemDeConjunto[],
+  avaliadores: ReadonlyMap<string, Avaliar>, regras: Regras): Resultado[] {
+  const porId = new Map(itens.map((i) => [i.id, i]));
+  return anteriores.map((r) => {
+    const item = porId.get(r.id);
+    if (!item) throw new Error(`${r.id}: o item não existe mais nos conjuntos congelados`);
+    if (JSON.stringify(r.congelado) !== JSON.stringify(FROZEN))
+      throw new Error(`${r.modelo} ${r.id}: perguntado com outro congelamento do prompt, do detector ou da linha de data`);
+    if (r.pergunta_sha !== undefined && r.pergunta_sha !== shaTexto(item.pergunta))
+      throw new Error(`${r.id}: a pergunta mudou desde a resposta; a nota nova não valeria`);
+    const nota = avaliadores.get(item.conjunto)!(item, r.resposta, regras);
+    return { ...r, bloco: item.bloco, certa: nota.certa, motivo: nota.motivo, manifesto: item.manifesto,
+      pergunta_sha: shaTexto(item.pergunta) };
+  });
+}
+
+/** Per model, how many answers a regrade turned from right to wrong and from wrong to right (plan, revision 26). */
+export function viradas(antes: readonly Resultado[], depois: readonly Resultado[]): string {
+  const out: string[] = [];
+  for (const m of [...new Set(antes.map((r) => r.modelo))]) {
+    let paraErrada = 0, paraCerta = 0;
+    antes.forEach((r, i) => {
+      if (r.modelo !== m) return;
+      if (r.certa && !depois[i]!.certa) ++paraErrada;
+      if (!r.certa && depois[i]!.certa) ++paraCerta;
+    });
+    out.push(`- ${m}: ${paraErrada} de certa para errada, ${paraCerta} de errada para certa`);
+  }
+  return out.join("\n");
 }
 
 export const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -244,7 +286,9 @@ function perguntar(binario: string, dir: string, sistema: string, cache: string,
   const t0 = performance.now();
   const r = Bun.spawnSync([binario, "--model", join(dir, "model.smoe"), "--config", join(dir, "config.ini"),
     "--tokenizer", join(dir, "tokenizer.qbp"), "--system", sistema, "--no-tools", "--prefix-cache", cache,
-    "--context", String(CONTEXT), "--tokens", String(item.tokens ?? TOKENS), "--temperature", "0"],
+    "--context", String(CONTEXT), "--tokens", String(item.tokens ?? TOKENS), "--temperature", "0",
+    /* The default heap ceiling covers the KV cache of 2048 positions; the Phi's at 4096 needs more. It changes no answer. */
+    "--memory-mib", String(MEMORY_MIB)],
   { stdin: new TextEncoder().encode(`${item.pergunta}\n/sair\n`), stdout: "pipe", stderr: "pipe", timeout: TIMEOUT_MS });
   if (r.exitCode !== 0) throw new Error(`${item.id}: o chat saiu com ${r.exitCode}: ${r.stderr.toString().slice(-400)}`);
   return { resposta: r.stdout.toString().trim(), segundos: (performance.now() - t0) / 1000 };
@@ -312,8 +356,20 @@ function escolhidos<T extends Item>(itens: readonly T[], filtro: string | undefi
 async function main(argv: readonly string[]): Promise<void> {
   const { values } = parseArgs({ args: [...argv], strict: true, options: {
     modelo: { type: "string", multiple: true }, saida: { type: "string" }, itens: { type: "string" },
-    piloto: { type: "boolean" }, "resumo-so": { type: "boolean" } } });
+    piloto: { type: "boolean" }, "resumo-so": { type: "boolean" }, renotar: { type: "string" } } });
   const saida = resolve(values.saida ?? join(ROOT, "build", "eval-manutencao.jsonl"));
+  if (values.renotar) {
+    /* A new file, never over the old one: the old grades stay for comparison. */
+    const entrada = resolve(values.renotar);
+    if (entrada === saida || existsSync(saida)) throw new Error("--renotar grava numa --saida nova, que ainda não existe");
+    conferirCongelados();
+    const antes = lerResultados(entrada);
+    const novos = renotar(antes, carregarItens(), await carregarAvaliadores(), carregarRegras());
+    appendFileSync(saida, novos.map((r) => `${JSON.stringify(r)}\n`).join(""));
+    console.log(`**Nota de novo** (${antes.length} respostas, sem rodar os modelos):\n${viradas(antes, novos)}\n`);
+    console.log(resumo(novos));
+    return;
+  }
   if (values["resumo-so"]) {
     conferirCongelados();
     const resultados = lerResultados(saida);
@@ -347,7 +403,7 @@ async function main(argv: readonly string[]): Promise<void> {
       const nota = avaliadores.get(item.conjunto)!(item, resposta, regras);
       const r: Resultado = { modelo, id: item.id, bloco: item.bloco, certa: nota.certa, motivo: nota.motivo, segundos,
         resposta, manifesto: item.manifesto, congelado: FROZEN, modelo_sha: modelos.get(modelo)!,
-        ...(values.piloto ? { piloto: true } : {}) };
+        pergunta_sha: shaTexto(item.pergunta), ...(values.piloto ? { piloto: true } : {}) };
       appendFileSync(saida, `${JSON.stringify(r)}\n`);
       console.error(`${modelo} ${item.id}: ${nota.certa ? "certa" : `errada (${nota.motivo})`} em ${segundos.toFixed(1)} s`);
     }

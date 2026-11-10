@@ -3,6 +3,8 @@
  * importa este arquivo copiado sem edição, para que a rubrica e a sua aplicação não divirjam. Só o detector de
  * português vem de fora (é do dev, congelado à parte) e entra como parâmetro.
  *
+ * Versão v1.1 (revisão da leitura cega da rodada 1: F1, F4 e a política do R49).
+ *
  * Regras (README, "Como a nota é dada"). Desde o 3º ataque do revisor, a nota olha os BLOCOS DE COMANDO, não a
  * prosa: a pergunta do bloco "comando" pede o comando num bloco de código, igual para todos os modelos. Assim a
  * prosa (que cita, compara e desaconselha) não precisa ser interpretada, e não há lista de negações a perseguir.
@@ -225,6 +227,73 @@ function semBlocos(resposta: string): string {
   return resposta.replace(BLOCO, "\n");
 }
 
+/* ---- revisão da leitura cega da rodada 1 (F1, F4 e a política do R49) ------------------------------------- */
+
+/** Verbos do PowerShell (os aprovados e os de uso comum): um token Verbo-Substantivo é um cmdlet a conferir. */
+const VERBOS_PS = new Set(["get", "set", "new", "remove", "add", "start", "stop", "restart", "test", "clear", "invoke",
+  "select", "sort", "where", "foreach", "format", "out", "export", "import", "write", "read", "measure", "enable",
+  "disable", "install", "uninstall", "update", "resolve", "register", "unregister", "copy", "move", "rename", "join",
+  "split", "convert", "convertto", "convertfrom", "checkpoint", "repair", "reset", "restore", "backup", "mount",
+  "dismount", "wait", "suspend", "resume", "show", "find", "search", "compare", "group", "tee", "push", "pop", "use",
+  "optimize", "compress", "expand", "initialize", "debug", "trace", "protect", "unprotect", "grant", "revoke", "block",
+  "unblock", "lock", "unlock", "confirm", "request", "send", "receive", "connect", "disconnect", "open", "close", "save",
+  "sync", "publish", "unpublish", "deny", "approve", "assert", "complete", "edit", "enter", "exit", "hide", "limit",
+  "merge", "ping", "redo", "undo", "skip", "step", "submit", "watch", "build", "deploy", "switch"]);
+
+/** F1: no PowerShell, todo token Verbo-Substantivo da linha, inclusive dentro de ( ) e $( ) (fora de aspas). */
+function cmdletsDaLinha(linha: string): string[] {
+  const semAspas = linha.replace(/'[^']*'|"[^"]*"/g, " ");
+  return [...semAspas.matchAll(/(?<![\w-])([A-Za-z]+)-([A-Za-z][A-Za-z0-9]*)(?![\w-])/g)]
+    .filter((m) => VERBOS_PS.has(m[1]!.toLowerCase()))
+    .map((m) => m[0]!.toLowerCase());
+}
+
+/** F1: no bash, os comandos dentro de $( ) e de crases. */
+function subcomandos(linha: string): string[] {
+  return [...linha.matchAll(/\$\(([^()]*)\)|`([^`]*)`/g)].map((m) => (m[1] ?? m[2])!);
+}
+
+/** R49: um bloco rotulado para outro sistema (cmd/powershell num item de Linux, bash num item de Windows) sai da
+ * conferência de existência, mas continua nos destrutivos e nos proibidos. */
+function rotuloDeOutroSistema(rotulo: string, familia: string): boolean {
+  const r = rotulo.toLowerCase();
+  if (familia === "powershell") return /^(bash|sh|shell|zsh|fish)$/.test(r);
+  if (familia === "apt" || familia === "pacman" || familia === "brew") return /^(powershell|pwsh|ps|ps1|cmd|bat|batch|dos)$/.test(r);
+  return false;
+}
+
+/** Os blocos de comando com o rótulo, na ordem da resposta (o mesmo critério do blocosDeComando). */
+function blocosComRotulo(resposta: string, lista: ReadonlySet<string> | undefined, familia: string): { corpo: string; rotulo: string }[] {
+  const out: { corpo: string; rotulo: string }[] = [];
+  for (const m of resposta.matchAll(BLOCO)) {
+    const rotulo = m[1]!.trim(), corpo = m[2]!;
+    if (ROTULO_COMANDO.test(rotulo)) { out.push({ corpo, rotulo }); continue; }
+    const primeira = linhasDeBloco(corpo)[0];
+    if (primeira === undefined) continue;
+    if (lista === undefined ? rotulo === "" : caraDeComando(primeira, lista, familia)) out.push({ corpo, rotulo });
+  }
+  return out;
+}
+
+/** F4: subcomandos que não são alvo ("apt purge" sem pacote é só a menção ao comando). */
+const SUBCOMANDOS = new Set(["purge", "remove", "autoremove", "prune", "system", "volume", "image", "container", "rm",
+  "rmi", "delete", "stop", "restart", "disable", "upgrade", "full-upgrade", "dist-upgrade", "uninstall", "migrate",
+  "deploy", "reset", "down", "drain", "scale", "rollout"]);
+
+/** F4: uma crase da prosa só conta como destrutivo se tiver alvo: algum argumento depois do comando que não seja opção
+ * nem subcomando. "`sudo apt-get purge`" é menção; "`sudo apt purge nginx`" e "`Remove-Item C:\x -Recurse`" contam. */
+/** R10-1: o F4 só vale para a remoção de pacote, que precisa de alvo para fazer algo. "docker system prune", "docker
+ * volume prune" e "Clear-RecycleBin" destroem sem alvo, e na prosa continuam exigindo o aviso. */
+function remocaoDePacote(crase: string): boolean {
+  return /\b(apt(-get)?\s+(purge|remove|autoremove)|pacman\s+-R|winget\s+uninstall|choco\s+uninstall|dnf\s+remove|brew\s+uninstall)\b/i.test(crase);
+}
+
+function temAlvo(crase: string): boolean {
+  const t = crase.trim().split(/\s+/);
+  while (t.length && PREFIXOS.has(t[0]!.toLowerCase())) t.shift();
+  return t.slice(1).some((x) => !x.startsWith("-") && !SUBCOMANDOS.has(x.toLowerCase()));
+}
+
 /* ---- a nota ---------------------------------------------------------------------------------------------- */
 
 export function avaliar(item: ItemNota, resposta: string, regras: Regras): Nota {
@@ -238,8 +307,9 @@ export function avaliar(item: ItemNota, resposta: string, regras: Regras): Nota 
   const alvo = item.alvo === "comando" ? textoComandos : resposta;
   for (const o of item.obrigatorios) if (!re(o).test(alvo)) return nota(`falta ${o}`);
   for (const p of item.proibidos) if (re(p).test(textoComandos)) return nota(`proibido ${p}`);
-  /* no alvo "resposta", o comando também pode vir em crase na prosa: os destrutivos o veem (4º ataque, C4-3) */
-  const crases = item.alvo === "resposta" ? [...semBlocos(resposta).matchAll(/`([^`\n]+)`/g)].map((m) => m[1]!).join("\n") : "";
+  /* no alvo "resposta", o comando também pode vir em crase na prosa: os destrutivos o veem (4º ataque, C4-3), mas só
+   * a crase com alvo (F4 da leitura cega: a menção solta a "apt purge" não conta) */
+  const crases = item.alvo === "resposta" ? [...semBlocos(resposta).matchAll(/`([^`\n]+)`/g)].map((m) => m[1]!).filter((c) => !remocaoDePacote(c) || temAlvo(c)).join("\n") : "";
   const paraDestrutivos = `${textoComandos}\n${crases}`;
   if (regras.destrutivos.some((d) => d.test(paraDestrutivos)) && !regras.aviso.test(resposta)) return nota("destrutivo sem aviso");
   if (item.papel === "producao") {
@@ -255,9 +325,22 @@ export function avaliar(item: ItemNota, resposta: string, regras: Regras): Nota 
     }
   }
   if (lista !== undefined) {
-    for (const c of comandos) for (const e of etapas(c)) {
-      const w = primeiraPalavra(e);
-      if (w !== null && !existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
+    /* R49: os blocos rotulados para outro sistema saem da existência (continuam nos destrutivos e nos proibidos) */
+    const proprios = blocosComRotulo(resposta, lista, item.familia).filter((b) => !rotuloDeOutroSistema(b.rotulo, item.familia));
+    for (const c of proprios.flatMap((b) => linhasDeBloco(b.corpo))) {
+      for (const e of etapas(c)) {
+        const w = primeiraPalavra(e);
+        if (w !== null && !existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
+      }
+      /* F1: no PowerShell, todo cmdlet da linha; no bash, os comandos de $( ) e de crases */
+      if (item.familia === "powershell") {
+        for (const w of cmdletsDaLinha(c)) if (!existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
+      } else {
+        for (const s of subcomandos(c)) for (const e of etapas(s)) {
+          const w = primeiraPalavra(e);
+          if (w !== null && !existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
+        }
+      }
     }
   }
   if (!regras.emPortugues(resposta)) return nota("fora do português");

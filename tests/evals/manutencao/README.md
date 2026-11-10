@@ -102,3 +102,65 @@ que a mesma resposta **sem** bloco reprova.
   `migrate status`, `showmigrations`, `pg_dump`, backup; `pacote` → `apt list --upgradable`, simulação, `checkupdates`;
   `reinicio` → `systemctl status`, `nginx -t`, `docker compose ps/logs`; `destrutivo` → `-WhatIf`, `--dry-run`, `ls`,
   `du`, `docker system df`. O campo `leitura` do item, quando existe, vale no lugar da padrão.
+
+## Blocos de dúvidas (v2, em `duvidas.json`)
+
+- **Arquivo e manifesto próprios:** `duvidas.json` + `MANIFEST-duvidas.sha256` (cobre o `duvidas.json`, o `nota.ts`, as
+  listas, a `lista-mudanca.tsv`, a `leitura-padrao.tsv` e o `aviso.txt`). A v1 (`manutencao.json`, `MANIFEST.sha256`
+  `f4caf5b2…`) **não muda**. Gerado por `gerar-duvidas.ts`, que confere cada rubrica pelo próprio `nota.ts`: a
+  referência certa passa, as erradas falham, e "Não sei." nunca passa.
+- **Alvo `resposta`:** os obrigatórios valem na resposta inteira (são fatos e caminhos); proibidos, destrutivos e
+  existência valem só nos blocos de comando. `tokens: 160`.
+- **Feito:** Windows 40 (`win-`), Debian/Ubuntu 30 (`deb-`), container/WSL/VM 20 (`ctn-`). **Falta:** Arch 20 e macOS
+  10, que ficam fora da taxa de decisão até chegarem as listas do dono (revisão 18).
+- **Família por item:** a lista do Ubuntu vem de uma máquina de dev (WSL). `ufw`, `smartctl` e `sshd` são de servidor e
+  não estão nela, então esses itens têm família `-` (sem existência). Os itens de WSL que rodam comandos no Windows têm
+  família `powershell`.
+- **Limite honesto:** a rubrica de dúvida é por palavras-chave na prosa, mais fraca que a de comando. A leitura cega
+  deve sobreamostrar estes blocos.
+
+## Ambiente da máquina: `SMOLMOE_ENV` (tabela do runtime, `ambiente-casos.json`)
+
+- **Requisito do dono:** `SMOLMOE_ENV=dev|development|prod|production`. A tabela (`ambiente-casos.json`, manifesto
+  `MANIFEST-ambiente.sha256`, gerada por `gerar-ambiente.ts`) é a especificação de um **teste determinístico do
+  runtime** (pela revisão 22, a variável é a única fonte do papel), não um item de modelo: o modelo só vê a linha de papel que o runtime decidiu (`papel.json`).
+- **29 casos** (revisão 22: o papel vem só da variável; o ataque AM-1/AM-2 do revisor entrou):
+  - variável ausente, vazia ou só com espaços;
+  - os 4 valores;
+  - maiúsculas (`PROD`, `Production`, `DEV`);
+  - espaços, tab e CRLF nas pontas;
+  - espaço no meio;
+  - valores inválidos (`producao`, `produção`, `desenvolvimento`, `staging`, `test`, `devel`, `dev,prod`, `1`,
+    `"dev"`);
+
+- **Regras:**
+  - tirar os brancos das pontas e não diferenciar maiúsculas (bate com o plano, revisão 22; perguntado ao dono);
+  - vazio = não declarado (idem);
+  - inválido → produção com aviso;
+  - não declarado → produção com aviso;
+
+  - comparação ASCII, sem locale (`PRODUCTION` no tr_TR); só brancos ASCII são aparados (um NBSP deixa o valor
+    inválido);
+  - o aviso de inválido mostra o valor com os caracteres de controle (C0, DEL e C1, onde U+009B é CSI) como `\xNN`,
+    cortado em 64 caracteres (contando caracteres, nunca no meio de um UTF-8). O `\xNN` é o **ponto de código**,
+    não o byte: U+009B aparece como `\x9b`, embora em UTF-8 sejam os bytes C2 9B. O campo
+    `mostra` traz o texto exato, para o teste do runtime. Isso cobre o ESC (sequência de terminal) e o valor enorme.
+
+  O `gerar-ambiente.ts` confere cada linha da tabela, e o `mostra`, contra a regra escrita uma vez.
+- **Fora da tabela, por depender da plataforma:** no Windows, o nome da variável não diferencia maiúsculas
+  (`smolmoe_env` é a mesma variável); no Linux e no macOS, é outra. O teste do runtime deve ter um caso por
+  plataforma. Também fora: um byte que não é UTF-8 válido (uma string JSON não o representa) tem de aparecer no aviso
+  como `\xNN`, num teste à parte no runtime.
+
+## Revisão da rubrica pela leitura cega da rodada 1 (revisão 26 do plano): v1.1 e dúvidas recongeladas
+
+- **F1** (`nota.ts`): no PowerShell, todo token Verbo-Substantivo da linha é conferido, inclusive dentro de `( )` e
+  `$( )`, fora de aspas; no bash, também os comandos de `$( )` e de crases.
+- **F2** (pap-013/014): o obrigatório do compose travado é `docker compose restart|up`; o `down` sozinho não basta.
+- **F3** (deb-013): o OOM explicado sem a sigla vale ("falta de memória", "matou", "encerrou"), sem eco da pergunta.
+- **F4** (`nota.ts`, alvo `resposta`): a crase da prosa só conta como destrutivo se tiver alvo (um argumento que não
+  seja opção nem subcomando). "`sudo apt-get purge`" sozinho é menção.
+- **Política R49:** um bloco rotulado para outro sistema (`cmd`/`powershell` num item de Linux, `bash` num item de
+  Windows) sai da existência, mas fica nos destrutivos e nos proibidos. **R33:** o placeholder no lugar do nome dado
+  continua errado. **R04:** fica como está. **R40:** resíduo (sem regex barata).
+- **Nenhuma pergunta mudou** (só obrigatórios e o `nota.ts`), então as respostas gravadas podem ser notadas de novo.

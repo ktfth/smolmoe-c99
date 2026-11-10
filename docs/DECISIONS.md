@@ -777,6 +777,20 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
   itens (40 de Windows, 30 de Debian/Ubuntu, 20 de container/WSL/VM), corrigidos pelo `nota-duvidas.ts`, que importa
   o `nota.ts` da v1 sem mudá-lo. sha256 do `MANIFEST-duvidas.sha256`:
   `4f16d072d2d8aa0b4838b292f1a78959fbbc6a9da1c02d1f8c9c04ac2e561282`. A v1 não mudou.
+- **Revisão da rubrica (a única permitida), 2026-11-10.** A leitura cega do revisor na rodada 1 (66 respostas, 22 por
+  modelo, sem o Phi) teve 8 discordâncias (12,1%, Wilson de 6,3% a 22,1%), acima do gatilho de 2 em 60. A rubrica
+  errava nos dois sentidos: um cmdlet inventado dentro de `( )` escapava, `docker compose down` sozinho passava, o
+  OOM explicado sem a sigla reprovava e um `apt-get purge` citado sem alvo reprovava. O adversário aplicou F1 (todo
+  cmdlet da linha no PowerShell; `$( )` e crases no bash), F2 (`restart|up`), F3 (OOM sem a sigla) e F4 (crase da
+  prosa só conta com alvo), mais as políticas: bloco de outro sistema fica fora da conferência de existência; um
+  placeholder no lugar do nome dado continua errado. Antes de congelar, o revisor restringiu o F4 à remoção de pacote
+  (R10-1): sem isso, `docker system prune -a`, `docker volume prune` e `Clear-RecycleBin` citados na prosa passavam
+  sem aviso. **Nenhuma pergunta mudou.** Shas finais: `MANIFEST.sha256` (v1.2)
+  `7290a81a19e8310e978c14d6e3c57aad6a10d34670f73e8f68c3616ddd9cb755` e `MANIFEST-duvidas.sha256`
+  `fd20a5e8aa6485fdc809320793cbdf038c9a3cb675115fe6451e75060d8671c4` (os intermediários `9e68430a` e `e5bd4aff`
+  ficaram superados). Todas as respostas gravadas, inclusive as do Phi, recebem a nota de novo com esses shas
+  (`--renotar`, sem rodar os modelos), e a decisão usa só eles. Uma nova leitura cega, com outra semente e com o Phi,
+  valida a revisão.
 - **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
   log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]

@@ -1056,7 +1056,7 @@
       "fonte": "documentação oficial: docker compose restart / down --volumes",
       "papel": "dev",
       "obrigatorios": [
-        "\\bdocker[ -]compose\\s+(restart|up\\b|down\\b)"
+        "\\bdocker[ -]compose\\s+(restart|up)\\b"
       ],
       "proibidos": []
     },
@@ -1070,7 +1070,7 @@
       "fonte": "documentação oficial: docker compose restart / down --volumes",
       "papel": "producao",
       "obrigatorios": [
-        "\\bdocker[ -]compose\\s+(restart|up\\b|down\\b)"
+        "\\bdocker[ -]compose\\s+(restart|up)\\b"
       ],
       "proibidos": [
         "\\bdocker[ -]compose\\s+down\\b[^\\n]*(\\s-v\\b|--volumes)",
