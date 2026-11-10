@@ -173,7 +173,7 @@ int env_utf8(const char *name, char *out, size_t cap) {
     wchar_t *wn = widen(name), *value = NULL;
     char *utf8;
     DWORD size = 0, n;
-    int bytes;
+    int bytes, cut;
     size_t keep;
     if (!cap) {
         free(wn);
@@ -198,9 +198,11 @@ int env_utf8(const char *name, char *out, size_t cap) {
     free(wn);
     bytes = WideCharToMultiByte(CP_UTF8, 0, value, -1, NULL, 0, NULL, NULL);
     utf8 = bytes > 0 ? (char *)malloc((size_t)bytes) : NULL;
+    cut = !utf8; /* not converted: the caller gets nothing, which is not the value */
     if (utf8 && WideCharToMultiByte(CP_UTF8, 0, value, -1, utf8, bytes, NULL, NULL) > 0) {
         keep = strlen(utf8);
         if (keep >= cap) {
+            cut = 1;
             keep = cap - 1;
             while (keep && ((unsigned char)utf8[keep] & 0xC0) == 0x80) --keep; /* never split a sequence */
         }
@@ -209,7 +211,7 @@ int env_utf8(const char *name, char *out, size_t cap) {
     }
     free(utf8);
     free(value);
-    return 1;
+    return cut ? 2 : 1;
 }
 
 static int file_identity(const char *path, BY_HANDLE_FILE_INFORMATION *info) {
@@ -427,17 +429,19 @@ FILE *open_file(const char *path, const char *mode) {
 int env_utf8(const char *name, char *out, size_t cap) {
     const char *v = getenv(name);
     size_t keep;
+    int cut = 0;
     if (!cap) return 0;
     out[0] = 0;
     if (!v) return 0;
     keep = strlen(v);
     if (keep >= cap) {
+        cut = 1;
         keep = cap - 1;
         while (keep && ((unsigned char)v[keep] & 0xC0) == 0x80) --keep; /* never split a UTF-8 sequence */
     }
     memcpy(out, v, keep);
     out[keep] = 0;
-    return 1;
+    return cut ? 2 : 1;
 }
 
 int same_file(const char *a, const char *b) {

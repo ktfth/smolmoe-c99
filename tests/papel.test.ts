@@ -62,6 +62,16 @@ describe.skipIf(!existsSync(PAPEL))("byte sequences and lengths an ordinary case
     expect(hex("F09F9880")).toBe("producao invalido 😀");
   });
 
+  test("a value longer than what is read is invalid, even when its start is 'dev' and the rest blanks (R9-2)", () => {
+    const env: Record<string, string> = { ...process.env, SMOLMOE_ENV: `dev${" ".repeat(2045)}x` } as Record<string, string>;
+    const out = Bun.spawnSync([PAPEL], { env, stdout: "pipe" }).stdout.toString().replace(/\r?\n$/, "");
+    expect(out.startsWith("producao invalido dev")).toBe(true);
+    expect(out.endsWith("…")).toBe(true);
+    /* Just under the limit, the blanks are trimmed and it is dev. */
+    const curto: Record<string, string> = { ...process.env, SMOLMOE_ENV: `dev${" ".repeat(2040)}` } as Record<string, string>;
+    expect(Bun.spawnSync([PAPEL], { env: curto, stdout: "pipe" }).stdout.toString().trim()).toBe("dev nenhum");
+  });
+
   test("a value of 5000 characters is read whole from the environment and shown cut at 64", () => {
     const env: Record<string, string> = { ...process.env, SMOLMOE_ENV: "x".repeat(5000) } as Record<string, string>;
     const r = Bun.spawnSync([PAPEL], { env, stdout: "pipe" });

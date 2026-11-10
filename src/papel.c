@@ -85,7 +85,20 @@ void papel_ler(const char *valor, PapelLido *out) {
 
 void papel_do_ambiente(PapelLido *out) {
     char valor[2048];
-    papel_ler(env_utf8("SMOLMOE_ENV", valor, sizeof(valor)) ? valor : NULL, out);
+    int lido = env_utf8("SMOLMOE_ENV", valor, sizeof(valor));
+    papel_ler(lido ? valor : NULL, out);
+    if (lido == 2) {
+        /* Only the start was read, and "dev" plus 2045 blanks plus "x" must not become dev: a value cut is invalid.
+         * What the notice shows always ends in "…", as the start of something longer. */
+        const char *inicio = valor;
+        size_t n;
+        while (espaco(*inicio)) ++inicio;
+        mostrar(inicio, strlen(inicio), out->mostra, sizeof(out->mostra) - 4);
+        n = strlen(out->mostra);
+        if (n < 3 || strcmp(out->mostra + n - 3, "…")) snprintf(out->mostra + n, sizeof(out->mostra) - n, "…");
+        out->papel = PAPEL_CONSERVADOR;
+        out->aviso = PAPEL_AVISO_INVALIDA;
+    }
 }
 
 const char *papel_marca(Papel p) {

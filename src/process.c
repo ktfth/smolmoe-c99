@@ -97,13 +97,23 @@ int stdin_is_terminal(void) {
 #  define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004 /* Windows 10; older consoles refuse it and stay without color */
 #endif
 
+static DWORD stderr_mode_before;
+
+/* The console is shared with the shell that started us: it gets its mode back. */
+static void restore_stderr_mode(void) { SetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), stderr_mode_before); }
+
 int stderr_color(void) {
     HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
     DWORD mode;
     const char *no_color = getenv("NO_COLOR");
     if (no_color && no_color[0]) return 0;
-    if (GetConsoleMode(err, &mode)) /* a console: the colors need its VT processing on */
-        return (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) || SetConsoleMode(err, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    if (GetConsoleMode(err, &mode)) { /* a console: the colors need its VT processing on */
+        if (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) return 1;
+        if (!SetConsoleMode(err, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) return 0;
+        stderr_mode_before = mode;
+        atexit(restore_stderr_mode);
+        return 1;
+    }
     return msys_terminal(err);
 }
 
