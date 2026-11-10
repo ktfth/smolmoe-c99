@@ -776,17 +776,22 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
 - **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono) e as respostas do dono viram o bloco v2. A
   escolha do modelo espera todos os blocos.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]
-  [--piloto]`. Ele recusa rodar se o conjunto, o detector, o prompt do kit ou a linha de data não forem os congelados
-  abaixo. Faz uma pergunta por processo do chat de verdade, como o kit pergunta: o prompt do kit, a linha de papel
-  nos itens de papel, a linha de data e nenhuma ferramenta (`--no-tools`), com `--context 4096`, temperatura 0 e
-  `--prefix-cache` por modelo e variante de prompt. Dá a nota com o
-  `nota.ts` do conjunto, sem editar. Itens de família sem lista de comandos (pacman, brew) ficam fora até a v2. O
-  resultado vai para um JSONL retomável; o resumo dá cada taxa com o IC de Wilson e cada par de modelos com o teste
-  de sinal nos dois sentidos.
+  [--piloto]`. Ele recusa rodar se os conjuntos presentes, o detector, o prompt do kit ou a linha de data não forem os
+  congelados aqui. Lê todos os conjuntos copiados para `tests/evals/manutencao/` (o v1 e, quando congelado, o das
+  dúvidas, cada um com o seu manifesto). Faz uma pergunta por processo do chat de verdade, como o kit pergunta: o
+  prompt do kit, a linha de papel nos itens de papel, a linha de data e nenhuma ferramenta (`--no-tools`), com
+  `--context 4096`, temperatura 0 e `--prefix-cache` por modelo e variante de prompt. Dá a nota com o `nota.ts` do
+  conjunto, sem editar. Itens de família sem lista de comandos (pacman, brew) ficam fora até a v2. Cada linha do
+  JSONL grava os congelamentos e o sha256 do `model.smoe`; a retomada recusa um arquivo feito em outras condições
+  (piloto, outro congelamento, outro modelo com o mesmo nome) em vez de misturar. O resumo dá cada taxa com o IC de
+  Wilson e cada par de modelos com o teste de sinal nos dois sentidos.
 - **Detector de português** (a única regra que o `nota.ts` deixa ao dev), `scripts/eval/portugues.ts`, congelado com
-  sha256 `0f3f936636c6e34c89e8320e5b6f44581aa2a06b36cd7fe0623db3aa90b75496`. Ele lê só a prosa (sem blocos nem crases).
-  A resposta está em português quando as palavras funcionais do português superam as do inglês e as do espanhol;
-  empate não conta, e palavras iguais nas duas línguas ("use", "a") não contam. Prosa de menos de 4 palavras passa.
+  sha256 `1d22c83291a8bb5fa301c9b5e92cb56642b1d27fd62f63f11d3c1bd84d386fab` (recongelado antes da 1ª rodada de
+  decisão: o anterior, `0f3f9366`, aprovava espanhol, porque "de", "que" e "para" contavam só para o português). Ele
+  lê só a prosa, sem blocos, crases e nomes de domínio. Cada palavra funcional conta para todas as línguas em que
+  existe ("de" para o português e o espanhol, "do" para o português e o inglês); `ç`/`ã`/`õ` marcam o português, e
+  `ñ`/`-ción` marcam o espanhol. A resposta está em português quando a contagem do português supera a do inglês e a do
+  espanhol; empate não conta. Prosa de menos de 4 palavras passa.
 - **Prompt do kit**, `kit/manutencao.txt`, congelado com sha256
   `860d7bfd0350be7e08c768e605a383635caa4a1b119a58f193a5cbd2e64b1582`: é o prompt de sistema do kit e do eval. Nos
   itens de papel, a linha do `papel.json` vem depois dele. **O bloco de comando mede sem linha de papel:** no kit, uma

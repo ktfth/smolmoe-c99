@@ -10,8 +10,9 @@ import { join } from "node:path";
 import { testeDeSinal, wilson } from "../scripts/eval/estatistica";
 import { emPortugues } from "../scripts/eval/portugues";
 import {
-  DETECTOR, FROZEN, KIT_DATE, KIT_PROMPT, NOW, carregarItens, carregarRegras, conferirCongelados, conferirManifesto,
-  linhaDeData, promptDoKit, resumo, semLista, sha, sistemaDoItem,
+  CONJUNTOS, DETECTOR, FROZEN, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
+  conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, resumo,
+  semLista, sha, sistemaDoItem,
 } from "../scripts/eval-manutencao";
 import { avaliar } from "./evals/manutencao/nota";
 import { ROOT, bundledModel, tempDir } from "./support/run";
@@ -21,13 +22,46 @@ const SLOW = Number(process.env.SMOLMOE_SLOW_MS ?? 180_000);
 const decisions = () => readFileSync(join(ROOT, "docs", "DECISIONS.md"), "utf8");
 
 describe("what was frozen", () => {
-  test("the set, the detector, the kit prompt and the date line are the ones in DECISIONS, checked before running", () => {
-    expect(conferirManifesto()).toBe(FROZEN.manifesto);
+  test("the sets, the detector, the kit prompt and the date line are the ones in DECISIONS, checked before running", () => {
+    expect(conferirManifesto()).toBe(CONJUNTOS[0]!.sha);
     expect(sha(DETECTOR)).toBe(FROZEN.detector);
     expect(sha(KIT_PROMPT)).toBe(FROZEN.sistema);
     expect(sha(KIT_DATE)).toBe(FROZEN.linhaData);
-    for (const v of Object.values(FROZEN)) expect(decisions()).toContain(v);
+    for (const v of [...Object.values(FROZEN), ...CONJUNTOS.map((c) => c.sha).filter((s) => s !== null)])
+      expect(decisions()).toContain(v);
     expect(() => conferirCongelados()).not.toThrow();
+  });
+
+  test("every set present is frozen, and every item carries the frozen SHA-256 of its set", () => {
+    const presentes = conjuntosPresentes();
+    expect(presentes.every((c) => c.sha !== null)).toBe(true);
+    const itens = carregarItens();
+    expect(new Set(itens.map((i) => i.id)).size).toBe(itens.length);
+    expect(itens.filter((i) => i.id.startsWith("cmd-")).every((i) => i.manifesto === CONJUNTOS[0]!.sha)).toBe(true);
+  });
+
+  test("each set present is graded by its own module, which its manifest freezes", async () => {
+    const avaliadores = await carregarAvaliadores();
+    for (const c of conjuntosPresentes()) {
+      expect(readFileSync(join(SET, c.manifesto), "utf8")).toMatch(new RegExp(`[ *]${c.nota.replace(".", "\\.")}\\r?$`, "m"));
+      expect(avaliadores.get(c.itens)).toBe((await import(join(SET, c.nota))).avaliar);
+    }
+    expect(avaliadores.get("manutencao.json")).toBe(avaliar);
+    expect(CONJUNTOS.find((c) => c.itens === "duvidas.json")?.nota).toBe("nota-duvidas.ts");
+  });
+
+  test("resuming refuses a file made under other conditions instead of mixing two runs", () => {
+    const linha = (extra: Partial<Resultado>): Resultado => ({ modelo: "m", id: "cmd-001", bloco: "comando", certa: true,
+      motivo: null, segundos: 1, resposta: "", manifesto: CONJUNTOS[0]!.sha!, congelado: FROZEN, modelo_sha: "aa", ...extra });
+    const modelos = new Map([["m", "aa"]]), manifestos = new Map([["cmd-001", CONJUNTOS[0]!.sha!]]);
+    expect(conferirRetomada([linha({})], modelos, manifestos, false)).toEqual(new Set(["m\tcmd-001"]));
+    expect(() => conferirRetomada([linha({ piloto: true })], modelos, manifestos, false)).toThrow(/piloto/);
+    expect(() => conferirRetomada([linha({})], modelos, manifestos, true)).toThrow(/não é de piloto/);
+    expect(() => conferirRetomada([linha({ congelado: { ...FROZEN, detector: "0f3f9366" } as typeof FROZEN })], modelos,
+      manifestos, false)).toThrow(/outro congelamento do detector/);
+    expect(() => conferirRetomada([linha({ congelado: undefined })], modelos, manifestos, false)).toThrow(/congelamento/);
+    expect(() => conferirRetomada([linha({ modelo_sha: "bb" })], modelos, manifestos, false)).toThrow(/outro model\.smoe/);
+    expect(() => conferirRetomada([linha({ manifesto: "f00" })], modelos, manifestos, false)).toThrow(/conjunto/);
   });
 
   test("the kit prompt asks for Brazilian Portuguese and a code block; a role item adds its frozen line, then the date", () => {
@@ -107,6 +141,15 @@ describe("Portuguese detector", () => {
     expect(emPortugues("```bash\nsudo apt update && sudo apt upgrade -y\n```")).toBe(true);
   });
 
+  test("words spelled the same in Portuguese and Spanish count for both (the reviewer's three Spanish sentences)", () => {
+    expect(emPortugues("Para ver el espacio libre del disco, use este comando que muestra el uso de cada partición:")).toBe(false);
+    expect(emPortugues("Ejecute este comando en PowerShell para ver los procesos que más memoria usan:")).toBe(false);
+    expect(emPortugues("Puede usar el siguiente comando para reiniciar el servicio de impresión en Windows:")).toBe(false);
+    expect(emPortugues("Para ver os processos que mais usam memória, rode este comando no PowerShell:")).toBe(true);
+    /* A domain is not prose: example.com does not make "com" Portuguese. */
+    expect(emPortugues("Download the installer from example.com and run it as administrator.")).toBe(false);
+  });
+
   test("works inside nota.ts: an English answer with the right command is wrong for the language only", () => {
     const item = carregarItens().find((i) => i.id === "cmd-001")!;
     const nota = avaliar(item, "To see the free space of each disk, use this command and check the output:\n```powershell\nGet-Volume\n```",
@@ -130,7 +173,7 @@ describe.skipIf(!qwen)("one item through the real chat", () => {
       const linhas = readFileSync(saida, "utf8").trim().split("\n");
       expect(linhas).toHaveLength(1);
       const res = JSON.parse(linhas[0]!) as { id: string; resposta: string; manifesto: string; piloto: boolean };
-      expect(res).toMatchObject({ id: "cmd-001", manifesto: FROZEN.manifesto, piloto: true });
+      expect(res).toMatchObject({ id: "cmd-001", manifesto: CONJUNTOS[0]!.sha, congelado: FROZEN, piloto: true });
       expect(res.resposta.length).toBeGreaterThan(0);
       expect(r.stdout.toString()).toContain("## qwen2.5-0.5b-instruct");
       expect(readdirSync(join(ROOT, "build", "eval-cache")).some((f) => /^qwen2\.5-0\.5b-instruct-[0-9a-f]{12}\.kv$/.test(f)))
