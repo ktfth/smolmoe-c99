@@ -1,6 +1,8 @@
 /* Unit tests for the chat tools: clock parsing, date arithmetic, strict call
  * parsing of untrusted model output and the system-prompt section. */
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "calendar.h"
@@ -402,6 +404,82 @@ static void test_system_prompt(void) {
     CHECK(tools_system_prompt("Seja breve.", out, 64) == 0, "too small a buffer is refused");
 }
 
+/* Seeded fuzzing of untrusted model output. Calls are mutated from valid ones
+ * and passed in buffers of exactly their length (no NUL after them), so an
+ * over-read shows up under the sanitizers. For every call:
+ *  - tool_run never writes past TOOL_NAME_MAX / TOOL_RESULT_MAX and always
+ *    leaves a JSON object; a call that did not run leaves {"erro": ...};
+ *  - for a neutral message (no number, date, conversion or counting asked),
+ *    only data_atual may be accepted as grounded: nothing else is "invented". */
+static uint64_t fuzz_state = 0x2545F4914F6CDD1Dull;
+
+static uint32_t fuzz_rnd(uint32_t n) {
+    fuzz_state ^= fuzz_state << 13;
+    fuzz_state ^= fuzz_state >> 7;
+    fuzz_state ^= fuzz_state << 17;
+    return n ? (uint32_t)(fuzz_state % n) : 0;
+}
+
+static void test_fuzz_calls(void) {
+    static const char *const seeds[] = {
+        "{\"name\": \"data_atual\", \"arguments\": {}}",
+        "{\"name\": \"dias_ate\", \"arguments\": {\"data\": \"25 de dezembro\"}}",
+        "{\"name\": \"dias_ate\", \"arguments\": {\"mes\": 12, \"dia\": 25}}",
+        "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"230 * 15 / 100\"}}",
+        "{\"name\": \"converter\", \"arguments\": {\"valor\": 100, \"de\": \"km\", \"para\": \"milhas\"}}",
+        "{\"name\": \"contar\", \"arguments\": {\"texto\": \"morango\", \"letra\": \"r\"}}",
+        "{\"arguments\": \"{\\\"data\\\": \\\"25/12\\\"}\", \"name\": \"dias_ate\"}"};
+    static const char *const neutral[] = {"Qual é a capital da França?", "Quem escreveu Dom Casmurro?",
+                                          "Olá, tudo bem?", "Me dê uma dica curta para estudar melhor."};
+    static const char *const users[] = {"Quanto falta para o natal?", "Quanto é 15% de 230?",
+                                        "Converta 100 km em milhas", "Quantas letras r tem em morango?", ""};
+    static const char hot[] = "{}[]\":,\\ 0123456789.-eE\x01\x7f\xc3\xa7\xff\x00";
+    const char *env = getenv("SM_FUZZ_ITERS");
+    unsigned it, n = env && strtoul(env, NULL, 10) ? (unsigned)strtoul(env, NULL, 10) : 3000;
+    ToolClock now = clock_at("2026-11-06T10:30");
+    for (it = 0; it < n; ++it) {
+        char work[1024], name[TOOL_NAME_MAX], result[TOOL_RESULT_MAX];
+        const char *seed = seeds[fuzz_rnd(sizeof(seeds) / sizeof(seeds[0]))];
+        size_t len = strlen(seed), m, muts = fuzz_rnd(8);
+        char *call;
+        const char *user;
+        int ran, neutral_msg = fuzz_rnd(2);
+        memcpy(work, seed, len);
+        if (!fuzz_rnd(10)) { /* pure noise */
+            len = fuzz_rnd(200);
+            for (m = 0; m < len; ++m) work[m] = (char)fuzz_rnd(256);
+        }
+        for (m = 0; m < muts; ++m) {
+            size_t at = len ? fuzz_rnd((uint32_t)len) : 0;
+            switch (fuzz_rnd(5)) {
+            case 0: if (len) work[at] = hot[fuzz_rnd(sizeof(hot))]; break;
+            case 1: if (len < 900) memmove(work + at + 1, work + at, len - at), work[at] = hot[fuzz_rnd(sizeof(hot))], ++len; break;
+            case 2: if (len) memmove(work + at, work + at + 1, len - at - 1), --len; break;
+            case 3: if (len + 64 < sizeof(work)) memmove(work + at + 64, work + at, len - at), memset(work + at, 'a', 64), len += 64; break;
+            default: len = at; break;
+            }
+        }
+        call = (char *)malloc(len ? len : 1);
+        if (!call) return;
+        memcpy(call, work, len);
+        user = neutral_msg ? neutral[fuzz_rnd(sizeof(neutral) / sizeof(neutral[0]))]
+                           : users[fuzz_rnd(sizeof(users) / sizeof(users[0]))];
+        memset(name, 0x55, sizeof(name));
+        memset(result, 0x55, sizeof(result));
+        ran = tool_run(call, len, user, &now, name, result);
+        CHECK(memchr(name, 0, sizeof(name)) != NULL, "name not terminated (iteration %u)", it);
+        CHECK(memchr(result, 0, sizeof(result)) != NULL, "result not terminated (iteration %u)", it);
+        if (memchr(result, 0, sizeof(result))) {
+            size_t rl = strlen(result);
+            CHECK(rl >= 2 && result[0] == '{' && result[rl - 1] == '}', "result is not an object: %s", result);
+            if (!ran) CHECK(!strncmp(result, "{\"erro\": \"", 10), "failed call without erro: %s", result);
+        }
+        if (neutral_msg && tool_call_grounded(call, len, user))
+            CHECK(!strcmp(name, "data_atual"), "call accepted for a neutral message: %.*s | %s", (int)len, call, user);
+        free(call);
+    }
+}
+
 int main(void) {
     test_calendar();
     test_date_parse();
@@ -418,6 +496,7 @@ int main(void) {
     test_convert_and_count();
     test_forced_choice();
     test_system_prompt();
+    test_fuzz_calls();
     if (failures) {
         fprintf(stderr, "%d tool test(s) failed\n", failures);
         return 1;

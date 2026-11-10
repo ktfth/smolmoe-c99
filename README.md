@@ -248,6 +248,8 @@ docs/         Documentação detalhada de arquitetura, formato binário, modelos
 ## Documentação Complementar
 
 - **[docs/CAMINHOS.md](docs/CAMINHOS.md)** — Guia completo comparando cada modo de execução (CLI, GUI, Web, pacotes únicos) por sistema operacional.
+- **[docs/INVENTARIO.md](docs/INVENTARIO.md)** — `smolmoe-inventario`: inventário defensivo só leitura da máquina (portas, usuários, SUID, persistência, chaves SSH) e comparação entre inventários.
+- **[docs/PLANO-DEFESA.md](docs/PLANO-DEFESA.md)** — Plano e revisão do uso defensivo.
 - **[docs/INSTALL.md](docs/INSTALL.md)** — Download e verificação dos binários prontos do GitHub Releases.
 - **[docs/DESKTOP.md](docs/DESKTOP.md)** — Uso, atalhos e detalhes técnicos da interface gráfica (Dear ImGui).
 - **[docs/WEB.md](docs/WEB.md)** — Como compilar e servir a versão WebAssembly no navegador.
