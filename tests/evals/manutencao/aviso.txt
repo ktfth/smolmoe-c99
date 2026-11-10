@@ -1,0 +1,1 @@
+cuidado|irrevers|permanentemente|definitivamente|n[aã]o (h[aá] como|d[aá] para|tem como|pode ser) (desfazer|recuperar|revert)|sem (volta|como desfazer)|\bbackup\b|c[oó]pia de seguran[cç]a|confira antes|perde(r[aá]?|m)? (os |seus |todos os )?(dados|arquivos)|apaga(r[aá]?)? (tudo|todos|permanente)

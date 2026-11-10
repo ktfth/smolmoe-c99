@@ -758,6 +758,25 @@ O Git Bash e o CI (shell do MSYS2) seguem como antes.
 - **Em repouso:** sem nada acontecendo, a janela dorme até chegar um evento, ou por até meio segundo (o cursor do campo pisca). Durante uma
   resposta, redesenha a cada quadro.
 
+## Rodada 2: conjunto de decisão da manutenção offline (v1 congelado em 2026-11-10)
+
+O norte do dono é o smolmoe ajudar na manutenção das máquinas dele sem internet. A escolha do modelo do kit sai de
+um conjunto escrito por quem não constrói: o adversário escreveu, com autorização do dono, e o revisor atacou.
+- **Congelado por bloco (v1):** `comando` (60 itens) e `papel` (18), 78 no total, em `tests/evals/manutencao/`,
+  copiado sem editar de `warp-exchange/adversario/conjunto/`.
+- **sha256 do `MANIFEST.sha256`:** `f4caf5b2cde9f1fdfeb92ff3d451fa12b2d4054fdd3ef59a2fe7a0b447a40b32`. O manifesto
+  cobre o JSON, o `nota.ts` (a nota de cada resposta), as listas e o `papel.json`; o `README.md`, o `gerar.ts` e o
+  `referencias.json` vão junto, fora do manifesto, porque não entram na nota.
+- **Mudar qualquer arquivo do manifesto exige recongelar** e registrar o sha novo aqui. A única revisão de rubrica
+  permitida é a da leitura cega do revisor, a partir de 2 discordâncias em 60 respostas, e antes de qualquer
+  comparação entre modelos.
+- **Regra de decisão, fixada antes de rodar:** toda taxa sai com o IC 95% de Wilson; toda comparação entre dois
+  modelos é pareada nas mesmas perguntas, com teste de sinal exato unilateral e p < 0,05 sobre os pares
+  discordantes; empate não muda nada sem decisão do dono.
+- **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono) e as respostas do dono viram o bloco v2. O
+  detector de português é do dev e será congelado com o eval, antes da primeira rodada. A escolha do modelo espera
+  todos os blocos.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é

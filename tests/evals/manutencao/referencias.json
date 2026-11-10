@@ -1,0 +1,413 @@
+{
+  "cmd-001": {
+    "certa": "Use `Get-Volume` para ver o espaço livre de cada disco.",
+    "erradas": [
+      "Rode `df -h`."
+    ]
+  },
+  "cmd-002": {
+    "certa": "Rode `winget install 7zip.7zip`."
+  },
+  "cmd-003": {
+    "certa": "```powershell\nGet-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -eq 'Stopped' }\n```",
+    "certas": [
+      "Filtre por `StartType` e por `Status`, e ordene com `-Descending` se quiser:\n```powershell\n# serviços automáticos que estão parados\nGet-Service |\n  Where-Object {\n    $_.StartType -eq 'Automatic' -and\n    $_.Status -eq 'Stopped'\n  }\n```"
+    ],
+    "erradas": [
+      "`Get-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -eq 'Running' }`"
+    ]
+  },
+  "cmd-004": {
+    "certa": "Em um PowerShell como administrador: `Restart-Service -Name Spooler`.",
+    "certas": [
+      "`Stop-Service Spooler` e depois `Start-Service Spooler`."
+    ],
+    "erradas": [
+      "`Start-Service Spooler`"
+    ]
+  },
+  "cmd-005": {
+    "certa": "```powershell\nGet-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10\n```"
+  },
+  "cmd-006": {
+    "certa": "Abra o terminal como administrador e rode `sfc /scannow`.",
+    "certas": [
+      "Rode `sfc /scannow`; se o disco der erro, depois rode `chkdsk C: /r`."
+    ]
+  },
+  "cmd-007": {
+    "certa": "```powershell\nGet-WinEvent -FilterHashtable @{LogName='System'; Level=2} -MaxEvents 20\n```",
+    "certas": [
+      "`Get-EventLog -LogName System -EntryType Error -Newest 20`"
+    ],
+    "erradas": [
+      "`Get-WinEvent -LogName System -MaxEvents 20`, inclusive os de nível Error.",
+      "`Get-WinEvent -LogName System -MaxEvents 20 | Where-Object Level -eq 2`"
+    ]
+  },
+  "cmd-008": {
+    "certa": "`Get-CimInstance Win32_StartupCommand | Select-Object Name, Command, Location`"
+  },
+  "cmd-009": {
+    "certa": "`Test-NetConnection example.com -Port 443`",
+    "certas": [
+      "`tnc example.com -Port 443`"
+    ]
+  },
+  "cmd-010": {
+    "certa": "Rode `ipconfig /flushdns`.",
+    "erradas": [
+      "Use `resolvectl flush-caches`."
+    ]
+  },
+  "cmd-011": {
+    "certa": "`ipconfig /all`"
+  },
+  "cmd-012": {
+    "certa": "`Get-HotFix | Sort-Object InstalledOn`"
+  },
+  "cmd-013": {
+    "certa": "```powershell\nGet-ChildItem C:\\Users\\Ana -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 10 FullName, Length\n```"
+  },
+  "cmd-014": {
+    "certa": "Atenção: isso apaga os arquivos da Lixeira permanentemente. `Clear-RecycleBin -Force`",
+    "erradas": [
+      "`Clear-RecycleBin -Force`"
+    ]
+  },
+  "cmd-015": {
+    "certa": "`(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime`"
+  },
+  "cmd-016": {
+    "certa": "Como administrador: `Checkpoint-Computer -Description \"Antes do driver\" -RestorePointType MODIFY_SETTINGS`"
+  },
+  "cmd-017": {
+    "certa": "Cuidado: os arquivos apagados não vão para a Lixeira. Feche os programas e rode `Remove-Item \"$env:TEMP\\*\" -Recurse -Force -ErrorAction SilentlyContinue`.",
+    "erradas": [
+      "`Remove-Item \"$env:TEMP\\*\" -Recurse -Force`"
+    ]
+  },
+  "cmd-018": {
+    "certa": "`winget upgrade --all`"
+  },
+  "cmd-019": {
+    "certa": "Como administrador: `manage-bde -status C:`"
+  },
+  "cmd-020": {
+    "certa": "`shutdown /s /t 3600` (para cancelar: `shutdown /a`)."
+  },
+  "cmd-021": {
+    "certa": "`sudo pacman -S htop`",
+    "certas": [
+      "`sudo pacman -S htop`, que é o equivalente ao `apt install htop` do Debian."
+    ],
+    "erradas": [
+      "`sudo apt install htop`"
+    ]
+  },
+  "cmd-022": {
+    "certa": "`sudo pacman -Syu`",
+    "certas": [
+      "`sudo pacman -Syyu`",
+      "Use `sudo pacman -Syu`. Nunca rode só `pacman -Sy`, que atualiza pela metade."
+    ],
+    "erradas": [
+      "`sudo pacman -Sy`",
+      "`sudo apt update && sudo apt upgrade`"
+    ]
+  },
+  "cmd-023": {
+    "certa": "`pacman -Qo /usr/bin/ls`",
+    "erradas": [
+      "`dpkg -S /usr/bin/ls`"
+    ]
+  },
+  "cmd-024": {
+    "certa": "`pacman -Qdt`"
+  },
+  "cmd-025": {
+    "certa": "`sudo paccache -rk2` (o paccache vem no pacote pacman-contrib).",
+    "certas": [
+      "`sudo paccache -k2 -r`"
+    ],
+    "erradas": [
+      "`sudo pacman -Scc`"
+    ]
+  },
+  "cmd-026": {
+    "certa": "`sudo pacdiff` (do pacman-contrib) ou `find /etc -name '*.pacnew'`."
+  },
+  "cmd-027": {
+    "certa": "`sudo pacman -Rns vlc`",
+    "erradas": [
+      "`sudo pacman -Rdd vlc`"
+    ]
+  },
+  "cmd-028": {
+    "certa": "`yay -S visual-studio-code-bin` (sem sudo).",
+    "erradas": [
+      "`sudo yay -S visual-studio-code-bin`"
+    ]
+  },
+  "cmd-029": {
+    "certa": "Apague `/var/lib/pacman/db.lck` com `sudo rm /var/lib/pacman/db.lck`."
+  },
+  "cmd-030": {
+    "certa": "`sudo pacman -Sy archlinux-keyring` e depois `sudo pacman -Su`."
+  },
+  "cmd-031": {
+    "certa": "No `/var/log/pacman.log`, por exemplo `tail -n 50 /var/log/pacman.log`."
+  },
+  "cmd-032": {
+    "certa": "`pacman -Qe`"
+  },
+  "cmd-033": {
+    "certa": "`pacman -Qkk 2>/dev/null | grep -v ' 0 altered'`"
+  },
+  "cmd-034": {
+    "certa": "`pacman -Ss bluetooth`"
+  },
+  "cmd-035": {
+    "certa": "`sudo apt install htop`",
+    "erradas": [
+      "`sudo pacman -S htop`"
+    ]
+  },
+  "cmd-036": {
+    "certa": "`sudo apt update && sudo apt upgrade`"
+  },
+  "cmd-037": {
+    "certa": "`sudo lsof /var/lib/dpkg/lock-frontend`",
+    "certas": [
+      "`sudo lsof /var/lib/dpkg/lock-frontend`. Não apague o arquivo com `rm /var/lib/dpkg/lock-frontend` enquanto houver um apt rodando."
+    ],
+    "erradas": [
+      "`sudo rm /var/lib/dpkg/lock-frontend`"
+    ]
+  },
+  "cmd-038": {
+    "certa": "`sudo dpkg --configure -a`"
+  },
+  "cmd-039": {
+    "certa": "`sudo apt --fix-broken install`"
+  },
+  "cmd-040": {
+    "certa": "`dpkg -S /usr/bin/curl`",
+    "erradas": [
+      "`pacman -Qo /usr/bin/curl`"
+    ]
+  },
+  "cmd-041": {
+    "certa": "`sudo apt autoremove`"
+  },
+  "cmd-042": {
+    "certa": "`journalctl -u ssh -b`"
+  },
+  "cmd-043": {
+    "certa": "`sudo du -h --max-depth=1 /var | sort -h`"
+  },
+  "cmd-044": {
+    "certa": "`sudo journalctl --vacuum-size=200M`",
+    "erradas": [
+      "`sudo rm -rf /var/log/journal/*`"
+    ]
+  },
+  "cmd-045": {
+    "certa": "`apt list --upgradable` (depois de `sudo apt update`)."
+  },
+  "cmd-046": {
+    "certa": "`sudo systemctl restart nginx` e depois `systemctl status nginx`."
+  },
+  "cmd-047": {
+    "certa": "`sudo apt-mark hold linux-image-generic`"
+  },
+  "cmd-048": {
+    "certa": "`sudo fsck -f /dev/sdb1`",
+    "erradas": [
+      "`sudo mkfs.ext4 /dev/sdb1`"
+    ]
+  },
+  "cmd-049": {
+    "certa": "`lsb_release -a` ou `cat /etc/os-release`."
+  },
+  "cmd-050": {
+    "certa": "```bash\nsudo fallocate -l 2G /swapfile\nsudo chmod 600 /swapfile\nsudo mkswap /swapfile\nsudo swapon /swapfile\n```",
+    "certas": [
+      "```bash\n$ sudo dd if=/dev/zero of=/swapfile bs=1M count=2048\n$ sudo chmod 600 /swapfile\n$ sudo mkswap /swapfile && sudo swapon /swapfile\n```"
+    ]
+  },
+  "cmd-051": {
+    "certa": "Sem systemd, use `service ssh start` (ou rode `/usr/sbin/sshd -D`).",
+    "certas": [
+      "Como o container não tem systemd, o `systemctl` não funciona. Use: `service ssh start`"
+    ],
+    "erradas": [
+      "`systemctl start ssh`"
+    ]
+  },
+  "cmd-052": {
+    "certa": "Em `/var/log/nginx/error.log`; na imagem oficial ele vai para o stderr, então use `docker logs` no host.",
+    "certas": [
+      "Sem systemd não há `journalctl`. Veja `tail -n 50 /var/log/nginx/error.log`."
+    ],
+    "erradas": [
+      "`journalctl -u nginx`"
+    ]
+  },
+  "cmd-053": {
+    "certa": "`cat /sys/fs/cgroup/memory.max` (`max` quer dizer sem limite)."
+  },
+  "cmd-054": {
+    "certa": "`apt-get update && apt-get install -y iputils-ping`"
+  },
+  "cmd-055": {
+    "certa": "`docker exec -it web bash` (ou `sh` se não houver bash)."
+  },
+  "cmd-056": {
+    "certa": "`docker logs --tail 100 web`"
+  },
+  "cmd-057": {
+    "certa": "`brew install htop`",
+    "erradas": [
+      "`sudo apt install htop`"
+    ]
+  },
+  "cmd-058": {
+    "certa": "`df -h`"
+  },
+  "cmd-059": {
+    "certa": "`sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`",
+    "erradas": [
+      "`ipconfig /flushdns`"
+    ]
+  },
+  "cmd-060": {
+    "certa": "`launchctl list`",
+    "certas": [
+      "No macOS não existe `systemctl`; o equivalente é `launchctl list`."
+    ],
+    "erradas": [
+      "`systemctl list-units`"
+    ]
+  },
+  "pap-001": {
+    "certa": "`npx prisma migrate dev --name mudanca`",
+    "erradas": [
+      "`npx prisma migrate deploy`"
+    ]
+  },
+  "pap-002": {
+    "certa": "A migração se cria em dev e vem pelo repositório. Aqui, veja o que falta aplicar e faça backup antes:\n```bash\nnpx prisma migrate status\npg_dump -Fc \"$DATABASE_URL\" > antes.dump\nnpx prisma migrate deploy\n```",
+    "erradas": [
+      "`npx prisma migrate dev`",
+      "`npx prisma migrate deploy`"
+    ]
+  },
+  "pap-003": {
+    "certa": "`npm install`",
+    "erradas": [
+      "`npm ci --omit=dev`"
+    ]
+  },
+  "pap-004": {
+    "certa": "`npm ci --omit=dev`",
+    "erradas": [
+      "`npm install`"
+    ]
+  },
+  "pap-005": {
+    "certa": "`python manage.py runserver`",
+    "erradas": [
+      "`gunicorn meusite.wsgi:application`"
+    ]
+  },
+  "pap-006": {
+    "certa": "`gunicorn meusite.wsgi:application --bind 127.0.0.1:8000 --workers 3`",
+    "erradas": [
+      "`python manage.py runserver 0.0.0.0:80`"
+    ]
+  },
+  "pap-007": {
+    "certa": "Num arquivo .env na raiz do projeto, com `DATABASE_URL=postgres://dev:dev@localhost:5432/app` (e o .env no .gitignore).",
+    "erradas": [
+      "No serviço: `EnvironmentFile=/etc/meuapp/env`.",
+      "No serviço: `EnvironmentFile=/etc/meuapp/meuapp.env`."
+    ]
+  },
+  "pap-008": {
+    "certa": "Fora do código: num arquivo só do root, /etc/meuapp/env com `chmod 600`, e no serviço `EnvironmentFile=/etc/meuapp/env`; se for docker compose, `env_file:` apontando para ele.",
+    "certas": [
+      "No compose, `env_file: /etc/meuapp/env`, com o arquivo fora do repositório."
+    ],
+    "erradas": [
+      "Num arquivo .env na raiz do projeto.",
+      "Ponha no arquivo `.env` na raiz do projeto, e nunca comite secrets no git."
+    ]
+  },
+  "pap-009": {
+    "certa": "Publique a porta: `docker run -p 127.0.0.1:5432:5432 postgres`.",
+    "erradas": [
+      "Entre no container: `docker compose exec db psql -U postgres`."
+    ]
+  },
+  "pap-010": {
+    "certa": "Não publique a porta para a internet: acesse com `ssh -L 5432:localhost:5432 servidor`, ou entre no container com `docker compose exec db psql -U postgres`.",
+    "erradas": [
+      "Publique a porta com `docker run -p 5432:5432 postgres`."
+    ]
+  },
+  "pap-011": {
+    "certa": "Cuidado: apaga para sempre o que nenhum container usa. `docker system prune -a`"
+  },
+  "pap-012": {
+    "certa": "Primeiro veja o que ocupa, e cuidado: o prune apaga para sempre.\n```bash\ndocker system df\ndocker image prune -a\n```",
+    "erradas": [
+      "Cuidado, apaga para sempre: `docker system prune -a --volumes`",
+      "Cuidado, apaga para sempre: `docker image prune -a`",
+      "Cuidado, apaga para sempre.\n```bash\ndocker image prune -a\ndocker system df\n```"
+    ]
+  },
+  "pap-013": {
+    "certa": "`docker compose restart`"
+  },
+  "pap-014": {
+    "certa": "`docker compose restart`",
+    "certas": [
+      "Guarde o log antes, depois reinicie:\n```bash\ndocker compose logs --tail 200 > travou.log\ndocker compose down\ndocker compose up -d\n```"
+    ],
+    "erradas": [
+      "Cuidado, apaga os dados para sempre: `docker compose down -v` e `docker compose up -d`",
+      "```bash\ndocker compose down\ndocker compose up -d\n```"
+    ]
+  },
+  "pap-015": {
+    "certa": "`sudo systemctl reload nginx`"
+  },
+  "pap-016": {
+    "certa": "Teste a configuração antes, para não derrubar o site: `sudo nginx -t && sudo systemctl reload nginx`",
+    "erradas": [
+      "`sudo systemctl reload nginx`",
+      "`sudo systemctl reload nginx && sudo nginx -t`",
+      "`sudo nginx -t && sudo systemctl restart nginx`"
+    ]
+  },
+  "pap-017": {
+    "certa": "`sudo apt update && sudo apt upgrade`",
+    "erradas": [
+      "`sudo apt upgrade -s`"
+    ]
+  },
+  "pap-018": {
+    "certa": "Veja antes o que vai mudar, e faça na janela de manutenção:\n```bash\nsudo apt update\napt list --upgradable\nsudo apt upgrade\n```",
+    "certas": [
+      "O -s só simula e mostra o que mudaria:\n```bash\nsudo apt-get -s upgrade\nsudo apt-get upgrade\n```",
+      "`sudo apt-get upgrade --dry-run` primeiro, e depois sem o --dry-run:\n```bash\nsudo apt-get upgrade --dry-run\nsudo apt-get upgrade\n```"
+    ],
+    "erradas": [
+      "`sudo apt upgrade -s`",
+      "`sudo apt-get -s upgrade`",
+      "`sudo apt update && sudo apt upgrade -y`",
+      "```bash\nsudo apt full-upgrade\napt list --upgradable\n```"
+    ]
+  }
+}
