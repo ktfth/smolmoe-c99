@@ -62,7 +62,7 @@ static inline uint32_t pretok_punct_run(const uint32_t *c, const uint8_t *k, uin
 static inline uint32_t pretok_whitespace(const uint32_t *c, uint32_t n, uint32_t i) {
     uint32_t j = i, q, last = UINT32_MAX;
     while (j < n && unicode_space(c[j])) ++j;
-    if (j == i) die("pre-tokenizer made no progress");
+    if (j == i) sm_fail(SM_ERR_FORMAT, "pre-tokenizer made no progress");
     for (q = i; q < j; ++q)
         if (c[q] == '\r' || c[q] == '\n') last = q;
     if (last != UINT32_MAX) return last + 1;

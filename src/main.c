@@ -355,7 +355,7 @@ static void open_source(Options *o, Source *s, Memory *mem) {
     o->model = resolve_model_target(o->model, mem);
     if (o->model) {
         map_file(o->model, &s->file);
-        modelfile_parse(&s->mf, s->file.data, s->file.size, mem);
+        sm_check(modelfile_parse(&s->mf, s->file.data, s->file.size, mem));
         s->present = 1;
         return;
     }
@@ -363,7 +363,7 @@ static void open_source(Options *o, Source *s, Memory *mem) {
     /* Not being able to read our own file just means "no bundle". */
     if (self && try_map_file(self, &s->file, err, sizeof(err))) {
         if (bundle_find(s->file.data, s->file.size, &offset, &length)) {
-            modelfile_parse(&s->mf, s->file.data + offset, length, mem);
+            sm_check(modelfile_parse(&s->mf, s->file.data + offset, length, mem));
             s->present = 1;
             return;
         }
@@ -372,7 +372,7 @@ static void open_source(Options *o, Source *s, Memory *mem) {
     if (o->interactive && stdin_is_terminal() && file_exists("models/qwen2.5-0.5b-instruct/model.smoe")) {
         o->model = "models/qwen2.5-0.5b-instruct/model.smoe";
         map_file(o->model, &s->file);
-        modelfile_parse(&s->mf, s->file.data, s->file.size, mem);
+        sm_check(modelfile_parse(&s->mf, s->file.data, s->file.size, mem));
         s->present = 1;
     }
 }
@@ -390,26 +390,36 @@ static const char *sidecar_tokenizer(const Options *o, Memory *mem) {
 }
 
 static Config load_config(const Options *o, const Source *s, Memory *mem) {
+    Config c;
     const Tensor *blob;
     const char *cfg;
-    if (o->config) return config_read(o->config);
+    if (o->config) {
+        sm_check(config_read(o->config, &c));
+        return c;
+    }
     blob = embedded(s, BLOB_CONFIG);
-    if (blob) return config_parse(blob->data, (size_t)blob->bytes);
-    if ((o->tokenizer || sidecar_tokenizer(o, mem)) && (cfg = beside_path(o->model, "config.ini", mem)) != NULL)
-        return config_read(cfg);
+    if (blob) {
+        sm_check(config_parse(blob->data, (size_t)blob->bytes, &c));
+        return c;
+    }
+    if ((o->tokenizer || sidecar_tokenizer(o, mem)) && (cfg = beside_path(o->model, "config.ini", mem)) != NULL) {
+        sm_check(config_read(cfg, &c));
+        return c;
+    }
     die("no config: pass --config, or embed it with smolmoe-bundle");
-    return config_parse(NULL, 0);
+    return c;
 }
 
 static Tokenizer *load_tokenizer(const Options *o, const Source *s, uint32_t vocab, Memory *mem) {
     const Tensor *blob;
     const char *tok;
-    if (o->tokenizer) return tokenizer_load(o->tokenizer, vocab, mem);
-    blob = embedded(s, BLOB_TOKENIZER);
-    if (blob) return tokenizer_parse(blob->data, (size_t)blob->bytes, vocab, mem);
-    if ((tok = sidecar_tokenizer(o, mem)) != NULL) return tokenizer_load(tok, vocab, mem);
-    die("no tokenizer: pass --tokenizer, or embed it with smolmoe-bundle");
-    return NULL;
+    Tokenizer *t = NULL;
+    if (o->tokenizer) t = tokenizer_load(o->tokenizer, vocab, mem);
+    else if ((blob = embedded(s, BLOB_TOKENIZER)) != NULL) t = tokenizer_parse(blob->data, (size_t)blob->bytes, vocab, mem);
+    else if ((tok = sidecar_tokenizer(o, mem)) != NULL) t = tokenizer_load(tok, vocab, mem);
+    else die("no tokenizer: pass --tokenizer, or embed it with smolmoe-bundle");
+    if (!t) die("%s", sm_last_error());
+    return t;
 }
 
 /* ---- generation -------------------------------------------------------- */
@@ -445,7 +455,7 @@ static uint32_t prefill_prompt(const Run *r) {
         uint32_t n = r->np - pos < r->model->batch ? r->np - pos : r->model->batch;
         int last = pos + n == r->np;
         LogitsMode mode = every_logit ? LOGITS_ALL : last ? LOGITS_LAST : LOGITS_NONE;
-        model_forward(r->model, r->ids + pos, n, pos, mode);
+        sm_check(model_forward(r->model, r->ids + pos, n, pos, mode));
         if (mode == LOGITS_ALL) record_logits(r->o, r->trace, r->st, r->model->logits, n, pos, vocab, r->ids, r->np);
         if (mode == LOGITS_ALL && last)
             memmove(r->model->logits, r->model->logits + (size_t)(n - 1) * vocab, vocab * sizeof(float));
@@ -465,7 +475,8 @@ static void run_prompt(const Run *r) {
     st->processed = st->prompt_tokens = r->np;
     st->prefill_end = now_seconds();
     for (i = 0; i < r->o->tokens; ++i) {
-        uint32_t token = sampler_next(r->sampler, r->model->logits), len;
+        uint32_t token, len;
+        sm_check(sampler_next(r->sampler, r->model->logits, &token));
         if (r->ids_out) fprintf(r->ids_out, "%u\n", token);
         if (token == EOS_ID) break;
         len = tokenizer_decode(r->tok, token, r->piece);
@@ -475,7 +486,7 @@ static void run_prompt(const Run *r) {
         if (st->first == 0) st->first = now_seconds();
         if (i + 1 < r->o->tokens) {
             LogitsMode mode = every_logit ? LOGITS_ALL : LOGITS_LAST;
-            model_forward(r->model, &token, 1, pos, mode);
+            sm_check(model_forward(r->model, &token, 1, pos, mode));
             if (mode == LOGITS_ALL) record_logits(r->o, r->trace, st, r->model->logits, 1, pos, vocab, r->ids, r->np);
             ++pos;
             ++st->processed;
@@ -631,18 +642,19 @@ int main(int argc, char **argv) {
 
     backend = kernels_select(o.scalar);
     pool = pool_create(o.threads ? o.threads : default_threads(), &mem);
-    modelfile_verify_payload(&src.mf, pool);
+    if (!pool) die("%s", sm_last_error());
+    sm_check(modelfile_verify_payload(&src.mf, pool));
     {
         uint32_t batch = o.batch < context ? o.batch : context;
         int every_logit = o.trace || o.hash_logits || o.perplexity;
-        model_init(&model, &c, &src.mf, context, batch, every_logit ? batch : 1, pool, &mem);
+        sm_check(model_init(&model, &c, &src.mf, context, batch, every_logit ? batch : 1, pool, &mem));
         model.profiling = o.profile;
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
     for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(run.tok, i);
     run.banned = banned;
     if (o.interactive) enable_tools(&run, context, &mem);
-    sampler_init(&sampler, c.vocab, banned, o.temperature, o.top_k, o.top_p, o.seed, &mem);
+    sm_check(sampler_init(&sampler, c.vocab, banned, o.temperature, o.top_k, o.top_p, o.seed, &mem));
     run.model = &model;
     run.sampler = &sampler;
     run.trace = open_output(o.trace);

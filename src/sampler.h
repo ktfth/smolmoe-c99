@@ -17,8 +17,9 @@ typedef struct Sampler {
 } Sampler;
 
 /* banned[id] != 0 excludes a token (BOS, control tokens). */
-void sampler_init(Sampler *s, uint32_t vocab, const unsigned char *banned, float temperature,
-                  uint32_t top_k, float top_p, uint32_t seed, Memory *mem);
-uint32_t sampler_next(Sampler *s, const float *logits);
+sm_status sampler_init(Sampler *s, uint32_t vocab, const unsigned char *banned, float temperature,
+                       uint32_t top_k, float top_p, uint32_t seed, Memory *mem);
+/* Writes the chosen id to *token. SM_ERR_STATE when every token is banned. */
+sm_status sampler_next(Sampler *s, const float *logits, uint32_t *token);
 
 #endif

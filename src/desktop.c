@@ -39,6 +39,11 @@ static int fail(char *err, const char *fmt, const char *arg) {
     return 0;
 }
 
+static int fail_msg(char *err, const char *message) {
+    snprintf(err, DESKTOP_ERROR_BYTES, "%s", message ? message : "");
+    return 0;
+}
+
 /* The container appended to this executable, mapped; 0 when there is none. */
 static int map_bundle(MappedFile *file, uint64_t *offset, uint64_t *length) {
     char err[512];
@@ -116,7 +121,7 @@ static int map_model(Desktop *d, const char *path, char *err) {
     data = d->file.data + offset;
     if (length < 16 || memcmp(data, MAGIC, MAGIC_BYTES) || !data[MAGIC_BYTES] || data[MAGIC_BYTES] > MAX_VERSION)
         return fail(err, "%s", "o arquivo não é um modelo do smolmoe (.smoe)");
-    modelfile_parse(&d->mf, data, length, &d->mem);
+    if (modelfile_parse(&d->mf, data, length, &d->mem) != SM_OK) return fail_msg(err, sm_last_error());
     return 1;
 }
 
@@ -132,16 +137,22 @@ static int load_metadata(Desktop *d, const char *path, char *err) {
             tokenizer_path = beside(d, path, "tokenizer.spb");
     }
     if ((!config && !config_path) || (!tokenizer && !tokenizer_path)) return fail(err, "%s", missing);
-    d->c = config ? config_parse(config->data, (size_t)config->bytes) : config_read(config_path);
+    if (config) {
+        if (config_parse(config->data, (size_t)config->bytes, &d->c) != SM_OK) return fail_msg(err, sm_last_error());
+    } else if (config_read(config_path, &d->c) != SM_OK) {
+        return fail_msg(err, sm_last_error());
+    }
     d->tok = tokenizer ? tokenizer_parse(tokenizer->data, (size_t)tokenizer->bytes, d->c.vocab, &d->mem)
                        : tokenizer_load(tokenizer_path, d->c.vocab, &d->mem);
+    if (!d->tok) return fail_msg(err, sm_last_error());
     if (!tokenizer_supports_chat(d->tok))
         return fail(err, "%s", "este modelo não conversa (o tokenizador não tem modelo de chat): use um modelo instruído");
     return 1;
 }
 
-/* Buffers, sampler and engine: the terminal chat's defaults. */
-static void start_engine(Desktop *d, const DesktopOptions *o) {
+/* Buffers, sampler and engine: the terminal chat's defaults. 0 leaves the
+ * reason in sm_last_error(). */
+static int start_engine(Desktop *d, const DesktopOptions *o) {
     Engine *e = &d->engine;
     uint32_t i, ids, needed, open_marker = 0, close_marker = 0, encode_cap;
     unsigned char *banned;
@@ -156,7 +167,7 @@ static void start_engine(Desktop *d, const DesktopOptions *o) {
     for (i = 0; i < d->c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(d->tok, i);
     tools = engine_tools_prompt(d->tok, CHAT_DEFAULT_SYSTEM, d->model.context, e->ids, &open_marker, &close_marker,
                                 &needed, &d->mem);
-    sampler_init(&d->sampler, d->c.vocab, banned, 0.0f, 40, 0.95f, 1, &d->mem);
+    if (sampler_init(&d->sampler, d->c.vocab, banned, 0.0f, 40, 0.95f, 1, &d->mem) != SM_OK) return 0;
     e->model = &d->model;
     e->tok = d->tok;
     e->sampler = &d->sampler;
@@ -168,20 +179,32 @@ static void start_engine(Desktop *d, const DesktopOptions *o) {
     e->banned = banned;
     e->fixed_clock = NULL;
     e->sink = o->sink;
-    engine_start(e);
+    return engine_start(e) == SM_OK;
 }
 
-Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
+typedef struct OpenArgs {
+    const DesktopOptions *o;
+    char *err;
+    Desktop *opened;
+} OpenArgs;
+
+static void desktop_open_body(OpenArgs *a) {
     Desktop *d = (Desktop *)calloc(1, sizeof(*d));
+    const DesktopOptions *o = a->o;
+    char *err = a->err;
     const char *path;
     uint32_t context, threads;
-    err[0] = 0;
-    if (!d) die("allocation failed");
+    a->opened = d;
+    if (!d) {
+        fail_msg(err, "allocation failed");
+        return;
+    }
     d->mem.limit = mul_size(DESKTOP_MEMORY_MIB, 1048576);
     path = resolve_desktop_path(d, o->path);
     if (!map_model(d, path, err) || !load_metadata(d, path, err)) {
         desktop_close(d);
-        return NULL;
+        a->opened = NULL;
+        return;
     }
     context = o->context ? o->context : DESKTOP_DEFAULT_CONTEXT;
     if (context > d->c.max_context) context = d->c.max_context;
@@ -192,12 +215,34 @@ Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
     if (o->stage) o->stage(o->sink.ctx, DESKTOP_CHECKING);
     d->backend = kernels_select(0);
     d->pool = pool_create(threads, &d->mem);
-    modelfile_verify_payload(&d->mf, d->pool);
+    if (!d->pool) goto fail;
+    if (modelfile_verify_payload(&d->mf, d->pool) != SM_OK) goto fail;
     if (o->stage) o->stage(o->sink.ctx, DESKTOP_PREPARING);
-    model_init(&d->model, &d->c, &d->mf, context, DESKTOP_BATCH < context ? DESKTOP_BATCH : context, 1, d->pool,
-               &d->mem);
-    start_engine(d, o);
-    return d;
+    if (model_init(&d->model, &d->c, &d->mf, context, DESKTOP_BATCH < context ? DESKTOP_BATCH : context, 1, d->pool,
+                   &d->mem) != SM_OK)
+        goto fail;
+    if (!start_engine(d, o)) goto fail;
+    return;
+fail:
+    fail_msg(err, sm_last_error());
+    a->opened = NULL;
+    desktop_close(d);
+}
+
+static void desktop_open_protected(void *ctx) { desktop_open_body((OpenArgs *)ctx); }
+
+Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
+    OpenArgs a;
+    a.o = o;
+    a.err = err;
+    a.opened = NULL;
+    err[0] = 0;
+    if (sm_protect(desktop_open_protected, &a) != SM_OK) {
+        fail_msg(err, sm_last_error());
+        desktop_close(a.opened);
+        return NULL;
+    }
+    return a.opened;
 }
 
 /* The longest prefix of text[0..len) that fits in cap bytes without splitting a UTF-8 character. */

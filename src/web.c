@@ -78,18 +78,21 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
     const char *tools;
     if (web.open) return 0;
     web.mem.limit = WEB_MEMORY_LIMIT;
-    modelfile_parse(&web.mf, data, size, &web.mem);
+    sm_check(modelfile_parse(&web.mf, data, size, &web.mem));
     blob = required_blob(BLOB_CONFIG, "config");
-    web.c = config_parse(blob->data, (size_t)blob->bytes);
+    sm_check(config_parse(blob->data, (size_t)blob->bytes, &web.c));
     blob = required_blob(BLOB_TOKENIZER, "tokenizer");
     web.tok = tokenizer_parse(blob->data, (size_t)blob->bytes, web.c.vocab, &web.mem);
+    if (!web.tok) die("%s", sm_last_error());
     if (!tokenizer_supports_chat(web.tok)) die("this model has no chat template");
     if (!context || context > web.c.max_context) context = web.c.max_context;
     if (context > WEB_MAX_CONTEXT) context = WEB_MAX_CONTEXT;
     web.backend = kernels_select(0);
     web.pool = pool_create(threads, &web.mem);
-    modelfile_verify_payload(&web.mf, web.pool);
-    model_init(&web.model, &web.c, &web.mf, context, WEB_BATCH < context ? WEB_BATCH : context, 1, web.pool, &web.mem);
+    if (!web.pool) die("%s", sm_last_error());
+    sm_check(modelfile_verify_payload(&web.mf, web.pool));
+    sm_check(model_init(&web.model, &web.c, &web.mf, context, WEB_BATCH < context ? WEB_BATCH : context, 1, web.pool,
+                        &web.mem));
 
     web.message_cap = context * WEB_BYTES_PER_TOKEN;
     encode_cap = (uint32_t)strlen(CHAT_DEFAULT_SYSTEM) + TOOLS_PROMPT_BYTES;
@@ -101,7 +104,7 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
     for (i = 0; i < web.c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(web.tok, i);
     tools = engine_tools_prompt(web.tok, CHAT_DEFAULT_SYSTEM, context, web.engine.ids, &open_marker, &close_marker,
                                 &needed, &web.mem);
-    sampler_init(&web.sampler, web.c.vocab, banned, 0.0f, 40, 0.95f, 1, &web.mem);
+    sm_check(sampler_init(&web.sampler, web.c.vocab, banned, 0.0f, 40, 0.95f, 1, &web.mem));
 
     web.engine.model = &web.model;
     web.engine.tok = web.tok;
@@ -116,7 +119,7 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
     web.engine.sink.text = sink_text;
     web.engine.sink.reply_end = sink_reply_end;
     web.engine.sink.notice = sink_notice;
-    engine_start(&web.engine);
+    sm_check(engine_start(&web.engine));
     web.open = 1;
     return 1;
 }
@@ -137,7 +140,11 @@ WEB_EXPORT("sm_send") int sm_send(uint32_t len, int year, int month, int day, in
     web.clock.day = day;
     web.clock.hour = hour;
     web.clock.minute = minute;
-    return engine_send(&web.engine, web.message, len);
+    {
+        int rc = engine_send(&web.engine, web.message, len);
+        if (rc < 0) die("%s", sm_last_error());
+        return rc;
+    }
 }
 
 WEB_EXPORT("sm_reset") void sm_reset(void) {

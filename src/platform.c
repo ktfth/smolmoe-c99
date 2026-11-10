@@ -476,5 +476,5 @@ unsigned console_original_codepage(void) {
 
 void map_file(const char *path, MappedFile *m) {
     char err[PATH_CAPACITY + 256];
-    if (!try_map_file(path, m, err, sizeof(err))) die("%s", err);
+    if (!try_map_file(path, m, err, sizeof(err))) sm_fail(SM_ERR_IO, "%s", err);
 }

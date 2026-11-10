@@ -65,17 +65,18 @@ typedef struct Model {
 const char *model_phase_name(ModelPhase p);
 
 /* logit_rows: 1 for normal generation, or the batch size when every prompt
- * token's logits are needed (--trace, --hash-logits). */
-void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
-                uint32_t logit_rows, Pool *pool, Memory *mem);
+ * token's logits are needed (--trace, --hash-logits). SM_OK, or the reason in
+ * sm_last_error(); a non-finite activation is SM_ERR_NUMERIC and does not exit. */
+sm_status model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
+                     uint32_t logit_rows, Pool *pool, Memory *mem);
 
 /* Runs tokens[0..n) at positions pos0..pos0+n-1. LOGITS_LAST writes the last
  * token's logits to m->logits; LOGITS_ALL writes n rows of vocab_size. */
-void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode);
+sm_status model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode);
 
 /* Runs n tokens in batch-sized chunks; with last_logits, m->logits holds the
  * last token's logits afterwards. */
-void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits);
+sm_status model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits);
 
 size_t model_kv_bytes(const Model *m);
 

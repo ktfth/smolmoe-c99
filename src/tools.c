@@ -50,7 +50,7 @@ ToolClock tool_clock_now(void) {
     time_t t = time(NULL);
     const struct tm *tm = t == (time_t)-1 ? NULL : localtime(&t);
     ToolClock c;
-    if (!tm) die("cannot read the local time");
+    if (!tm) sm_fail(SM_ERR_IO, "cannot read the local time");
     c.year = tm->tm_year + 1900;
     c.month = tm->tm_mon + 1;
     c.day = tm->tm_mday;

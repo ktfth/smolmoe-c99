@@ -28,40 +28,40 @@ static void check_alias(const ModelFile *mf, const Tensor *t, uint32_t index) {
         if (!strcmp(mf->tensors[j].name, "embed")) e = &mf->tensors[j];
     if (!e || strcmp(t->name, "lm_head") || t->offset != e->offset || t->bytes != e->bytes ||
         t->rows != e->rows || t->cols != e->cols || t->dtype != e->dtype)
-        die("invalid tied embedding alias");
+        sm_fail(SM_ERR_FORMAT, "invalid tied embedding alias");
 }
 
 static void check_metadata(const ModelFile *mf, const Tensor *t) {
     if (t->dtype == DTYPE_BLOB) {
         if (mf->version < 3 || t->rows != 1 || t->cols != 1 || t->alias || strncmp(t->name, "__", 2))
-            die("invalid blob record: %s", t->name);
+            sm_fail(SM_ERR_FORMAT, "invalid blob record: %s", t->name);
         return;
     }
     if (t->alias > 1 || (t->alias && mf->version < 2) || !t->rows || !t->cols || t->cols > MAX_TENSOR_COLS ||
         t->dtype > DTYPE_Q5 || !strncmp(t->name, "__", 2))
-        die("invalid tensor metadata: %s", t->name);
+        sm_fail(SM_ERR_FORMAT, "invalid tensor metadata: %s", t->name);
 }
 
-void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Memory *mem) {
+static void modelfile_parse_body(ModelFile *mf, const unsigned char *data, uint64_t size, Memory *mem) {
     uint64_t previous;
     uint32_t i;
     memset(mf, 0, sizeof(*mf));
-    if (size < HEADER_BYTES) die("invalid checkpoint size");
+    if (size < HEADER_BYTES) sm_fail(SM_ERR_FORMAT, "invalid checkpoint size");
     mf->base = data;
     mf->size = size;
     mf->version = data[7];
     if (memcmp(data, "SMOEQ8\0", 7) || mf->version < 1 || mf->version > 3 || rd_u32(data + 12))
-        die("unsupported checkpoint format (expected SMOEQ8 v1-v3)");
+        sm_fail(SM_ERR_FORMAT, "unsupported checkpoint format (expected SMOEQ8 v1-v3)");
     mf->count = rd_u32(data + 8);
-    if (!mf->count || mf->count > MAX_TENSORS) die("invalid tensor count");
+    if (!mf->count || mf->count > MAX_TENSORS) sm_fail(SM_ERR_FORMAT, "invalid tensor count");
     previous = HEADER_BYTES + (uint64_t)mf->count * RECORD_BYTES;
-    if (previous > size) die("truncated checkpoint directory");
+    if (previous > size) sm_fail(SM_ERR_FORMAT, "truncated checkpoint directory");
     mf->tensors = (Tensor *)mem_alloc(mem, mf->count, sizeof(Tensor));
     for (i = 0; i < mf->count; ++i) {
         const unsigned char *rec = data + HEADER_BYTES + (uint64_t)i * RECORD_BYTES;
         Tensor *t = &mf->tensors[i];
         memcpy(t->name, rec, TENSOR_NAME_SIZE);
-        if (!memchr(t->name, 0, TENSOR_NAME_SIZE) || !t->name[0]) die("invalid tensor name");
+        if (!memchr(t->name, 0, TENSOR_NAME_SIZE) || !t->name[0]) sm_fail(SM_ERR_FORMAT, "invalid tensor name");
         t->rows = rd_u32(rec + 40);
         t->cols = rd_u32(rec + 44);
         t->dtype = rd_u32(rec + 48);
@@ -71,14 +71,35 @@ void modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Me
         check_metadata(mf, t);
         if (t->bytes != expected_bytes(t) || (!t->alias && t->offset < previous) || t->offset > size ||
             t->bytes > size - t->offset)
-            die("invalid tensor extent: %s", t->name);
+            sm_fail(SM_ERR_FORMAT, "invalid tensor extent: %s", t->name);
         if (t->alias) check_alias(mf, t, i);
         else previous = t->offset + t->bytes;
         if (i && strcmp(mf->tensors[i - 1].name, t->name) >= 0)
-            die("tensor directory must have unique sorted names");
+            sm_fail(SM_ERR_FORMAT, "tensor directory must have unique sorted names");
         if (t->dtype == DTYPE_BLOB) ++mf->blobs;
         t->data = data + t->offset;
     }
+}
+
+typedef struct ParseArgs {
+    ModelFile *mf;
+    const unsigned char *data;
+    uint64_t size;
+    Memory *mem;
+} ParseArgs;
+
+static void parse_protected(void *ctx) {
+    ParseArgs *a = (ParseArgs *)ctx;
+    modelfile_parse_body(a->mf, a->data, a->size, a->mem);
+}
+
+sm_status modelfile_parse(ModelFile *mf, const unsigned char *data, uint64_t size, Memory *mem) {
+    ParseArgs a;
+    a.mf = mf;
+    a.data = data;
+    a.size = size;
+    a.mem = mem;
+    return sm_protect(parse_protected, &a);
 }
 
 const Tensor *modelfile_blob(const ModelFile *mf, const char *name) {
@@ -96,10 +117,15 @@ const Tensor *modelfile_find(const ModelFile *mf, const char *name, uint32_t row
         if (strcmp(mf->tensors[mid].name, name) < 0) lo = mid + 1;
         else hi = mid;
     }
-    if (lo == mf->count || strcmp(mf->tensors[lo].name, name)) die("missing tensor: %s", name);
+    if (lo == mf->count || strcmp(mf->tensors[lo].name, name)) {
+        sm_set(SM_ERR_FORMAT, "missing tensor: %s", name);
+        return NULL;
+    }
     if (mf->tensors[lo].rows != rows || mf->tensors[lo].cols != cols ||
-        (dtype == DTYPE_QUANTIZED ? mf->tensors[lo].dtype == DTYPE_F32 : mf->tensors[lo].dtype != dtype))
-        die("wrong tensor shape/type: %s", name);
+        (dtype == DTYPE_QUANTIZED ? mf->tensors[lo].dtype == DTYPE_F32 : mf->tensors[lo].dtype != dtype)) {
+        sm_set(SM_ERR_FORMAT, "wrong tensor shape/type: %s", name);
+        return NULL;
+    }
     return &mf->tensors[lo];
 }
 
@@ -145,10 +171,27 @@ static void verify_task(void *ctx, uint32_t index, uint32_t count) {
     }
 }
 
-void modelfile_verify_payload(const ModelFile *mf, Pool *pool) {
+static void verify_body(const ModelFile *mf, Pool *pool) {
     VerifyTask v;
     v.mf = mf;
     v.bad = 0;
     pool_run(pool, verify_task, &v);
-    if (v.bad) die("non-finite value or invalid scale in tensor %s", mf->tensors[v.bad - 1].name);
+    if (v.bad) sm_fail(SM_ERR_NUMERIC, "non-finite value or invalid scale in tensor %s", mf->tensors[v.bad - 1].name);
+}
+
+typedef struct VerifyArgs {
+    const ModelFile *mf;
+    Pool *pool;
+} VerifyArgs;
+
+static void verify_protected(void *ctx) {
+    VerifyArgs *a = (VerifyArgs *)ctx;
+    verify_body(a->mf, a->pool);
+}
+
+sm_status modelfile_verify_payload(const ModelFile *mf, Pool *pool) {
+    VerifyArgs a;
+    a.mf = mf;
+    a.pool = pool;
+    return sm_protect(verify_protected, &a);
 }

@@ -1,7 +1,5 @@
 #include "session.h"
 
-#include <chrono>
-#include <cstdlib>
 #include <utility>
 
 extern "C" {
@@ -11,7 +9,6 @@ extern "C" {
 
 namespace {
 
-constexpr auto kShutdownWait = std::chrono::seconds(3);
 constexpr size_t kNoticeBytes = 1100;  // engine notices are at most 1024 bytes
 
 // die() reports to the one session; a die() on the window's own thread
@@ -55,7 +52,7 @@ ChatSession::ChatSession(SessionOptions options, std::function<void()> wake)
 }
 
 ChatSession::~ChatSession() {
-    if (worker_.joinable() && !shutdown()) std::_Exit(EXIT_SUCCESS);  // the worker uses this object
+    shutdown();
     if (g_session == this) g_session = nullptr;
 }
 
@@ -71,14 +68,12 @@ void ChatSession::on_die(const char *message) {
         if (g_window_die) g_window_die(message);
         return;  // die() exits
     }
-    {
-        std::lock_guard<std::mutex> lock(session->mutex_);
-        session->state_.phase = Phase::Failed;
-        session->state_.error = message;
-        session->changed();
-    }
-    session->worker_done_.notify_all();
-    for (;;) std::this_thread::sleep_for(std::chrono::hours(1));  // die() never returns
+    // A die() that escaped the engine still ends the process; record it first
+    // and return so this thread is not parked (and its model leaked) forever.
+    std::lock_guard<std::mutex> lock(session->mutex_);
+    session->state_.phase = Phase::Failed;
+    session->state_.error = message ? message : "";
+    session->changed();
 }
 
 void ChatSession::changed() {
@@ -104,6 +99,7 @@ bool ChatSession::send(const std::string &text) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (state_.phase != Phase::Ready || text.empty()) return false;
     state_.entries.push_back({Role::User, text});
+    state_.error.clear();
     state_.phase = Phase::Busy;
     state_.phase_started = now_seconds();
     state_.last_stopped = false;
@@ -134,14 +130,12 @@ std::optional<SessionState> ChatSession::changed_since(uint64_t seen) const {
 }
 
 bool ChatSession::shutdown() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    quit_ = true;
-    stop_ = true;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        quit_ = true;
+        stop_ = true;
+    }
     requests_ready_.notify_all();
-    worker_done_.wait_for(lock, kShutdownWait, [this] { return !worker_running_ || state_.phase == Phase::Failed; });
-    const bool finished = !worker_running_ && state_.phase != Phase::Failed;
-    lock.unlock();
-    if (!finished) return false;
     if (worker_.joinable()) worker_.join();
     return true;
 }
@@ -164,7 +158,6 @@ void ChatSession::run(std::string path) {
         state_.phase_started = now_seconds();
         worker_running_ = false;
         changed();
-        worker_done_.notify_all();
         return;
     }
     {
@@ -178,7 +171,6 @@ void ChatSession::run(std::string path) {
     desktop_close(desktop);
     std::lock_guard<std::mutex> lock(mutex_);
     worker_running_ = false;
-    worker_done_.notify_all();
 }
 
 void ChatSession::serve(Desktop *desktop) {
@@ -192,17 +184,27 @@ void ChatSession::serve(Desktop *desktop) {
             requests_.pop_front();
         }
         DesktopInfo before{}, after{};
+        int rc = 1;
         desktop_info(desktop, &before);
-        if (request.kind == Request::Kind::Send) desktop_send(desktop, request.text.data(), request.text.size());
+        if (request.kind == Request::Kind::Send)
+            rc = desktop_send(desktop, request.text.data(), request.text.size());
         else desktop_reset(desktop);
         desktop_info(desktop, &after);
         std::lock_guard<std::mutex> lock(mutex_);
         state_.info = after;
         if (request.kind == Request::Kind::Send) {
-            const double seconds = after.decode_seconds - before.decode_seconds;
-            const uint32_t tokens = after.generated - before.generated;
-            state_.last_rate = seconds > 0 ? tokens / seconds : 0;
-            state_.last_stopped = after.stopped != 0;
+            if (rc < 0) {
+                state_.error = sm_last_error();
+                state_.entries.push_back({Role::Notice, state_.error});
+                state_.last_stopped = true;
+                state_.last_rate = 0;
+            } else {
+                const double seconds = after.decode_seconds - before.decode_seconds;
+                const uint32_t tokens = after.generated - before.generated;
+                state_.error.clear();
+                state_.last_rate = seconds > 0 ? tokens / seconds : 0;
+                state_.last_stopped = after.stopped != 0;
+            }
             state_.phase = Phase::Ready;
             state_.phase_started = now_seconds();
         }

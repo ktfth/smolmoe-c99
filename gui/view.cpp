@@ -415,6 +415,8 @@ void ChatView::draw_status() {
     std::string status;
     if (state_.phase == Phase::Busy) {
         status = "Respondendo" + dots() + " (Esc ou Parar interrompe)";
+    } else if (!state_.error.empty()) {
+        status = sentence(state_.error);
     } else if (state_.last_stopped) {
         status = "Resposta interrompida.";
     } else if (state_.last_rate > 0) {
@@ -422,5 +424,5 @@ void ChatView::draw_status() {
     } else {
         status = "Pronto.";
     }
-    ImGui::TextColored(p.dim, "%s", status.c_str());
+    ImGui::TextColored(!state_.error.empty() && state_.phase != Phase::Busy ? p.error : p.dim, "%s", status.c_str());
 }
