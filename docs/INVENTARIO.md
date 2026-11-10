@@ -122,7 +122,11 @@ antigo precisa dar o novo). `SM_FUZZ_ITERS=20000 build/test-inventory` roda uma 
   gerenciador da distribuição (`debsums`, `rpm -Va`) a partir de um sistema limpo.
 - **A leitura reproduz a glibc 2.30 em diante** (conferida na 2.39). Em musl (Alpine) ou numa glibc mais antiga, a
   própria máquina pode ler uma linha fora do padrão de outro jeito: a cauda repetida de uma linha recuada, por
-  exemplo, só existe na glibc 2.30+. Uma conta assim pode sair como nota em vez de alerta, ou o contrário.
+  exemplo, só existe na glibc 2.30+. Uma conta assim pode sair como nota em vez de alerta, ou o contrário. A musl
+  não tem comentário no `/etc/passwd`: para ela, `#evil:x:0:0::/root:/bin/sh` (sete campos, uid e gid só com
+  dígitos ou vazios) é uma conta que o `getpwnam` acha, de qualquer comprimento, com o uid módulo 2^32. O inventário
+  a registra como nota (`comentário para a glibc, mas conta uid=0 para a musl`, com o uid que a musl lê), não como
+  alerta nem como `usuario`, e não confere a senha dela no shadow.
 - **Só os arquivos locais.** Contas vindas de outro módulo NSS (LDAP, SSSD, um `libnss_*.so` plantado) não aparecem;
   o `/etc/nsswitch.conf` é acompanhado em `config`, então uma mudança nele aparece no `--comparar`. Linhas `+`/`-`
   do nss_compat em `/etc/passwd` são lidas como contas comuns; o que elas incluem do NIS/LDAP não é consultado.

@@ -1339,6 +1339,9 @@ static void test_hidden_accounts(void) {
     memset(text + n, ' ', 9000);                                                                          /* 15 */
     n += 9000;
     n += (size_t)sprintf(text + n, "blank9k:x:0:0::/root:/bin/bash\n");
+    n += (size_t)sprintf(text + n, "#musl:x::0::/root:/bin/sh\n# a comment: x:0:0\n");         /* 16, 17 */
+    n += (size_t)sprintf(text + n, "#wrap:x:4294967296:0::/root:/bin/sh\n");                     /* 18 */
+    n += (size_t)sprintf(text + n, "#longo:x:0:0:%s:/root:/bin/sh\n", gecos);                    /* 19 */
     put_bytes("/etc/passwd", text, n, 0644);
     collect(&items, &notes);
 
@@ -1357,6 +1360,15 @@ static void test_hidden_accounts(void) {
     CHECK(d && strstr(d, "uid=4294967295"), "uid -1 not flagged: %s", d ? d : "-");
     CHECK(has_prefix(&items, "alerta\tuid0:short\t"), "account without its last fields hidden");
     CHECK(!any_contains(&items, "hidden"), "a comment after blanks read as an account");
+    /* musl reads a comment shaped like an account as one: glibc does not, so it is a note, not an item. */
+    CHECK(any_contains(&notes, "linha 8: comentário para a glibc, mas conta uid=0 para a musl") &&
+              any_contains(&notes, "linha 16: comentário para a glibc, mas conta uid=0 para a musl") &&
+              !any_contains(&notes, "linha 17:") && !any_contains(&items, "musl"),
+          "a passwd comment that musl reads as a uid 0 account left no note");
+    /* musl's atou wraps modulo 2^32, and musl reads a line of any length. */
+    CHECK(any_contains(&notes, "linha 18: comentário para a glibc, mas conta uid=0 para a musl") &&
+              any_contains(&notes, "linha 19: comentário para a glibc, mas conta uid=0 para a musl (linha longa"),
+          "a wrapped uid or a long comment line hid a musl uid 0 account");
     CHECK(has_prefix(&items, "alerta\tuid0:lead\t"), "blanks before a name: glibc reads the name without them");
     CHECK(has_prefix(&items, "alerta\tuid0:nulroot\t"), "account before a NUL hidden");
     CHECK(!has_prefix(&items, "usuario\tbighome") && !has_prefix(&items, "usuario\tevil") &&

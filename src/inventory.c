@@ -721,6 +721,14 @@ static void add_why(char *why, size_t cap, const char *reason) {
     snprintf(why + n, cap - n, "%s%s", n ? ", " : "", reason);
 }
 
+/* A uid or gid as musl's atou reads it: digits only (none is 0), wrapping modulo 2^32. */
+static int musl_id(const char *s, unsigned long *out) {
+    unsigned long x = 0;
+    for (; *s >= '0' && *s <= '9'; ++s) x = (x * 10 + (unsigned long)(*s - '0')) & 0xFFFFFFFFul;
+    *out = x;
+    return !*s;
+}
+
 /* One /etc/passwd line (after the blanks read_entry skipped), read the way glibc's
  * nss_files reads it: comments skipped, missing fields empty, the line ending at a NUL. An account glibc
  * accepts is never dropped: one that does not fit the report or is not written the
@@ -732,7 +740,23 @@ static void passwd_line(Ctx *c, char *line, int r, int blanks, unsigned long no)
     User u;
     int n, i, uid_ok = 0, gid_ok = 0, uid_canon = 1, gid_canon = 1, cut = r == LINE_LONG, fits;
     int uid_known, gid_known;
-    if (!*line || *line == '#') return;
+    if (!*line) return;
+    if (*line == '#') {
+        /* musl has no comments here: seven fields with a digits-only (or empty, so 0) uid and gid are an
+         * account named "#..." that its getpwnam finds. glibc skips the line, so a note keeps it in sight.
+         * musl reads the whole line: in one cut here, only the fields seen are checked. */
+        unsigned long muid = 0, mgid = 0;
+        int musl;
+        n = split_colons(line, fl, 7);
+        musl = cut ? (n < 3 || musl_id(fl[2], &muid)) && (n < 4 || musl_id(fl[3], &mgid))
+                   : n == 7 && musl_id(fl[2], &muid) && musl_id(fl[3], &mgid);
+        if (musl) {
+            if (!cut || n > 3) snprintf(uid_text, sizeof(uid_text), "%lu", muid);
+            note(c->notes, "/etc/passwd linha %lu: comentário para a glibc, mas conta uid=%s para a musl%s", no,
+                 uid_text, cut ? " (linha longa demais)" : "");
+        }
+        return;
+    }
     n = split_colons(line, fl, 7);
     for (i = n; i < 7; ++i) fl[i] = empty;
     memset(&u, 0, sizeof(u));

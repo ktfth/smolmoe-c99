@@ -62,6 +62,9 @@
   byte nulo. Um membro com branco ou `\r` no fim (`ana `), que não é a conta `ana`, vem marcado no detalhe.
 - Inventário: o `--comparar` aceita um pipe como relatório (`<(ssh host ...)`). O `/etc/nsswitch.conf` entrou na
   lista de `config`.
+- Inventário: na musl, uma linha `#evil:x:0:0::/root:/bin/sh` do `/etc/passwd` é conta uid 0, que o `getpwnam`
+  acha, e o inventário a descartava em silêncio como comentário. Agora ela deixa uma nota com o número da linha e o
+  uid que a musl lê (módulo 2^32), também quando a linha passa de 8 KB.
 
 ### Mudado
 - `smolmoe-inventario` saiu de `make` e de `make test-unit`: `make inventario` compila e roda os testes dele. O CI
