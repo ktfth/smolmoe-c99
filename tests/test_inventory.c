@@ -14,6 +14,7 @@
 #  define _POSIX_C_SOURCE 200809L
 #  define _DEFAULT_SOURCE 1
 #  define _DARWIN_C_SOURCE 1
+#  define _FILE_OFFSET_BITS 64
 #endif
 
 #include <stdint.h>
@@ -26,8 +27,16 @@
 
 #if !defined(_WIN32)
 #  include <dirent.h>
+#  include <fcntl.h>
+#  include <signal.h>
 #  include <sys/stat.h>
+#  include <sys/wait.h>
+#  include <time.h>
 #  include <unistd.h>
+#  if defined(__GLIBC__)
+#    include <pwd.h>
+#    include <shadow.h>
+#  endif
 #endif
 
 static int failures;
@@ -668,9 +677,11 @@ static void test_no_invented_items(void) {
     /* 2. A NUL inside a line: the rest of the line must not be read as a line. */
     memcpy(line + n, "nul\0x:0:0::/:/bin/sh\n", 21);
     n += 21;
-    /* 3. A uid that is empty or not a number: strtoul reads it as 0 (root). */
+    /* 3. A uid that is empty or not a number: strtoul reads it as 0 (root), glibc rejects the line.
+     *    "-0" is different: glibc reads it as uid 0, so it must show up (test_hidden_accounts). */
     n += (size_t)sprintf(line + n, "blank:x::0::/:/bin/sh\nword:x:abc:0::/:/bin/sh\nneg:x:-0:0::/:/bin/sh\n");
-    /* 4. A name longer than the account buffer: cutting it could merge two accounts. */
+    /* 4. A name longer than the account buffer: cutting it could merge two accounts, so it
+     *    becomes an alert, never a user item. */
     n += (size_t)sprintf(line + n, "%s:x:1001:0::/:/bin/sh\n",
                          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     n += (size_t)sprintf(line + n, "ana2:x:1002:1002::/home/ana:/bin/bash\n");
@@ -694,12 +705,16 @@ static void test_no_invented_items(void) {
     collect(&items, &notes);
     CHECK(!any_contains(&items, "evil"), "tail of a long passwd line became an account");
     CHECK(!any_contains(&items, "nul") && !any_contains(&items, "x:0:0"), "text after a NUL became an account");
-    CHECK(!any_contains(&items, "blank") && !any_contains(&items, "word") && !any_contains(&items, "neg"),
-          "malformed uid read as root");
-    CHECK(!any_contains(&items, "bbbb"), "oversized name cut and kept");
+    CHECK(!any_contains(&items, "blank") && !any_contains(&items, "word"), "malformed uid read as root");
+    CHECK(has_prefix(&items, "alerta\tuid0:neg\t"), "uid -0, root for glibc, hidden");
+    CHECK(!has_prefix(&items, "usuario\tbbbb"), "oversized name cut and kept as a user");
+    CHECK(has_prefix(&items, "alerta\tconta_anormal:bbbb"), "oversized name dropped without an alert");
     CHECK(has(&items, "usuario\troot\tuid=0 shell=/bin/bash"), "valid account before the bad lines lost");
     CHECK(has(&items, "usuario\tana2\tuid=1002 shell=/bin/bash"), "valid account after the bad lines lost");
-    CHECK(!has_prefix(&items, "alerta\tuid0:"), "invented uid 0 alert");
+    CHECK(!has_prefix(&items, "alerta\tuid0:evil") && !has_prefix(&items, "alerta\tuid0:nul") &&
+              !has_prefix(&items, "alerta\tuid0:x") && !has_prefix(&items, "alerta\tuid0:blank") &&
+              !has_prefix(&items, "alerta\tuid0:word"),
+          "invented uid 0 alert");
     /* The fake keys may appear inside the recorded options text, never as a key of their own. */
     CHECK(!any_contains(&items, "tipo=ssh-rsa") && !any_contains(&items, "tipo=ssh-dss"), "fake key from quoted options");
     {
@@ -857,7 +872,8 @@ static size_t mutate(const char *src, char *out, size_t cap) {
             size_t run = rnd(2) ? 9000 : 100 + rnd(400);
             if (n + run < cap) {
                 memmove(out + at + run, out + at, n - at);
-                memset(out + at, 'A' + (int)rnd(3), run);
+                /* blanks too: glibc skips them before a line, however many there are */
+                memset(out + at, rnd(3) ? 'A' + (int)rnd(3) : ' ', run);
                 n += run;
             }
             break;
@@ -874,6 +890,93 @@ static size_t mutate(const char *src, char *out, size_t cap) {
     return n;
 }
 
+#define INV_LINE_KEPT 8191 /* bytes of a system file line inventory.c keeps (its INV_LINE - 1) */
+
+#if defined(__GLIBC__)
+/* After an oracle failure: the start of each line of path holding name, byte by byte. */
+static void dump_lines(const char *path, const char *name) {
+    static char buf[32768];
+    size_t n, i, start = 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    for (i = 0; i <= n; ++i)
+        if (i == n || buf[i] == '\n') {
+            if (i > start && (!*name || memmem(buf + start, i - start, name, strlen(name)))) {
+                size_t k, colons = 0;
+                fprintf(stderr, "  line (%zu bytes, ':' at", i - start);
+                for (k = start; k < i && colons < 12; ++k)
+                    if (buf[k] == ':') fprintf(stderr, " %zu", k - start), ++colons;
+                fputs("):", stderr);
+                for (k = start; k < i && k < start + 64; ++k) fprintf(stderr, " %02x", (unsigned char)buf[k]);
+                fprintf(stderr, "%s\n", i - start > 64 ? " ..." : "");
+                if (i - start > 64) {
+                    fputs("  ends:", stderr);
+                    for (k = i - 48; k < i; ++k) fprintf(stderr, " %02x", (unsigned char)buf[k]);
+                    fputc('\n', stderr);
+                }
+            }
+            start = i + 1;
+        }
+}
+#endif
+
+/* The text as glibc reads it, for traceability. An indented line keeps its last k bytes twice,
+ * k being the blanks before it, when no newline is copied along to cut it: the last line with
+ * no newline, or a line with a NUL (glibc's __nss_readline; see read_entry in inventory.c).
+ * Each such line, as glibc reads it, is appended after a newline: the original text stays. */
+static size_t glibc_view(char *buf, size_t n, size_t cap) {
+    size_t start = 0, end, out = n;
+    while (start < n) {
+        size_t k = 0, len;
+        const char *nul;
+        for (end = start; end < n && buf[end] != '\n'; ++end) {}
+        while (start + k < end && (buf[start + k] == ' ' || (buf[start + k] >= '\t' && buf[start + k] <= '\r')))
+            ++k;
+        nul = (const char *)memchr(buf + start, 0, end - start);
+        len = (nul ? (size_t)(nul - buf) : end) - start; /* the line up to a NUL, blanks included */
+        if (k && len > k && (nul || end == n) && out + len + 1 < cap) {
+            buf[out++] = '\n';
+            memcpy(buf + out, buf + start + k, len - k);           /* the line without its blanks */
+            memcpy(buf + out + len - k, buf + start + len - k, k); /* and its last k bytes again */
+            out += len;
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+/* Whether a detail says uid 0, or an unknown uid (a line cut before its gid). */
+static int uid0_in(const char *detail) {
+    const char *p;
+    for (p = detail; (p = strstr(p, "uid=")) != NULL; p += 4)
+        if ((p[4] == '0' && (p[5] < '0' || p[5] > '9')) || p[4] == '?') return 1;
+    return 0;
+}
+
+/* Whether the report names this uid 0 account: as a user, as a uid 0 alert, or as an
+ * abnormal account (the name cut to the key's room) whose detail says uid 0. */
+static int root_visible(const InvList *l, const char *name) {
+    char clean[INV_ITEM_MAX];
+    size_t i, n = 0, cut;
+    for (; *name && n + 1 < sizeof(clean); ++name) clean[n++] = (unsigned char)*name < 32 || *name == 127 ? '?' : *name;
+    clean[n] = 0;
+    cut = n < 48 ? n : 48;
+    for (i = 0; i < l->count; ++i) {
+        const char *s = l->items[i], *k = strchr(s, '\t') + 1, *d = strchr(k, '\t') + 1;
+        size_t kl = (size_t)(d - 1 - k);
+        if (!strncmp(s, "usuario\t", 8) && kl == n && !strncmp(k, clean, n) && uid0_in(d)) return 1;
+        if (strncmp(s, "alerta\t", 7)) continue;
+        if (kl == 5 + n && !strncmp(k, "uid0:", 5) && !strncmp(k + 5, clean, n)) return 1;
+        if (kl >= 14 + cut && !strncmp(k, "conta_anormal:", 14) && !strncmp(k + 14, clean, cut) &&
+            (n > 48 || kl == 14 + n) && uid0_in(d))
+            return 1;
+    }
+    return 0;
+}
+
 static void fuzz_collection(void) {
     static const char *const allowed[] = {"usuario", "alerta", "admin", "porta", "suid",
                                           "gravavel", "inicio", "config", "chave_ssh"};
@@ -885,7 +988,8 @@ static void fuzz_collection(void) {
                         "   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 55 1 0\n"
                         "   1: 0100007F:0CEA 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 66 1 0\n";
     const char *keys_t = "ssh-ed25519 AAAAC3Nz ana@pc\nfrom=\"1.2.3.4\",command=\"x y\" ssh-rsa AAAAB3 b\n";
-    static char passwd[32768], shadow[32768], group[32768], tcp[32768], keys[32768];
+    /* mutated up to 32 KiB; twice that leaves room for glibc_view */
+    static char passwd[65536], shadow[65536], group[65536], tcp[32768], keys[32768];
     unsigned it, n = iters(150);
     new_root();
     if (!root[0]) return;
@@ -894,14 +998,17 @@ static void fuzz_collection(void) {
     dir("/home/ana/.ssh", 0700);
     for (it = 0; it < n; ++it) {
         InvList items, notes;
-        size_t pl = mutate(passwd_t, passwd, sizeof(passwd)), sl = mutate(shadow_t, shadow, sizeof(shadow));
-        size_t gl = mutate(group_t, group, sizeof(group)), tl = mutate(tcp_t, tcp, sizeof(tcp));
+        size_t pl = mutate(passwd_t, passwd, 32768), sl = mutate(shadow_t, shadow, 32768);
+        size_t gl = mutate(group_t, group, 32768), tl = mutate(tcp_t, tcp, sizeof(tcp));
         size_t kl = mutate(keys_t, keys, sizeof(keys)), i, a;
         put_bytes("/etc/passwd", passwd, pl, 0644);
         put_bytes("/etc/shadow", shadow, sl, 0600);
         put_bytes("/etc/group", group, gl, 0644);
         put_bytes("/proc/net/tcp", tcp, tl, 0644);
         put_bytes("/home/ana/.ssh/authorized_keys", keys, kl, 0600);
+        pl = glibc_view(passwd, pl, sizeof(passwd));
+        sl = glibc_view(shadow, sl, sizeof(shadow));
+        gl = glibc_view(group, gl, sizeof(group));
         shown_as(passwd, pl);
         shown_as(shadow, sl);
         shown_as(group, gl);
@@ -928,6 +1035,16 @@ static void fuzz_collection(void) {
                 CHECK(strstr(passwd, probe) != NULL, "user %s not in passwd", k);
             } else if (!strcmp(cat, "alerta") && !strncmp(k, "uid0:", 5)) {
                 CHECK(strstr(passwd, k + 5) != NULL, "uid0 alert for %s not in passwd", k + 5);
+            } else if (!strcmp(cat, "alerta") && !strncmp(k, "conta_anormal:", 14)) {
+                CHECK(strstr(passwd, k + 14) != NULL, "abnormal account %s not in passwd (iteration %u)", k + 14, it);
+                if (!strstr(passwd, k + 14)) {
+                    size_t q, from = pl > 80 ? pl - 80 : 0;
+                    fprintf(stderr, "  key %zu bytes:", strlen(k + 14));
+                    for (q = 14; k[q] && q < 14 + 70; ++q) fprintf(stderr, " %02x", (unsigned char)k[q]);
+                    fprintf(stderr, "\n  passwd (%zu bytes) ends:", pl);
+                    for (q = from; q < pl; ++q) fprintf(stderr, " %02x", (unsigned char)passwd[q]);
+                    fputc('\n', stderr);
+                }
             } else if (!strcmp(cat, "alerta") && !strncmp(k, "senha_vazia:", 12)) {
                 CHECK(strstr(shadow, k + 12) != NULL, "empty password for %s not in shadow", k + 12);
             } else if (!strcmp(cat, "admin")) {
@@ -945,6 +1062,64 @@ static void fuzz_collection(void) {
                 CHECK(t[0] && strstr(keys, t), "key type %s not in authorized_keys", t);
             }
         }
+#if defined(__GLIBC__)
+        {
+            /* glibc's own reader is the oracle: every uid 0 account it returns is in the report.
+             * "+" and "-" lines are nss_compat directives that nss_files lookups skip. */
+            char p[512];
+            FILE *pf;
+            struct passwd *pw;
+            snprintf(p, sizeof(p), "%s/etc/passwd", root);
+            if ((pf = fopen(p, "rb")) != NULL) {
+                while ((pw = fgetpwent(pf)) != NULL)
+                    if (pw->pw_uid == 0 && pw->pw_name[0] != '+' && pw->pw_name[0] != '-')
+                        CHECK(root_visible(&items, pw->pw_name), "uid 0 account [%s] hidden (iteration %u)",
+                              pw->pw_name, it);
+                fclose(pf);
+            }
+            /* The other way: every user listed is an account glibc reads, with the same uid. Names
+             * shown with '?' (a control byte) and nss_compat lines are left out. */
+            for (i = 0; i < items.count; ++i) {
+                const char *s = items.items[i], *tab = strchr(s + 8, '\t');
+                char name[INV_ITEM_MAX];
+                unsigned long uid = 0;
+                int found = 0;
+                if (strncmp(s, "usuario\t", 8) || !tab || s[8] == '+' || s[8] == '-') continue;
+                memcpy(name, s + 8, (size_t)(tab - s - 8));
+                name[tab - s - 8] = 0;
+                if (strchr(name, '?')) continue;
+                CHECK(sscanf(tab + 1, "uid=%lu", &uid) == 1, "user item without a uid: [%s]", s);
+                if ((pf = fopen(p, "rb")) != NULL) {
+                    while ((pw = fgetpwent(pf)) != NULL)
+                        if (!strcmp(pw->pw_name, name) && (unsigned long)pw->pw_uid == uid) found = 1;
+                    fclose(pf);
+                }
+                CHECK(found, "user [%s] uid=%lu is not an account glibc reads (iteration %u)", name, uid, it);
+            }
+            /* And every empty password glibc reads from the shadow file is an alert. */
+            snprintf(p, sizeof(p), "%s/etc/shadow", root);
+            if ((pf = fopen(p, "rb")) != NULL) {
+                struct spwd *sp;
+                while ((sp = fgetspent(pf)) != NULL) {
+                    char want[600], cut[80];
+                    size_t q;
+                    if (sp->sp_pwdp[0] || sp->sp_namp[0] == '+' || sp->sp_namp[0] == '-') continue;
+                    /* By name, or, for a name longer than the line kept, as an abnormal shadow line. */
+                    snprintf(want, sizeof(want), "alerta\tsenha_vazia:%.500s", sp->sp_namp);
+                    snprintf(cut, sizeof(cut), "alerta\tshadow_anormal:%.48s", sp->sp_namp);
+                    for (q = 7; want[q]; ++q)
+                        if ((unsigned char)want[q] < 32 || want[q] == 127) want[q] = '?';
+                    for (q = 7; cut[q]; ++q)
+                        if ((unsigned char)cut[q] < 32 || cut[q] == 127) cut[q] = '?';
+                    if (has_prefix(&items, want) || (strlen(sp->sp_namp) >= INV_LINE_KEPT && has_prefix(&items, cut)))
+                        continue;
+                    CHECK(0, "empty password of [%s] hidden (iteration %u)", sp->sp_namp, it);
+                    dump_lines(p, sp->sp_namp);
+                }
+                fclose(pf);
+            }
+        }
+#endif
         inv_free(&items);
         inv_free(&notes);
     }
@@ -1149,6 +1324,453 @@ static void test_review_fixes(void) {
     inv_free(&back);
 }
 
+/* Accounts that glibc accepts, read the way glibc reads them (nss_files: blanks and
+ * comments skipped, uid through strtou32, missing fields empty, the line ending at a
+ * NUL): none may be missing from the report. Odd spellings are alerts with the line. */
+static void test_hidden_accounts(void) {
+    static const char *const roots[] = {"neg", "plus", "sp", "zeros", "short", "lead", "nulroot", "bighome", "evil"};
+    static const char nul_line[] = "nulroot:x:0:0::/:/bin/sh\0tail\n";
+    static char text[32768];
+    char longname[71], home[601], gecos[9001];
+    const char *d;
+    InvList items, notes;
+    size_t i, n = 0;
+    new_root();
+    if (!root[0]) return;
+    memset(longname, 'n', 70);
+    longname[70] = 0;
+    home[0] = '/';
+    memset(home + 1, 'h', 599);
+    home[600] = 0;
+    memset(gecos, 'G', 9000);
+    gecos[9000] = 0;
+    n += (size_t)sprintf(text + n, "root:x:0:0:root:/root:/bin/bash\n");                                   /* 1 */
+    n += (size_t)sprintf(text + n, "neg:x:-0:0::/root:/bin/bash\nplus:x:+0:0::/root:/bin/bash\n");        /* 2, 3 */
+    n += (size_t)sprintf(text + n, "sp:x: 0:0::/root:/bin/bash\nzeros:x:00000000000:0::/root:/bin/bash\n"); /* 4, 5 */
+    n += (size_t)sprintf(text + n, "minus1:x:-1:0::/home/m:/bin/bash\nshort:x:0:0\n");                    /* 6, 7 */
+    n += (size_t)sprintf(text + n, "  # hidden:x:0:0::/:/bin/sh\n \tlead:x:0:0::/:/bin/sh\n");            /* 8, 9 */
+    memcpy(text + n, nul_line, sizeof(nul_line) - 1);                                                     /* 10 */
+    n += sizeof(nul_line) - 1;
+    n += (size_t)sprintf(text + n, "%s:x:0:0::/:/bin/sh\n", longname);                                    /* 11 */
+    n += (size_t)sprintf(text + n, "bighome:x:0:0::%s:/bin/sh\n", home);                                  /* 12 */
+    n += (size_t)sprintf(text + n, "evil:x:0:0:%s:/root:/bin/bash\n", gecos);                             /* 13 */
+    n += (size_t)sprintf(text + n, "after:x:1003:1003::/home/after:/bin/bash\n");                         /* 14 */
+    memset(text + n, ' ', 9000);                                                                          /* 15 */
+    n += 9000;
+    n += (size_t)sprintf(text + n, "blank9k:x:0:0::/root:/bin/bash\n");
+    n += (size_t)sprintf(text + n, "#musl:x::0::/root:/bin/sh\n# a comment: x:0:0\n");         /* 16, 17 */
+    n += (size_t)sprintf(text + n, "#wrap:x:4294967296:0::/root:/bin/sh\n");                     /* 18 */
+    n += (size_t)sprintf(text + n, "#longo:x:0:0:%s:/root:/bin/sh\n", gecos);                    /* 19 */
+    n += (size_t)sprintf(text + n, "vazio:x::0::/root:/bin/sh\nword:x:abc:0::/:/bin/sh\n");     /* 20, 21 */
+    n += (size_t)sprintf(text + n, "wrap:x:4294967296:0::/root:/bin/sh\ntop:x:4294967295:0::/:/bin/sh\n"); /* 22, 23 */
+    n += (size_t)sprintf(text + n, "g1:x:0:4294967296::/root:/bin/sh\n");                         /* 24 */
+    put_bytes("/etc/passwd", text, n, 0644);
+    collect(&items, &notes);
+
+    for (i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i)
+        CHECK(root_visible(&items, roots[i]), "uid 0 account %s hidden", roots[i]);
+    CHECK(root_visible(&items, "blank9k"), "uid 0 account after 9000 blanks hidden");
+    CHECK(root_visible(&items, longname), "uid 0 account with a 70-byte name hidden");
+    d = item_detail(&items, "alerta\tconta_anormal:neg\t");
+    CHECK(d && strstr(d, "linha=2"), "uid -0 not flagged with its line: %s", d ? d : "-");
+    CHECK(has_prefix(&items, "alerta\tconta_anormal:plus\t") && has_prefix(&items, "alerta\tconta_anormal:sp\t") &&
+              has_prefix(&items, "alerta\tconta_anormal:zeros\t"),
+          "uid 0 written as +0, \" 0\" or with leading zeros not flagged");
+    /* strtoul wraps -1 past 32 bits, and glibc 2.39 rejects the line; musl stops at the sign and rejects it too. */
+    CHECK(!any_contains(&items, "minus1") && any_contains(&notes, "linha 6: não é conta para a glibc, ignorada"),
+          "uid -1 not rejected as glibc does");
+    CHECK(has_prefix(&items, "alerta\tuid0:short\t"), "account without its last fields hidden");
+    CHECK(!any_contains(&items, "hidden"), "a comment after blanks read as an account");
+    /* musl reads a comment shaped like an account as one: glibc does not, so it is a note, not an item. */
+    CHECK(any_contains(&notes, "linha 8: comentário para a glibc, mas conta uid=0 para a musl") &&
+              any_contains(&notes, "linha 16: comentário para a glibc, mas conta uid=0 para a musl") &&
+              !any_contains(&notes, "linha 17:") && !any_contains(&items, "musl"),
+          "a passwd comment that musl reads as a uid 0 account left no note");
+    /* musl's atou wraps modulo 2^32, and musl reads a line of any length. */
+    CHECK(any_contains(&notes, "linha 18: comentário para a glibc, mas conta uid=0 para a musl") &&
+              any_contains(&notes, "linha 19: comentário para a glibc, mas conta uid=0 para a musl (linha longa"),
+          "a wrapped uid or a long comment line hid a musl uid 0 account");
+    /* An empty uid: glibc rejects the line, musl reads uid 0. */
+    CHECK(any_contains(&notes, "linha 20: não é conta para a glibc, mas conta uid=0 para a musl") &&
+              any_contains(&notes, "linha 21: não é conta para a glibc, ignorada"),
+          "an empty uid that musl reads as 0 not told apart in the note");
+    /* Past 32 bits glibc rejects the line, and musl wraps 4294967296 to root; 4294967295 still fits. */
+    CHECK(!any_contains(&items, "wrap") &&
+              any_contains(&notes, "linha 22: não é conta para a glibc, mas conta uid=0 para a musl") &&
+              has(&items, "usuario\ttop\tuid=4294967295 shell=/bin/sh"),
+          "a uid past 32 bits read as an account, or 4294967295 lost");
+    CHECK(!has_prefix(&items, "usuario\tg1\t") && !has_prefix(&items, "alerta\tuid0:g1\t") && any_contains(&notes, "linha 24: não é conta para a glibc, mas conta uid=0"),
+          "a gid past 32 bits read as an account");
+    CHECK(has_prefix(&items, "alerta\tuid0:lead\t"), "blanks before a name: glibc reads the name without them");
+    CHECK(has_prefix(&items, "alerta\tuid0:nulroot\t"), "account before a NUL hidden");
+    CHECK(!has_prefix(&items, "usuario\tbighome") && !has_prefix(&items, "usuario\tevil") &&
+              !has_prefix(&items, "usuario\tnnnn"),
+          "an account with a field cut kept as a user");
+    d = item_detail(&items, "alerta\tconta_anormal:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn");
+    CHECK(d && strstr(d, "cortado"), "cut name not marked: %s", d ? d : "-");
+    d = item_detail(&items, "alerta\tconta_anormal:evil\t");
+    CHECK(d && strstr(d, "linha=13"), "long line not flagged with its line: %s", d ? d : "-");
+    CHECK(has(&items, "usuario\troot\tuid=0 shell=/bin/bash") && !has_prefix(&items, "alerta\tconta_anormal:root"),
+          "plain root changed or flagged");
+    CHECK(has(&items, "usuario\tafter\tuid=1003 shell=/bin/bash"), "account after the odd lines lost");
+    inv_free(&items);
+    inv_free(&notes);
+    remove_root();
+}
+
+/* Items and notes in one list, as --comparar compares them. */
+static void with_notes(const InvList *items, const InvList *notes, InvList *out) {
+    size_t i;
+    inv_init(out);
+    for (i = 0; i < items->count; ++i) add_line(out, items->items[i]);
+    for (i = 0; i < notes->count; ++i) inv_add(out, "nota", notes->items[i], "");
+    inv_finish(out);
+}
+
+/* --comparar must see a second bad line next to one the base already had: both used
+ * to get the same note, and equal notes merge into one. */
+static void test_second_bad_account(void) {
+    static const char *const base = "root:x:0:0:root:/root:/bin/bash\nblank:x::0::/:/bin/sh\n";
+    InvList a, na, b, nb, ma, mb;
+    char text[8192], passwd[512];
+    new_root();
+    if (!root[0]) return;
+    put("/etc/passwd", base, 0644);
+    collect(&a, &na);
+    with_notes(&a, &na, &ma);
+
+    snprintf(passwd, sizeof(passwd), "%sneg:x:-0:0::/root:/bin/bash\n", base);
+    put("/etc/passwd", passwd, 0644);
+    collect(&b, &nb);
+    with_notes(&b, &nb, &mb);
+    CHECK(diff_text(&ma, &mb, text, sizeof(text)) > 0 && strstr(text, "neg"), "second account with uid 0 unseen:\n%s",
+          text);
+    inv_free(&b);
+    inv_free(&nb);
+    inv_free(&mb);
+
+    snprintf(passwd, sizeof(passwd), "%sword:x:abc:0::/:/bin/sh\n", base);
+    put("/etc/passwd", passwd, 0644);
+    collect(&b, &nb);
+    with_notes(&b, &nb, &mb);
+    CHECK(diff_text(&ma, &mb, text, sizeof(text)) > 0, "second line that is not an account unseen");
+    inv_free(&a);
+    inv_free(&na);
+    inv_free(&ma);
+    inv_free(&b);
+    inv_free(&nb);
+    inv_free(&mb);
+    remove_root();
+}
+
+/* /etc/shadow and /etc/group read the way glibc reads them too. A group grants what its gid
+ * grants, whatever the line is called: initgroups collects every gid a user is listed under,
+ * and sudo matches %sudo by getgrnam's gid and by getgrgid's name. */
+static void test_shadow_and_groups(void) {
+    /* The last line, indented and without a newline, is read by glibc with its last byte twice:
+     * "\tzed::1::" becomes "zed::1:::", which it accepts (see read_entry). */
+    static const char rejected[] = "eve:\0$6$x:19000:0:99999:7:::\ncarol::19000\nten::1:2:3:4:5:6:7:8\n"
+                                   "nine::1:2:3:4:5:6:\n nul2::1::\0:::\n\tzed::1::";
+    static char text[16384];
+    const char *d;
+    InvList items, notes;
+    size_t n = 0;
+    new_root();
+    if (!root[0]) return;
+    put("/etc/passwd",
+        "root:x:0:0:root:/root:/bin/bash\nana:x:1000:1000::/home/ana:/bin/bash\nbia:x:1002:1002::/home/bia:/bin/bash\n"
+        "carl:x:1003:1003::/home/carl:/bin/bash\nbob:x:1004:27::/home/bob:/bin/bash\n"
+        "dan:x:1005:999::/home/dan:/bin/bash\n",
+        0644);
+    n += (size_t)sprintf(text + n, "root:$6$x:19000:0:99999:7:::\n");
+    memset(text + n, ' ', 9000);
+    n += 9000;
+    n += (size_t)sprintf(text + n, "bob::19000:0:99999:7:::\n");
+    /* Numbers past 32 bits: glibc 2.39 rejects big and neg1; "-18446744073709551615" wraps to 1. */
+    n += (size_t)sprintf(text + n, "big::4294967296:0:99999:7:::\nneg1::19000:-1:99999:7:::\n");
+    n += (size_t)sprintf(text + n, "one::-18446744073709551615:0:99999:7:::\n");
+    /* Lines glibc's shadow parser rejects (it needs the fields up to sp_max): no password to report. */
+    memcpy(text + n, rejected, sizeof(rejected) - 1);
+    n += sizeof(rejected) - 1;
+    put_bytes("/etc/shadow", text, n, 0600);
+    put("/etc/group", "root:x:0:\nsudo:x:27:\nsudo2:x:27:ana\n sudo:x:27:bia\nsudo:x:999:carl\nusers:x:100:ana\n", 0644);
+    collect(&items, &notes);
+
+    CHECK(has(&items, "alerta\tsenha_vazia:bob\tentra sem senha"), "empty password after 9000 blanks hidden");
+    CHECK(!has_prefix(&items, "alerta\tsenha_vazia:eve") && !has_prefix(&items, "alerta\tsenha_vazia:carol") &&
+              !has_prefix(&items, "alerta\tsenha_vazia:ten"),
+          "empty password invented from a shadow line glibc rejects");
+    CHECK(has(&items, "alerta\tsenha_vazia:nine\tentra sem senha"), "9-field shadow line with an empty flag hidden");
+    CHECK(!has_prefix(&items, "alerta\tsenha_vazia:big") && !has_prefix(&items, "alerta\tsenha_vazia:neg1") &&
+              has(&items, "alerta\tsenha_vazia:one\tentra sem senha"),
+          "a shadow number past 32 bits not read as glibc does");
+    /* An indented line with a NUL also keeps its last byte twice: " nul2::1::" is read as "nul2::1:::". */
+    CHECK(has(&items, "alerta\tsenha_vazia:nul2\tentra sem senha"), "indented shadow line with a NUL hidden");
+    CHECK(has(&items, "alerta\tsenha_vazia:zed\tentra sem senha"), "indented last shadow line without a newline hidden");
+    CHECK(has(&items, "admin\tsudo:ana\tmembro"), "member of another name with sudo's gid hidden");
+    CHECK(has(&items, "admin\tsudo:bia\tmembro"), "member of \" sudo\" (glibc skips the blank) hidden");
+    CHECK(has(&items, "admin\tsudo:carl\tmembro"), "member of a second \"sudo\" line hidden");
+    CHECK(has(&items, "admin\tsudo:bob\tgrupo primário"), "primary group sudo by gid hidden");
+    CHECK(has(&items, "admin\tsudo:dan\tgrupo primário"), "primary gid of a second \"sudo\" line hidden");
+    d = item_detail(&items, "alerta\tgrupo_anormal:sudo2\t");
+    CHECK(d && strstr(d, "gid=27"), "another name for sudo's gid not flagged: %s", d ? d : "-");
+    d = item_detail(&items, "alerta\tgrupo_anormal:sudo\t");
+    CHECK(d && strstr(d, "gid=999"), "a second sudo with another gid not flagged: %s", d ? d : "-");
+    CHECK(!has_prefix(&items, "admin\tusers:"), "ordinary group listed");
+    inv_free(&items);
+    inv_free(&notes);
+    remove_root();
+}
+
+/* Group membership as glibc's initgroups reads it, for that is what login, sshd and sudo
+ * get: every line read whole with getline (comments too, with no repeated tail), blanks
+ * skipped before each member. Checked with `id` against getent on glibc 2.39. */
+static void test_initgroups_view(void) {
+    InvList items, notes;
+    new_root();
+    if (!root[0]) return;
+    put("/etc/passwd",
+        "root:x:0:0:root:/root:/bin/bash\ncmt:x:1001:1001::/home/cmt:/bin/bash\nsp2:x:1002:1002::/home/sp2:/bin/bash\n"
+        "tail:x:1003:1003::/home/tail:/bin/bash\n",
+        0644);
+    put("/etc/group", "root:x:0:\nsudo:x:27:\n#c:x:27:cmt\nlist:x:27:aa, sp2\nend:x:27:ana \ncrlf:x:27:carl\r\n"
+                      "  last:x:27:tail",
+        0644);
+    collect(&items, &notes);
+    /* "ana " and "carl\r" are not ana and carl (id gives them no 27): the report must not look as if they were. */
+    CHECK(has_prefix(&items, "admin\tsudo:ana \tmembro; ") && !has(&items, "admin\tsudo:ana \tmembro"),
+          "member with a trailing blank shown as a plain member");
+    CHECK(has_prefix(&items, "admin\tsudo:carl?\tmembro; "), "member with a trailing CR shown as a plain member");
+    CHECK(has(&items, "admin\tsudo:cmt\tmembro"), "member of a comment line (initgroups reads it) hidden");
+    CHECK(has_prefix(&items, "alerta\tgrupo_anormal:#c\t"), "comment line granting sudo not flagged");
+    CHECK(has(&items, "admin\tsudo:sp2\tmembro"), "member after \", \" hidden");
+    CHECK(has(&items, "admin\tsudo:tail\tmembro") && !has_prefix(&items, "admin\tsudo:tailil"),
+          "indented last line without a newline: initgroups's member replaced by getgrnam's");
+    inv_free(&items);
+    inv_free(&notes);
+    remove_root();
+}
+
+/* Collects root in a child process and reads its report back: a scan that blocks fails
+ * the case after 5 s instead of hanging this binary. 0 on a timeout or a crash. */
+static int collect_in_child(InvList *items, InvList *notes) {
+    static const char path[] = "inv-child-report.txt";
+    struct timespec tick = {0, 10 * 1000 * 1000};
+    char err[256];
+    int status = 0, waited = 0, ok;
+    pid_t pid;
+    inv_init(items);
+    inv_init(notes);
+    fflush(NULL);
+    if ((pid = fork()) < 0) return 0;
+    if (pid == 0) {
+        InvList ci, cn;
+        FILE *f;
+        inv_init(&ci);
+        inv_init(&cn);
+        inventory_collect(root, &ci, &cn);
+        if (!(f = fopen(path, "wb"))) _exit(3);
+        inventory_write(f, &ci, &cn, "h", "t", root);
+        _exit(fclose(f) ? 3 : 0);
+    }
+    while (waitpid(pid, &status, WNOHANG) == 0) {
+        if (++waited > 500) {
+            kill(pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            remove(path);
+            return 0;
+        }
+        nanosleep(&tick, NULL);
+    }
+    ok = WIFEXITED(status) && !WEXITSTATUS(status) && inventory_read(path, items, notes, err, sizeof(err));
+    remove(path);
+    return ok;
+}
+
+/* A process that writes NUL bytes into the FIFO at rel, without end, once a reader opens it. */
+static pid_t nul_writer(const char *rel) {
+    char p[512];
+    pid_t pid;
+    snprintf(p, sizeof(p), "%s%s", root, rel);
+    fflush(NULL);
+    if ((pid = fork()) == 0) {
+        static const char zeros[4096];
+        int fd = open(p, O_WRONLY);
+        if (fd < 0) _exit(1);
+        for (;;)
+            if (write(fd, zeros, sizeof(zeros)) < 0) _exit(0);
+    }
+    return pid;
+}
+
+static void stop(pid_t pid) {
+    int status;
+    if (pid <= 0) return;
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+}
+
+/* A sparse file of the given size: no disk used, every byte reads as NUL. 0 (and no
+ * file) where the file system has no holes: a 64 MiB probe that takes real blocks
+ * stops before 4 GiB of zeros get written. */
+static int sparse(const char *rel, long long bytes) {
+    char p[512];
+    struct stat st;
+    int fd, ok;
+    snprintf(p, sizeof(p), "%s%s", root, rel);
+    if ((fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) return 0;
+    ok = !ftruncate(fd, (off_t)64 << 20) && !fstat(fd, &st) && (long long)st.st_blocks * 512 < (1LL << 20) &&
+         !ftruncate(fd, (off_t)bytes);
+    close(fd);
+    if (!ok) unlink(p);
+    return ok;
+}
+
+static void fifo(const char *rel) {
+    char p[512];
+    snprintf(p, sizeof(p), "%s%s", root, rel);
+    if (mkfifo(p, 0644)) {
+        fprintf(stderr, "FAIL mkfifo %s\n", p);
+        ++failures;
+    }
+}
+
+static void unlink_rel(const char *rel) {
+    char p[512];
+    snprintf(p, sizeof(p), "%s%s", root, rel);
+    unlink(p);
+}
+
+/* --comparar base.txt <(ssh host smolmoe-inventario): a report can come through a pipe. */
+static void test_report_from_pipe(void) {
+    static const char path[] = "inv-test-pipe";
+    InvList a, back;
+    char err[256];
+    pid_t writer;
+    inv_init(&a);
+    inv_init(&back);
+    inv_add(&a, "porta", "tcp 0.0.0.0:22", "processo=sshd");
+    inv_finish(&a);
+    remove(path);
+    if (mkfifo(path, 0600)) {
+        fprintf(stderr, "FAIL mkfifo %s\n", path);
+        ++failures;
+        return;
+    }
+    fflush(NULL);
+    if ((writer = fork()) == 0) {
+        FILE *f = fopen(path, "wb");
+        if (f) inventory_write(f, &a, NULL, "h", "t", "/"), fclose(f);
+        _exit(0);
+    }
+    CHECK(inventory_read(path, &back, NULL, err, sizeof(err)) && same_list(&a, &back), "report through a pipe: %s",
+          err);
+    stop(writer);
+    remove(path);
+    inv_free(&a);
+    inv_free(&back);
+}
+
+/* What the user owns in their home can be a FIFO, a device or a huge sparse file: the
+ * scan, run as root, must neither block nor read without end, and must say so. */
+static void test_special_files(void) {
+    static const char keys[] = "/root/.ssh/authorized_keys", rc[] = "/home/ana/.bashrc",
+                      ana_keys[] = "/home/ana/.ssh/authorized_keys";
+    const long long huge = 4LL << 30;
+    InvList items, notes;
+    pid_t writer;
+    int ok;
+    new_root();
+    if (!root[0]) return;
+    dir("/root", 0700);
+    dir("/root/.ssh", 0700);
+    dir("/home", 0755);
+    dir("/home/ana", 0755);
+    dir("/home/ana/.ssh", 0700);
+    dir("/etc/ssh", 0755);
+    dir("/etc/ssh/keys", 0755);
+    put("/etc/passwd", "root:x:0:0:root:/root:/bin/bash\nana:x:1000:1000::/home/ana:/bin/bash\n", 0644);
+
+    /* A FIFO with no writer used to block in open. */
+    fifo(keys);
+    ok = collect_in_child(&items, &notes);
+    CHECK(ok, "FIFO without a writer as authorized_keys: the scan blocked");
+    CHECK(has_prefix(&items, "alerta\tnao_regular:/root/.ssh/authorized_keys\t"), "FIFO without a writer not flagged");
+    inv_free(&items);
+    inv_free(&notes);
+
+    /* A FIFO fed NULs used to loop in read_line. */
+    writer = nul_writer(keys);
+    ok = collect_in_child(&items, &notes);
+    stop(writer);
+    CHECK(ok, "FIFO fed NULs as authorized_keys: the scan never ended");
+    CHECK(has_prefix(&items, "alerta\tnao_regular:/root/.ssh/authorized_keys\t"), "FIFO fed NULs not flagged");
+    inv_free(&items);
+    inv_free(&notes);
+
+    /* Opening is already an act (/dev/watchdog arms on open): what is not a regular file is never
+     * opened. A writer's open of a FIFO returns only once a reader opens it, so it marks that. */
+    {
+        char marker[512];
+        pid_t watcher;
+        struct timespec tick = {0, 20 * 1000 * 1000};
+        int k;
+        snprintf(marker, sizeof(marker), "%s/opened", root);
+        fflush(NULL);
+        if ((watcher = fork()) == 0) {
+            char p[512];
+            int fd;
+            snprintf(p, sizeof(p), "%s%s", root, keys);
+            if ((fd = open(p, O_WRONLY)) >= 0) close(open(marker, O_WRONLY | O_CREAT, 0644));
+            _exit(0);
+        }
+        ok = collect_in_child(&items, &notes);
+        for (k = 0; k < 10 && access(marker, F_OK); ++k) nanosleep(&tick, NULL);
+        CHECK(ok && access(marker, F_OK), "a FIFO in place of authorized_keys was opened");
+        stop(watcher);
+        inv_free(&items);
+        inv_free(&notes);
+    }
+    unlink_rel(keys);
+
+    /* A relative link inside the image is a legitimate authorized_keys (regression guard, passes before). */
+    put("/etc/ssh/keys/root", "ssh-ed25519 ROOTKEY admin@pc\n", 0600);
+    link_to("../../etc/ssh/keys/root", keys);
+    ok = collect_in_child(&items, &notes);
+    CHECK(ok && has_prefix(&items, "chave_ssh\troot:"), "authorized_keys behind a relative link inside the image lost");
+    inv_free(&items);
+    inv_free(&notes);
+
+    /* A FIFO in place of a tracked file used to vanish from the report. */
+    fifo(rc);
+    ok = collect_in_child(&items, &notes);
+    CHECK(ok && has_prefix(&items, "alerta\tnao_regular:/home/ana/.bashrc\t"), "FIFO as .bashrc not flagged");
+    inv_free(&items);
+    inv_free(&notes);
+    unlink_rel(rc);
+
+    /* Sparse files of 4 GiB: regular, so only a byte limit stops the read. */
+    if (!sparse(ana_keys, huge)) {
+        fprintf(stderr, "test-inventory: no sparse files here, size limits not tested\n");
+    } else {
+        ok = collect_in_child(&items, &notes);
+        CHECK(ok, "4 GiB authorized_keys: the scan did not end in 5 s");
+        CHECK(any_contains(&notes, ana_keys), "4 GiB authorized_keys read without a note");
+        inv_free(&items);
+        inv_free(&notes);
+        unlink_rel(ana_keys);
+        if (sparse(rc, huge)) {
+            ok = collect_in_child(&items, &notes);
+            CHECK(ok, "4 GiB .bashrc: the hash did not end in 5 s");
+            CHECK(any_contains(&notes, rc) && !has_prefix(&items, "inicio\t/home/ana/.bashrc\t"),
+                  "4 GiB .bashrc not noted");
+            inv_free(&items);
+            inv_free(&notes);
+        }
+    }
+    remove_root();
+}
+
 #endif
 
 int main(void) {
@@ -1165,6 +1787,12 @@ int main(void) {
     fuzz_collection();
     test_long_paths();
     test_review_fixes();
+    test_hidden_accounts();
+    test_second_bad_account();
+    test_shadow_and_groups();
+    test_initgroups_view();
+    test_report_from_pipe();
+    test_special_files();
 #endif
     if (failures) {
         fprintf(stderr, "test-inventory: %d failure(s)\n", failures);

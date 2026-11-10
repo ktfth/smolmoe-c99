@@ -9,6 +9,7 @@
 #   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
 #   make web             build/web: the browser page (needs zig and bun)
 #   make gui             build/smolmoe-gui[.exe]: the desktop window (C++17; GLFW on Linux/macOS)
+#   make inventario      build/smolmoe-inventario and its tests: the read-only defensive inventory (collects on Linux)
 
 # PowerShell and cmd: the recipes need a POSIX shell, and native Windows make
 # (winget's, mingw32-make) falls back to cmd.exe when PATH has none. Use the
@@ -81,9 +82,9 @@ OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui \
 	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui stories all-models phi-weights \
-	chat run-gui run-web help
+	chat run-gui run-web help inventario
 
-all: $(BIN) $(QUANTIZE) $(BUNDLE) $(INVENTARIO)
+all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
 tools: $(Q8PACK)
 
@@ -111,7 +112,11 @@ $(QUANTIZE): $(BUILD)/obj/quantize_main.o $(OBJ_LIB)
 $(BUNDLE): $(BUILD)/obj/bundle_main.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-# Read-only defensive inventory; depends on nothing else in the runtime.
+# Read-only defensive inventory; depends on nothing else in the runtime, so it stays out
+# of `all` and `test-unit`: `make inventario` builds it and runs its tests (CI does).
+inventario: $(INVENTARIO) $(TEST_INV)
+	$(TEST_INV)
+
 $(INVENTARIO): $(BUILD)/obj/inventory_main.o $(OBJ_INV)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@
 
@@ -145,14 +150,13 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP) $(TEST_INV)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
 	$(TEST_SHELL)
 	$(TEST_DESKTOP)
-	$(TEST_INV)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.
 TEST_TIMEOUT_MS ?= 30000
@@ -166,7 +170,7 @@ test: test-unit test-integration
 sanitize:
 	$(MAKE) BUILD=build/asan OPT="-O1 -g -fno-omit-frame-pointer" \
 		CFLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all" \
-		LDFLAGS="-fsanitize=address,undefined" SLOW_TEST_MS=600000 test
+		LDFLAGS="-fsanitize=address,undefined" SLOW_TEST_MS=600000 test inventario
 
 # RELEASE_DIR and RELEASE_LDFLAGS let the release workflow build a static musl
 # binary (-static) or one slice of the macOS universal binary (-arch arm64).
@@ -277,6 +281,7 @@ help:
 	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|gemma|phi))
 	$(info $(EMPTY)  make run-web         abre a interface web em http://localhost:8080)
 	$(info $(EMPTY)  make test            testes (em C e com o bun))
+	$(info $(EMPTY)  make inventario      inventário defensivo só leitura (coleta no Linux) e os testes dele)
 	$(info )
 	$(info Um executável por modelo, com o programa e os pesos num arquivo só, em $(DIST)/:)
 	$(info $(EMPTY)  make qwen            $(DIST)/qwen-pt             chat no terminal, Qwen2.5-0.5B Q8 (560 MB))

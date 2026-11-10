@@ -25,7 +25,7 @@ jobs:
       - name: unit tests
         run: |
           docker run --rm --platform linux/arm64 -e SM_EXPECT_SIMD -v "$PWD:/src" -w /src alpine:3.20 \
-            sh -c 'apk add --no-cache build-base && make -j4 test-unit'
+            sh -c 'apk add --no-cache build-base && make -j4 test-unit inventario'
 
   linux:
     name: linux (${{ matrix.cc }})
@@ -71,6 +71,9 @@ jobs:
         env:
           SM_EXPECT_WASM: ${{ matrix.cc == 'gcc' && '1' || '' }}
           SM_EXPECT_GUI: ${{ matrix.cc == 'gcc' && '1' || '' }}
+      # The defensive inventory is outside `all` and `test`; sanitize runs it too.
+      - name: inventory
+        run: make CC=${{ matrix.cc }} inventario
       - name: sanitize
         run: make CC=${{ matrix.cc }} sanitize
 
@@ -91,7 +94,7 @@ jobs:
         with:
           bun-version: 1.2.15
       - name: build
-        run: make -j4 all scalar gui
+        run: make -j4 all scalar gui inventario
       # The same Makefile from PowerShell with native Windows make (mingw32-make), which has
       # no POSIX shell on PATH: the Makefile finds the one next to the compiler (docs/CAMINHOS.md).
       - name: build from PowerShell
@@ -145,7 +148,7 @@ jobs:
       - name: make help and the model aliases
         run: make help > /dev/null && make -n CC=clang all-models > /dev/null
       - name: build and test
-        run: make -j4 CC=clang test
+        run: make -j4 CC=clang test inventario
         env:
           SM_EXPECT_GUI: "1"
       - name: NEON against scalar
