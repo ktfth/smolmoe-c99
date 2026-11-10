@@ -164,6 +164,8 @@ block order, and the eight lanes are reduced as `((l0+l4)+(l2+l6)) +
 ((l1+l5)+(l3+l7))`. The scalar kernel and the AVX2 kernel (`maddubs`/`madd`,
 separate multiply and add, never FMA) implement this order bit for bit, so
 results do not depend on backend, thread count or prompt batch size.
+`--fast` keeps the integer lanes and the final reduction, but each lane
+update is one FMA, so those logits are not bit-identical to the default.
 Reproducibility across operating systems is not promised yet: `expf`, `cos`
 and `sin` come from the platform's libm.
 

@@ -143,6 +143,11 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     m->keys = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
     m->values = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
     m->scores = (float *)buffer(mem, threads, context, sizeof(float));
+    {
+        uint32_t wide = m->nb_hidden > nb_max ? m->nb_hidden : nb_max;
+        m->pack_stride = gemm_scratch_bytes(wide);
+        m->pack = (unsigned char *)mem_alloc(mem, threads, m->pack_stride);
+    }
 }
 
 size_t kv_cache_bytes(const Config *c, uint32_t context) {
@@ -165,43 +170,36 @@ typedef struct MatTask {
     uint32_t items, total_rows, ntok, nb;
     const float *xd;
     const int8_t *xq;
+    unsigned char *pack;
+    size_t pack_stride;
     uint32_t fault;
 } MatTask;
 
-static int store(const MatItem *it, uint32_t token, uint32_t row, float y) {
-    if (it->bias) y += it->bias[row];
-    it->y[(size_t)token * it->w->rows + row] = y;
-    return isfinite(y);
-}
-
-static int mat_rows(const MatTask *t, const MatItem *it, uint32_t r0, uint32_t r1) {
+static int mat_rows(const MatTask *t, const MatItem *it, uint32_t r0, uint32_t r1, unsigned char *scratch) {
     const QMat *w = it->w;
-    const DotQ8 dot = w->dtype == DTYPE_Q5 ? dot_q5 : dot_q8;
-    const DotQ8x4 dot_x4 = w->dtype == DTYPE_Q5 ? dot_q5_x4 : dot_q8_x4;
-    size_t xs = (size_t)t->nb * QK;
-    uint32_t r, k, j;
+    const GemmQ8 gemm = w->dtype == DTYPE_Q5 ? gemm_q5 : gemm_q8;
+    uint32_t r, k;
     int ok = 1;
-    for (r = r0; r < r1; ++r) {
-        const unsigned char *row = w->data + w->row_bytes * r;
-        for (k = 0; k + 4 <= t->ntok; k += 4) {
-            float y[4];
-            dot_x4(row, t->xd + (size_t)k * t->nb, t->xq + k * xs, t->nb, t->nb, y);
-            for (j = 0; j < 4; ++j) ok &= store(it, k + j, r, y[j]);
+    gemm(w->data + w->row_bytes * r0, w->row_bytes, t->xd, t->xq, r1 - r0, t->ntok, t->nb, it->y + r0, w->rows,
+         scratch);
+    for (k = 0; k < t->ntok; ++k)
+        for (r = r0; r < r1; ++r) {
+            float *cell = &it->y[(size_t)k * w->rows + r];
+            if (it->bias) *cell += it->bias[r];
+            ok &= isfinite(*cell);
         }
-        for (; k < t->ntok; ++k)
-            ok &= store(it, k, r, dot(row, t->xd + (size_t)k * t->nb, t->xq + k * xs, t->nb));
-    }
     return ok;
 }
 
 static void mat_task(void *ctx, uint32_t index, uint32_t count) {
     MatTask *t = (MatTask *)ctx;
+    unsigned char *scratch = t->pack ? t->pack + (size_t)index * t->pack_stride : NULL;
     uint32_t begin, end, base = 0, i;
     split_range(t->total_rows, index, count, &begin, &end);
     for (i = 0; i < t->items; base += t->item[i].w->rows, ++i) {
         uint32_t rows = t->item[i].w->rows;
         uint32_t lo = begin > base ? begin : base, hi = end < base + rows ? end : base + rows;
-        if (lo < hi && !mat_rows(t, &t->item[i], lo - base, hi - base))
+        if (lo < hi && !mat_rows(t, &t->item[i], lo - base, hi - base, scratch))
             __atomic_store_n(&t->fault, 1, __ATOMIC_RELAXED);
     }
 }
@@ -225,6 +223,8 @@ static void matmul(Model *m, const MatItem *items, uint32_t n, const float *xd, 
     t.nb = items[0].w->nb;
     t.xd = xd;
     t.xq = xq;
+    t.pack = m->pack;
+    t.pack_stride = m->pack_stride;
     for (i = 0; i < n; ++i) {
         if (items[i].w->nb != t.nb) die("internal error: matmul inputs differ in width");
         t.item[i] = items[i];

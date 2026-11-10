@@ -35,7 +35,8 @@ typedef struct Options {
     const char *shell; /* --shell */
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
-    int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock, profile;
+    int scalar, fast, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock,
+        profile;
     int shell_escape; /* "!comando": 0 on in a terminal, 1 also on piped input, -1 off */
     int memory_given; /* --memory-mib: otherwise the KV cache is added to the default budget */
     ToolClock clock; /* --now */
@@ -88,6 +89,7 @@ static void usage(FILE *out) {
           "  --batch N            prompt tokens per forward pass (default 32)\n"
           "  --memory-mib N       heap ceiling, excluding mapped weights (default 512 plus the KV cache of up to 2048 positions)\n"
           "  --scalar             disable SIMD kernels\n"
+          "  --fast               lane-wise FMA dots; not bit-identical to the default\n"
           "diagnostics\n"
           "  --stats FILE         JSON statistics (always printed to stderr)\n"
           "  --trace FILE         exact hexadecimal logits of every processed token\n"
@@ -154,6 +156,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--help") || !strcmp(opt, "-h")) { usage(stdout); exit(0); }
         if (!strcmp(opt, "--version")) { puts("smolmoe " SMOLMOE_VERSION); exit(0); }
         if (!strcmp(opt, "--scalar")) { o->scalar = 1; continue; }
+        if (!strcmp(opt, "--fast")) { o->fast = 1; continue; }
         if (!strcmp(opt, "--chat")) { o->chat = 1; continue; }
         if (!strcmp(opt, "--interactive") || !strcmp(opt, "-i")) { o->interactive = 1; continue; }
         if (!strcmp(opt, "--hash-logits")) { o->hash_logits = 1; continue; }
@@ -629,6 +632,7 @@ int main(int argc, char **argv) {
     if (!o.interactive && o.tokens > context - run.np)
         die("prompt + --tokens exceeds --context; increase context or reduce tokens");
 
+    if (o.fast) kernels_set_fast(1);
     backend = kernels_select(o.scalar);
     pool = pool_create(o.threads ? o.threads : default_threads(), &mem);
     modelfile_verify_payload(&src.mf, pool);

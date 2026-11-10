@@ -41,7 +41,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform process threadpool kernels vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell engine chat main
+SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell engine chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -413,6 +413,13 @@ gui: $(GUI)
 
 bench: $(BIN)
 	bun scripts/bench.ts
+
+# Kernel microbenchmark (no model weights). Prints before/after tok/s-equivalent.
+BENCH_MATMUL := $(BUILD)/bench-matmul$(EXE)
+$(BENCH_MATMUL): tests/bench_matmul.c $(OBJ_LIB)
+	$(CC) $(OPT) $(STD) $(FPFLAGS) $(PLATFORM) -Isrc $< $(OBJ_LIB) -o $@ $(LDLIBS)
+bench-kernels: $(BENCH_MATMUL)
+	$(BENCH_MATMUL)
 
 clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe
