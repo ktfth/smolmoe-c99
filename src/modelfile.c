@@ -1,4 +1,5 @@
 #include "modelfile.h"
+#include "compat.h"
 #include "f16.h"
 #include "kernels.h"
 
@@ -137,9 +138,9 @@ static void verify_task(void *ctx, uint32_t index, uint32_t count) {
         uint64_t begin = units * index / count, end = units * (index + 1) / count;
         if (t->alias || t->dtype == DTYPE_BLOB) continue;
         if (!verify_units(t, begin, end)) {
-            uint32_t expected = __atomic_load_n(&v->bad, __ATOMIC_RELAXED);
+            uint32_t expected = sm_load_u32(&v->bad, SM_ATOMIC_RELAXED);
             while ((!expected || i + 1 < expected) &&
-                   !__atomic_compare_exchange_n(&v->bad, &expected, i + 1, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+                   !sm_cas_u32(&v->bad, &expected, i + 1, SM_ATOMIC_RELAXED)) {}
             return;
         }
     }

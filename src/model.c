@@ -1,4 +1,5 @@
 #include "model.h"
+#include "compat.h"
 #include "kernels.h"
 #include "platform.h"
 #include "vecmath.h"
@@ -202,7 +203,7 @@ static void mat_task(void *ctx, uint32_t index, uint32_t count) {
         uint32_t rows = t->item[i].w->rows;
         uint32_t lo = begin > base ? begin : base, hi = end < base + rows ? end : base + rows;
         if (lo < hi && !mat_rows(t, &t->item[i], lo - base, hi - base))
-            __atomic_store_n(&t->fault, 1, __ATOMIC_RELAXED);
+            sm_store_u32(&t->fault, 1, SM_ATOMIC_RELAXED);
     }
 }
 
@@ -291,7 +292,7 @@ static void row_task(void *ctx, uint32_t index, uint32_t count) {
     uint32_t begin, end, r;
     split_range(t->n, index, count, &begin, &end);
     for (r = begin; r < end; ++r)
-        if (!row_work(t, r)) __atomic_store_n(&t->fault, 1, __ATOMIC_RELAXED);
+        if (!row_work(t, r)) sm_store_u32(&t->fault, 1, SM_ATOMIC_RELAXED);
 }
 
 static RowTask rows_of(float *rows, uint32_t n, uint32_t cols, uint32_t nb, float *d, int8_t *q) {

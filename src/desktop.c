@@ -39,20 +39,47 @@ static int fail(char *err, const char *fmt, const char *arg) {
     return 0;
 }
 
-/* The container appended to this executable, mapped; 0 when there is none. */
-static int map_bundle(MappedFile *file, uint64_t *offset, uint64_t *length) {
+/* Appended container, or <stem>.smoe beside this executable. *beside is the
+ * sibling path (arena memory) when that file is the model, so config and
+ * tokenizer next to it can be found; NULL when the container is appended. */
+static int map_own_model(Desktop *d, uint64_t *offset, uint64_t *length, const char **beside) {
     char err[512];
+    char sibling[4112];
     const char *self = self_executable_path();
-    if (!self || !try_map_file(self, file, err, sizeof(err))) return 0;
-    if (bundle_find(file->data, file->size, offset, length)) return 1;
-    unmap_file(file);
-    return 0;
+    *beside = NULL;
+    if (!self) return 0;
+    if (try_map_file(self, &d->file, err, sizeof(err))) {
+        if (bundle_find(d->file.data, d->file.size, offset, length)) return 1;
+        unmap_file(&d->file);
+    }
+    if (!bundle_sibling_path(self, sibling, sizeof(sibling))) return 0;
+    if (!try_map_file(sibling, &d->file, err, sizeof(err))) return 0;
+    *offset = 0;
+    *length = d->file.size;
+    {
+        size_t n = strlen(sibling);
+        char *copy = (char *)mem_alloc(&d->mem, n + 1, 1);
+        memcpy(copy, sibling, n + 1);
+        *beside = copy;
+    }
+    return 1;
 }
 
 int desktop_has_bundle(void) {
     MappedFile file;
     uint64_t offset, length;
-    if (!map_bundle(&file, &offset, &length)) return 0;
+    char err[512], sibling[4112];
+    const char *self = self_executable_path();
+    if (!self) return 0;
+    if (try_map_file(self, &file, err, sizeof(err))) {
+        if (bundle_find(file.data, file.size, &offset, &length)) {
+            unmap_file(&file);
+            return 1;
+        }
+        unmap_file(&file);
+    }
+    if (!bundle_sibling_path(self, sibling, sizeof(sibling))) return 0;
+    if (!try_map_file(sibling, &file, err, sizeof(err))) return 0;
     unmap_file(&file);
     return 1;
 }
@@ -103,15 +130,19 @@ static const char *resolve_desktop_path(Desktop *d, const char *arg) {
 
 /* Maps the model and parses its directory; a file that does not even start
  * like a container is refused here instead of by die(). */
-static int map_model(Desktop *d, const char *path, char *err) {
+static int map_model(Desktop *d, const char **path, char *err) {
     char why[DESKTOP_ERROR_BYTES - 64]; /* room for the sentence around it */
     uint64_t offset = 0, length;
     const unsigned char *data;
-    if (path) {
-        if (!try_map_file(path, &d->file, why, sizeof(why))) return fail(err, "não consegui abrir o arquivo (%s)", why);
+    const char *beside = NULL;
+    if (*path) {
+        if (!try_map_file(*path, &d->file, why, sizeof(why)))
+            return fail(err, "não consegui abrir o arquivo (%s)", why);
         length = d->file.size;
-    } else if (!map_bundle(&d->file, &offset, &length)) {
+    } else if (!map_own_model(d, &offset, &length, &beside)) {
         return fail(err, "%s", "este programa não traz um modelo: escolha um arquivo .smoe");
+    } else if (beside) {
+        *path = beside;
     }
     data = d->file.data + offset;
     if (length < 16 || memcmp(data, MAGIC, MAGIC_BYTES) || !data[MAGIC_BYTES] || data[MAGIC_BYTES] > MAX_VERSION)
@@ -179,7 +210,7 @@ Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
     if (!d) die("allocation failed");
     d->mem.limit = mul_size(DESKTOP_MEMORY_MIB, 1048576);
     path = resolve_desktop_path(d, o->path);
-    if (!map_model(d, path, err) || !load_metadata(d, path, err)) {
+    if (!map_model(d, &path, err) || !load_metadata(d, path, err)) {
         desktop_close(d);
         return NULL;
     }

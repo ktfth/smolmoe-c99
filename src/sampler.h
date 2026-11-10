@@ -7,12 +7,18 @@
 
 #include "util.h"
 
+/* One candidate. The logit lives in the record so sorting needs no process-wide
+ * context: two samplers can run at the same time. */
+typedef struct SamplerRank {
+    float logit;
+    uint32_t id;
+} SamplerRank;
+
 typedef struct Sampler {
     uint32_t vocab, top_k, rng;
     float temperature, top_p;
     const unsigned char *banned;
-    uint32_t *ids;
-    float *logits;
+    SamplerRank *ranked;
     double *probs;
 } Sampler;
 
