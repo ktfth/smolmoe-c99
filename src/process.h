@@ -9,6 +9,9 @@
 /* Whether stdin is a terminal a person types into: a console, a POSIX tty, or
  * the pipe of an MSYS/Cygwin terminal (Git Bash in mintty). */
 int stdin_is_terminal(void);
+/* Whether notices on stderr may use colors: a terminal (on a Windows console,
+ * with its VT processing turned on) and NO_COLOR unset or empty. */
+int stderr_color(void);
 /* Reads a terminal stdin byte by byte, so input_pending() sees every line that
  * stdio would otherwise have buffered. Call before the first read. */
 void terminal_input_unbuffered(void);

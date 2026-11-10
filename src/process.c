@@ -93,6 +93,20 @@ int stdin_is_terminal(void) {
     return console_input() || msys_terminal(input_handle());
 }
 
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#  define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004 /* Windows 10; older consoles refuse it and stay without color */
+#endif
+
+int stderr_color(void) {
+    HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD mode;
+    const char *no_color = getenv("NO_COLOR");
+    if (no_color && no_color[0]) return 0;
+    if (GetConsoleMode(err, &mode)) /* a console: the colors need its VT processing on */
+        return (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) || SetConsoleMode(err, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    return msys_terminal(err);
+}
+
 void terminal_input_unbuffered(void) {
     /* The console is read with ReadConsoleW, which stdio does not buffer. */
     if (!console_input() && msys_terminal(input_handle())) setvbuf(stdin, NULL, _IONBF, 0);
@@ -362,6 +376,12 @@ int run_program(const char *const *argv, const char *command_line, const char *e
 
 int stdin_is_terminal(void) {
     return isatty(STDIN_FILENO);
+}
+
+int stderr_color(void) {
+    const char *no_color = getenv("NO_COLOR");
+    if (no_color && no_color[0]) return 0;
+    return isatty(STDERR_FILENO);
 }
 
 void terminal_input_unbuffered(void) {

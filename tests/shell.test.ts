@@ -154,10 +154,10 @@ describe.skipIf(!qwen || !WINDOWS)("!comando in a Windows console", () => {
 /* The same on a Linux terminal: util-linux `script` gives the chat a pty, and
  * what one printf writes arrives at once, as a paste does. Instead of fixed
  * pauses (a sanitizer build answers far slower), the input waits until the
- * transcript shows the chat's Nth "> " prompt. */
+ * transcript shows the chat's Nth prompt ("[conservador] > ", or the machine role in brackets). */
 const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 const prompts = (n: number) =>
-  `k=0; until [ "$(grep -c '^> ' transcript.txt 2>/dev/null)" -ge ${n} ] || [ $k -ge 1200 ]; do sleep 0.1; k=$((k+1)); done`;
+  `k=0; until [ "$(grep -cE '^\\[[^]]+\\] > ' transcript.txt 2>/dev/null)" -ge ${n} ] || [ $k -ge 1200 ]; do sleep 0.1; k=$((k+1)); done`;
 describe.skipIf(!qwen || process.platform !== "linux" || !Bun.which("script"))("!comando in a Linux terminal", () => {
   const session = (input: string, dir: string) => {
     const chat = [BINARY, ...chatArgs(["--shell", "sh", "--tokens", "32"])].map(q).join(" ");
