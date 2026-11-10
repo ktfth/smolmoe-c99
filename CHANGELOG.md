@@ -8,7 +8,7 @@
   foi medido com `bench.ts --ab`: o cenário de abertura vem com o kit. O cache só é usado depois de conferido, pela
   identidade do modelo, pelo hash dos dados e pelos logits da última posição, recalculados sobre ele. Um arquivo
   danificado, outro prompt ou outro modelo de mesma forma fazem o cache ser refeito, com aviso. As respostas são
-  idênticas com e sem cache.
+  idênticas com e sem cache. O arquivo tem 16,4 MB no Qwen 0,5B com as ferramentas e cerca de 180 MB no Phi-4-mini.
 - **`smolmoe-inventario`:** inventário defensivo só leitura de máquinas Linux (portas em escuta com processo,
   usuários com login, grupos administrativos, binários SUID/SGID com hash, caminhos graváveis por todos, pontos de
   persistência, chaves SSH autorizadas, configurações de segurança e alertas) e `--comparar` entre dois relatórios,

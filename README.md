@@ -152,7 +152,9 @@ A palavra "morango" tem 1 'r'.
 - Use `--no-tools` para abrir o chat instantaneamente (~0,4 s em vez de ~5,5 s) quando não precisar de ferramentas.
 - Use `--prefix-cache ARQUIVO` para guardar o prompt de sistema já processado: a partir do segundo chat, a abertura
   pula o prefill desse prompt, inclusive o das ferramentas. A cada abertura, o cache é conferido contra o modelo e o
-  prompt (identidade do modelo, hash dos dados e logits da última posição); se não conferir, é refeito.
+  prompt (identidade do modelo, hash dos dados e logits da última posição); se não conferir, é refeito. O arquivo
+  ocupa camadas × tokens do prompt × `kv_dim` × 8 bytes: 16,4 MB no Qwen 0,5B com as ferramentas, cerca de 180 MB
+  no Phi-4-mini.
 - Use `--now AAAA-MM-DDTHH:MM` para fixar o relógio em testes reproduzíveis.
 
 ### Execução de comandos no shell (`!comando`)
