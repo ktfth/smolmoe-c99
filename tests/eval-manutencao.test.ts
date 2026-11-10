@@ -11,7 +11,7 @@ import { testeDeSinal, wilson } from "../scripts/eval/estatistica";
 import { emPortugues } from "../scripts/eval/portugues";
 import {
   CONJUNTOS, DETECTOR, FROZEN, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
-  conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, resumo,
+  conferirArquivo, conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, resumo,
   semLista, sha, sistemaDoItem,
 } from "../scripts/eval-manutencao";
 import { avaliar } from "./evals/manutencao/nota";
@@ -62,6 +62,11 @@ describe("what was frozen", () => {
     expect(() => conferirRetomada([linha({ congelado: undefined })], modelos, manifestos, false)).toThrow(/congelamento/);
     expect(() => conferirRetomada([linha({ modelo_sha: "bb" })], modelos, manifestos, false)).toThrow(/outro model\.smoe/);
     expect(() => conferirRetomada([linha({ manifesto: "f00" })], modelos, manifestos, false)).toThrow(/conjunto/);
+    /* --resumo-so checks the file the same way: one pilot flag, one model.smoe per name, today's freezes. */
+    const itens = [{ id: "cmd-001", manifesto: CONJUNTOS[0]!.sha! }, { id: "cmd-002", manifesto: CONJUNTOS[0]!.sha! }];
+    expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002" })], itens)).not.toThrow();
+    expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002", piloto: true })], itens)).toThrow(/piloto/);
+    expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002", modelo_sha: "bb" })], itens)).toThrow(/model\.smoe/);
   });
 
   test("the kit prompt asks for Brazilian Portuguese and a code block; a role item adds its frozen line, then the date", () => {
@@ -125,13 +130,14 @@ describe("decision rule", () => {
 });
 
 describe("Portuguese detector", () => {
-  test("passes every right reference answer of the set", () => {
-    const refs = JSON.parse(readFileSync(join(SET, "referencias.json"), "utf8")) as
-      Record<string, { certa?: string; certas?: string[] }>;
-    const textos = Object.values(refs).flatMap((r) => [r.certa, ...(r.certas ?? [])]).filter((t): t is string => !!t);
-    expect(textos.length).toBeGreaterThan(70);
-    for (const t of textos) expect(emPortugues(t)).toBe(true);
-  });
+  test.each([["referencias.json", 70], ["referencias-duvidas.json", 85]])(
+    "passes every right reference answer of %s", (arquivo, minimo) => {
+      const refs = JSON.parse(readFileSync(join(SET, arquivo), "utf8")) as
+        Record<string, { certa?: string; certas?: string[] }>;
+      const textos = Object.values(refs).flatMap((r) => [r.certa, ...(r.certas ?? [])]).filter((t): t is string => !!t);
+      expect(textos.length).toBeGreaterThan(minimo);
+      for (const t of textos) expect([t, emPortugues(t)]).toEqual([t, true]);
+    });
 
   test("rejects English and Spanish prose, whatever the code says, and a tie is not Portuguese", () => {
     expect(emPortugues("Use `Get-Service` to list them.")).toBe(false); /* the adversary's case: "use" is English too */
@@ -148,6 +154,12 @@ describe("Portuguese detector", () => {
     expect(emPortugues("Para ver os processos que mais usam memória, rode este comando no PowerShell:")).toBe(true);
     /* A domain is not prose: example.com does not make "com" Portuguese. */
     expect(emPortugues("Download the installer from example.com and run it as administrator.")).toBe(false);
+  });
+
+  test("a tie goes to Portuguese only when the other language has no word of its own (the reviewer's low)", () => {
+    expect(emPortugues("Use este comando para ver se está cheio:")).toBe(true);
+    expect(emPortugues("Use este comando para ver si está lleno:")).toBe(false);
+    expect(emPortugues("Use do as no execute here.")).toBe(false);
   });
 
   test("works inside nota.ts: an English answer with the right command is wrong for the language only", () => {

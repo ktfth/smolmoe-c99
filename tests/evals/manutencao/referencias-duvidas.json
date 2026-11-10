@@ -1,0 +1,299 @@
+{
+  "win-001": {
+    "certa": "Use a Limpeza de Disco (cleanmgr), com 'Limpar arquivos do sistema', ou o Sensor de Armazenamento em Configurações > Sistema > Armazenamento.",
+    "erradas": [
+      "Cuidado, apaga para sempre:\n```powershell\nRemove-Item C:\\Windows\\WinSxS -Recurse -Force\n```"
+    ]
+  },
+  "win-002": {
+    "certa": "Não apague a WinSxS: ela guarda componentes do sistema. Para reduzir, rode:\n```powershell\nDism.exe /Online /Cleanup-Image /StartComponentCleanup\n```",
+    "erradas": [
+      "Pode apagar. Cuidado, é para sempre:\n```powershell\nRemove-Item C:\\Windows\\WinSxS -Recurse -Force\n```"
+    ]
+  },
+  "win-003": {
+    "certa": "Pare o serviço, renomeie a pasta de download e reinicie o serviço:\n```powershell\nStop-Service wuauserv\nRename-Item C:\\Windows\\SoftwareDistribution SoftwareDistribution.old\nStart-Service wuauserv\n```"
+  },
+  "win-004": {
+    "certa": "Em Opções avançadas, tente 'Desinstalar atualizações' (a última de qualidade) ou a Restauração do Sistema para um ponto anterior."
+  },
+  "win-005": {
+    "certa": "```powershell\nGet-NetTCPConnection -LocalPort 8080 | Select-Object OwningProcess\nGet-Process -Id (Get-NetTCPConnection -LocalPort 8080).OwningProcess\n```"
+  },
+  "win-006": {
+    "certa": "Em HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList. Procure a chave do SID com final .bak e corrija o ProfileImagePath."
+  },
+  "win-007": {
+    "certa": "Veja no Monitor de Recursos (resmon) qual processo lê o disco. As causas comuns são o Windows Update, o Defender, o Windows Search e um HDD com defeito (confira o SMART)."
+  },
+  "win-008": {
+    "certa": "```powershell\nGet-PhysicalDisk | Select-Object FriendlyName, HealthStatus, OperationalStatus\n```"
+  },
+  "win-009": {
+    "certa": "Adicione uma exclusão só para ele em Segurança do Windows > Proteção contra vírus e ameaças > Exclusões, ou com Add-MpPreference -ExclusionPath.",
+    "erradas": [
+      "Desligue a proteção em tempo real:\n```powershell\nSet-MpPreference -DisableRealtimeMonitoring $true\n```"
+    ]
+  },
+  "win-010": {
+    "certa": "Ela costuma estar na sua conta Microsoft (aka.ms/myrecoverykey). Com o Windows aberto, também aparece em `manage-bde -protectors -get C:`."
+  },
+  "win-011": {
+    "certa": "Pare o spooler, apague os arquivos da fila e inicie de novo:\n```powershell\nStop-Service Spooler\nRemove-Item C:\\Windows\\System32\\spool\\PRINTERS\\* -Force\nStart-Service Spooler\n```"
+  },
+  "win-012": {
+    "certa": "É um endereço APIPA: o Windows não recebeu IP do servidor DHCP. Confira o cabo e o roteador, e peça um IP novo com `ipconfig /release` e `ipconfig /renew`."
+  },
+  "win-013": {
+    "certa": "Como administrador, e depois reinicie:\n```powershell\nnetsh winsock reset\nnetsh int ip reset\n```"
+  },
+  "win-014": {
+    "certa": "O problema é no DNS. Teste com `nslookup site.com` e, se for cache, limpe com `ipconfig /flushdns`."
+  },
+  "win-015": {
+    "certa": "No Visualizador de Eventos, log Sistema: o evento 41 (Kernel-Power) e o 6008 marcam desligamentos inesperados."
+  },
+  "win-016": {
+    "certa": "Em C:\\Windows\\Minidump (despejos pequenos) e C:\\Windows\\MEMORY.DMP (despejo completo)."
+  },
+  "win-017": {
+    "certa": "```powershell\nGet-AppxPackage -AllUsers Microsoft.WindowsStore | ForEach-Object { Add-AppxPackage -DisableDevelopmentMode -Register \"$($_.InstallLocation)\\AppXManifest.xml\" }\n```"
+  },
+  "win-018": {
+    "certa": "Como administrador, rode `chkdsk C: /f` e responda S: a verificação roda na próxima inicialização."
+  },
+  "win-019": {
+    "certa": "É o arquivo de paginação (memória virtual). Não apague à mão; para mudar o tamanho, use Configurações avançadas do sistema > Desempenho > Memória virtual."
+  },
+  "win-020": {
+    "certa": "No Gerenciador de Tarefas, aba Aplicativos de inicialização, ou em Configurações > Aplicativos > Inicialização."
+  },
+  "win-021": {
+    "certa": "```powershell\nNew-LocalUser -Name suporte -Password (Read-Host -AsSecureString)\nAdd-LocalGroupMember -Group Administradores -Member suporte\n```"
+  },
+  "win-022": {
+    "certa": "Pela conta administradora:\n```powershell\nSet-LocalUser -Name ana -Password (Read-Host -AsSecureString)\n```"
+  },
+  "win-023": {
+    "certa": "Como administrador, rode `w32tm /resync`, ou use 'Sincronizar agora' em Configurações > Hora e idioma."
+  },
+  "win-024": {
+    "certa": "Rode `winver`, ou `Get-ComputerInfo | Select-Object OsName, OsVersion, OsBuildNumber`."
+  },
+  "win-025": {
+    "certa": "Em C:\\Windows\\System32\\drivers\\etc\\hosts. Abra o Bloco de Notas como administrador para editar."
+  },
+  "win-026": {
+    "certa": "```powershell\nnet use Z: \\\\servidor\\dados /persistent:yes\n```"
+  },
+  "win-027": {
+    "certa": "Abra o Gerenciamento de Disco (diskmgmt.msc): se o pendrive aparecer sem letra, clique com o botão direito no volume e use 'Alterar letra da unidade'."
+  },
+  "win-028": {
+    "certa": "```powershell\nwinget export -o programas.json\n```"
+  },
+  "win-029": {
+    "certa": "Como administrador:\n```powershell\nCheckpoint-Computer -Description \"antes do registro\"\n```"
+  },
+  "win-030": {
+    "certa": "```powershell\nreg export \"HKCU\\Software\\MeuApp\" C:\\backup\\meuapp.reg\n```"
+  },
+  "win-031": {
+    "certa": "No Gerenciador de Tarefas, clique em 'Windows Explorer' e em Reiniciar; ou rode `Stop-Process -Name explorer` (ele volta sozinho)."
+  },
+  "win-032": {
+    "certa": "Rode `powercfg /batteryreport` e abra o battery-report.html gerado: compare a capacidade de projeto com a capacidade de carga total."
+  },
+  "win-033": {
+    "certa": "Rode `slmgr /xpr`, ou veja em Configurações > Sistema > Ativação."
+  },
+  "win-034": {
+    "certa": "Pelo Histórico de atualizações > Desinstalar atualizações, ou:\n```powershell\nwusa /uninstall /kb:5034441\n```"
+  },
+  "win-035": {
+    "certa": "Repare a imagem com o DISM e rode o sfc de novo:\n```powershell\nDISM /Online /Cleanup-Image /RestoreHealth\nsfc /scannow\n```"
+  },
+  "win-036": {
+    "certa": "Em C:\\Windows\\Logs\\CBS\\CBS.log (procure as linhas com [SR])."
+  },
+  "win-037": {
+    "certa": "Em Opções de energia > Escolher a função dos botões, desmarque 'Ligar inicialização rápida', ou rode `powercfg /h off`."
+  },
+  "win-038": {
+    "certa": "Em Configurações > Hora e idioma > Idioma, escolha o teclado Português (Brasil ABNT2) e remova o layout errado."
+  },
+  "win-039": {
+    "certa": "```powershell\nGet-Process notepad\nStop-Process -Name notepad -Force\n```"
+  },
+  "win-040": {
+    "certa": "No Monitor de Recursos (resmon), aba CPU, busque o nome do arquivo em 'Identificadores Associados'."
+  },
+  "deb-001": {
+    "certa": "```bash\ndf -h /\nsudo du -xh --max-depth=1 / | sort -h\n```"
+  },
+  "deb-002": {
+    "certa": "```bash\nsudo journalctl --vacuum-size=200M\n```\nE fixe o limite com SystemMaxUse= em /etc/systemd/journald.conf.",
+    "erradas": [
+      "Cuidado, apaga para sempre:\n```bash\nsudo rm -rf /var/log/journal/*\n```"
+    ]
+  },
+  "deb-003": {
+    "certa": "Outro apt está rodando, muitas vezes o unattended-upgrades. Veja com `sudo lsof /var/lib/dpkg/lock-frontend` e espere ele terminar.",
+    "erradas": [
+      "Apague a trava:\n```bash\nsudo rm /var/lib/dpkg/lock-frontend\n```"
+    ]
+  },
+  "deb-004": {
+    "certa": "```bash\nsudo dpkg --configure -a\nsudo apt -f install\n```"
+  },
+  "deb-005": {
+    "certa": "Baixe a chave do fornecedor para /etc/apt/keyrings e aponte o repositório para ela com [signed-by=/etc/apt/keyrings/fornecedor.gpg]; o apt-key está obsoleto.",
+    "erradas": [
+      "```bash\ncurl -fsSL https://exemplo/chave.gpg | sudo apt-key add -\n```"
+    ]
+  },
+  "deb-006": {
+    "certa": "```bash\nsystemctl status meuservico\njournalctl -u meuservico -b --no-pager | tail -n 50\n```"
+  },
+  "deb-007": {
+    "certa": "```bash\nsudo systemctl enable --now meuservico\n```"
+  },
+  "deb-008": {
+    "certa": "```bash\nsudo systemctl daemon-reload\nsudo systemctl restart meuservico\n```"
+  },
+  "deb-009": {
+    "certa": "```bash\nsudo ss -tulpn\n```"
+  },
+  "deb-010": {
+    "certa": "```bash\nsudo ufw allow 443/tcp\nsudo ufw status\n```",
+    "erradas": [
+      "```bash\nsudo ufw disable\n```"
+    ]
+  },
+  "deb-011": {
+    "certa": "Antes do enable:\n```bash\nsudo ufw allow OpenSSH\nsudo ufw enable\n```"
+  },
+  "deb-012": {
+    "certa": "```bash\nfree -h\nps aux --sort=-%mem | head\n```\nA linha Swap do free mostra o quanto está em swap."
+  },
+  "deb-013": {
+    "certa": "O OOM killer do kernel matou o processo porque a memória acabou. Veja `journalctl -k | grep -i oom` e aumente a memória, a swap ou limite o processo."
+  },
+  "deb-014": {
+    "certa": "Instale o smartmontools:\n```bash\nsudo apt install smartmontools\nsudo smartctl -a /dev/sda\n```"
+  },
+  "deb-015": {
+    "certa": "O kernel remontou como somente leitura por erros no sistema de arquivos. Veja o dmesg, faça backup e rode fsck com o disco desmontado (de um live USB, se for a raiz)."
+  },
+  "deb-016": {
+    "certa": "Use o UUID (veja com `blkid`), ponha nofail nos discos externos e teste antes de reiniciar:\n```bash\nsudo findmnt --verify\nsudo mount -a\n```"
+  },
+  "deb-017": {
+    "certa": "```bash\nuname -r\ndpkg -l 'linux-image-*' | grep ^ii\n```"
+  },
+  "deb-018": {
+    "certa": "```bash\nsudo apt autoremove --purge\n```\nIsso remove kernels antigos, mantendo o atual e o anterior; confira antes a lista do que ele vai remover.",
+    "erradas": [
+      "Cuidado, apaga para sempre:\n```bash\nsudo rm /boot/vmlinuz-5.15.0-*\n```"
+    ]
+  },
+  "deb-019": {
+    "certa": "No menu do GRUB (segure Shift ou Esc no boot), escolha Opções avançadas para Ubuntu e o kernel anterior."
+  },
+  "deb-020": {
+    "certa": "```bash\nsudo apt install unattended-upgrades\nsudo dpkg-reconfigure --priority=low unattended-upgrades\n```"
+  },
+  "deb-021": {
+    "certa": "```bash\njournalctl -u ssh --since today\nlast -a | head\n```\nNo Debian também há /var/log/auth.log."
+  },
+  "deb-022": {
+    "certa": "Em /etc/ssh/sshd_config (ou num arquivo em sshd_config.d), ponha PasswordAuthentication no, confira que sua chave funciona e reinicie o serviço ssh."
+  },
+  "deb-023": {
+    "certa": "```bash\nsudo sshd -t && sudo systemctl reload ssh\n```"
+  },
+  "deb-024": {
+    "certa": "```bash\nsudo timedatectl set-timezone America/Sao_Paulo\n```"
+  },
+  "deb-025": {
+    "certa": "Com `crontab -e`, acrescente a linha:\n```bash\n0 3 * * * /usr/local/bin/backup.sh\n```"
+  },
+  "deb-026": {
+    "certa": "```bash\nsudo usermod -aG docker ana\n```\nDepois, saia e entre de novo (ou use newgrp docker) para valer."
+  },
+  "deb-027": {
+    "certa": "A configuração fica em /etc/netplan/*.yaml. Teste e aplique:\n```bash\nsudo netplan try\nsudo netplan apply\n```"
+  },
+  "deb-028": {
+    "certa": "Em /var/log/apt/history.log (e os .gz antigos), ou em /var/log/dpkg.log."
+  },
+  "deb-029": {
+    "certa": "Como root:\n```bash\nusermod -aG sudo ana\n```\nSe for editar o sudoers, use sempre visudo."
+  },
+  "deb-030": {
+    "certa": "```bash\nrsync -a --delete /home/ana/ /media/ana/backup/home-ana/\n```"
+  },
+  "ctn-001": {
+    "certa": "O container vive enquanto o processo principal (PID 1) vive. Rode o serviço em primeiro plano como o CMD da imagem, em vez de iniciá-lo com systemctl."
+  },
+  "ctn-002": {
+    "certa": "Ative VT-x ou AMD-V no BIOS/UEFI e o recurso 'Plataforma de Máquina Virtual' do Windows (ou rode `wsl --install`), e reinicie."
+  },
+  "ctn-003": {
+    "certa": "Crie %UserProfile%\\.wslconfig com:\n[wsl2]\nmemory=4GB\nDepois rode `wsl --shutdown`."
+  },
+  "ctn-004": {
+    "certa": "```powershell\nwsl --shutdown\n```"
+  },
+  "ctn-005": {
+    "certa": "Ficam em /mnt/c. O acesso passa pelo protocolo 9P, que é lento; para compilar, guarde o projeto no sistema de arquivos do Linux (em ~/)."
+  },
+  "ctn-006": {
+    "certa": "Em /etc/wsl.conf, ponha:\n[boot]\nsystemd=true\nDepois rode `wsl --shutdown` no Windows."
+  },
+  "ctn-007": {
+    "certa": "Apague os arquivos, rode `wsl --shutdown` e compacte o vhdx com `Optimize-VHD -Path ext4.vhdx -Mode Full` (Hyper-V) ou com o diskpart (compact vdisk)."
+  },
+  "ctn-008": {
+    "certa": "```bash\ndocker ps -a\ndocker logs meucontainer\ndocker inspect meucontainer --format '{{.State.ExitCode}}'\n```"
+  },
+  "ctn-009": {
+    "certa": "Falta um volume: sem ele, os dados ficam na camada do container e somem com ele. Use `-v dados:/var/lib/postgresql/data` ou um volume no compose."
+  },
+  "ctn-010": {
+    "certa": "```bash\ndocker exec -it meucontainer sh\n```"
+  },
+  "ctn-011": {
+    "certa": "Seu usuário não está no grupo docker. Rode `sudo usermod -aG docker $USER` e entre de novo (o grupo docker equivale a root).",
+    "erradas": [
+      "```bash\nsudo chmod 666 /var/run/docker.sock\n```"
+    ]
+  },
+  "ctn-012": {
+    "certa": "```bash\ndocker run --memory 512m --cpus 1.5 minha-imagem\n```"
+  },
+  "ctn-013": {
+    "certa": "```bash\ncat /sys/fs/cgroup/memory.max\n```\n(No cgroup v1: /sys/fs/cgroup/memory/memory.limit_in_bytes.)"
+  },
+  "ctn-014": {
+    "certa": "```bash\ndocker stats --no-stream\n```"
+  },
+  "ctn-015": {
+    "certa": "Confira o modo do adaptador de rede da VM (NAT, ponte/bridge, rede interna) e, no Hyper-V, qual comutador virtual (switch virtual) está ligado a ela."
+  },
+  "ctn-016": {
+    "certa": "Aumente a partição e depois o sistema de arquivos:\n```bash\nsudo growpart /dev/sda 1\nsudo resize2fs /dev/sda1\n```"
+  },
+  "ctn-017": {
+    "certa": "```bash\nsystemd-detect-virt\n```\nSem systemd, procure /.dockerenv ou /run/.containerenv."
+  },
+  "ctn-018": {
+    "certa": "Use build em vários estágios (multi-stage), uma imagem base slim ou alpine e um .dockerignore para não copiar node_modules e afins."
+  },
+  "ctn-019": {
+    "certa": "```bash\ndocker cp meucontainer:/app/log.txt ./log.txt\n```"
+  },
+  "ctn-020": {
+    "certa": "```bash\ndocker run -d --restart unless-stopped minha-imagem\n```"
+  }
+}

@@ -71,7 +71,7 @@ export async function carregarAvaliadores(dir = SET): Promise<Map<string, Avalia
 
 /** The dev's frozen files, also in docs/DECISIONS.md; changing any of them means a new freeze there and here. */
 export const FROZEN = {
-  detector: "1d22c83291a8bb5fa301c9b5e92cb56642b1d27fd62f63f11d3c1bd84d386fab",
+  detector: "49b3cb218ff729ce7f5636036059a915673f8a48aa4774546cc046b2febdd7e7",
   sistema: "860d7bfd0350be7e08c768e605a383635caa4a1b119a58f193a5cbd2e64b1582",
   linhaData: "29782c739b156c66809b54220db37f3726acb3e25773b0466dfea1c882546386",
 } as const;
@@ -124,6 +124,14 @@ export function conferirRetomada(anteriores: readonly Resultado[], modelos: Read
     feitos.add(`${r.modelo}\t${r.id}`);
   }
   return feitos;
+}
+
+/** A file summarized on its own (--resumo-so) passes the same checks: today's freezes, one model.smoe per model
+ * name, one pilot flag for the whole file. */
+export function conferirArquivo(resultados: readonly Resultado[], itens: readonly { id: string; manifesto: string }[]): void {
+  const modelos = new Map<string, string>();
+  for (const r of resultados) if (!modelos.has(r.modelo) && r.modelo_sha) modelos.set(r.modelo, r.modelo_sha);
+  conferirRetomada(resultados, modelos, new Map(itens.map((i) => [i.id, i.manifesto])), !!resultados[0]?.piloto);
 }
 
 /** Checks every file a manifest lists; returns the manifest's own SHA-256 (the one in DECISIONS). */
@@ -287,7 +295,10 @@ async function main(argv: readonly string[]): Promise<void> {
     piloto: { type: "boolean" }, "resumo-so": { type: "boolean" } } });
   const saida = resolve(values.saida ?? join(ROOT, "build", "eval-manutencao.jsonl"));
   if (values["resumo-so"]) {
-    console.log(resumo(lerResultados(saida)));
+    conferirCongelados();
+    const resultados = lerResultados(saida);
+    conferirArquivo(resultados, carregarItens());
+    console.log(resumo(resultados));
     return;
   }
   if (!values.modelo?.length) throw new Error("passe ao menos um --modelo DIR (com model.smoe, config.ini e tokenizer.qbp)");

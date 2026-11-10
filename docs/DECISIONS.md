@@ -790,12 +790,16 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
   (piloto, outro congelamento, outro modelo com o mesmo nome) em vez de misturar. O resumo dá cada taxa com o IC de
   Wilson e cada par de modelos com o teste de sinal nos dois sentidos.
 - **Detector de português** (a única regra que o `nota.ts` deixa ao dev), `scripts/eval/portugues.ts`, congelado com
-  sha256 `1d22c83291a8bb5fa301c9b5e92cb56642b1d27fd62f63f11d3c1bd84d386fab` (recongelado antes da 1ª rodada de
-  decisão: o anterior, `0f3f9366`, aprovava espanhol, porque "de", "que" e "para" contavam só para o português). Ele
-  lê só a prosa, sem blocos, crases e nomes de domínio. Cada palavra funcional conta para todas as línguas em que
-  existe ("de" para o português e o espanhol, "do" para o português e o inglês); `ç`/`ã`/`õ` marcam o português, e
-  `ñ`/`-ción` marcam o espanhol. A resposta está em português quando a contagem do português supera a do inglês e a do
-  espanhol; empate não conta. Prosa de menos de 4 palavras passa.
+  sha256 `49b3cb218ff729ce7f5636036059a915673f8a48aa4774546cc046b2febdd7e7`, recongelado antes da 1ª rodada de
+  decisão: o `0f3f9366` aprovava espanhol, porque "de", "que" e "para" contavam só para
+  o português; o `1d22c832` reprovava "Use este comando para ver se está cheio", que empata por só ter palavras
+  compartilhadas, e também a resposta certa de referência `ctn-013` das dúvidas, porque um caminho
+  (`/sys/fs/cgroup/...`) virava palavras em inglês. Ele lê só a prosa, sem blocos, crases, caminhos
+  de arquivo e nomes de domínio. Cada palavra funcional conta para todas as
+  línguas em que existe ("de" para o português e o espanhol, "do" para o português e o inglês); `ç`/`ã`/`õ` marcam o
+  português, e `ñ`/`-ción` marcam o espanhol. A resposta está em português quando a contagem do português supera a do
+  inglês e a do espanhol; num empate, ela só fica em português se a outra língua não tiver nenhuma palavra só dela.
+  Prosa de menos de 4 palavras passa.
 - **Prompt do kit**, `kit/manutencao.txt`, congelado com sha256
   `860d7bfd0350be7e08c768e605a383635caa4a1b119a58f193a5cbd2e64b1582`: é o prompt de sistema do kit e do eval. Nos
   itens de papel, a linha do `papel.json` vem depois dele. **O bloco de comando mede sem linha de papel:** no kit, uma
