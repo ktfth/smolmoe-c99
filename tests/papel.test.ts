@@ -22,6 +22,20 @@ interface Caso {
   readonly mostra?: string;
 }
 
+const SET = join(ROOT, "tests", "evals", "manutencao");
+const MANIFESTO_AMBIENTE = "54800cb6b61fb62d5334b0032430f3dcb5f5f5a27ea57c0dc295c120b42ac928";
+const sha = (path: string) => new Bun.CryptoHasher("sha256").update(readFileSync(path)).digest("hex");
+
+test("the role cases are the table frozen in DECISIONS", () => {
+  const manifesto = join(SET, "MANIFEST-ambiente.sha256");
+  expect(sha(manifesto)).toBe(MANIFESTO_AMBIENTE);
+  expect(readFileSync(join(ROOT, "docs", "DECISIONS.md"), "utf8")).toContain(MANIFESTO_AMBIENTE);
+  for (const linha of readFileSync(manifesto, "utf8").trim().split(/\r?\n/)) {
+    const [hash, nome] = linha.split(/\s+\*?/);
+    expect(sha(join(SET, nome!))).toBe(hash!);
+  }
+});
+
 describe.skipIf(!existsSync(PAPEL) || !existsSync(CASOS))("SMOLMOE_ENV, case by case", () => {
   const casos = existsSync(CASOS) ? (JSON.parse(readFileSync(CASOS, "utf8")) as { casos: Caso[] }).casos : [];
 

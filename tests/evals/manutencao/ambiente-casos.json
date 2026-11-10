@@ -1,0 +1,247 @@
+{
+  "versao": 3,
+  "variavel": "SMOLMOE_ENV",
+  "casos": [
+    {
+      "id": "amb-01",
+      "SMOLMOE_ENV": null,
+      "esperado": "producao",
+      "aviso": "nao_declarado",
+      "nota": "ausente"
+    },
+    {
+      "id": "amb-02",
+      "SMOLMOE_ENV": "",
+      "esperado": "producao",
+      "aviso": "nao_declarado",
+      "nota": "vazia (SMOLMOE_ENV=)"
+    },
+    {
+      "id": "amb-03",
+      "SMOLMOE_ENV": "   ",
+      "esperado": "producao",
+      "aviso": "nao_declarado",
+      "nota": "só espaços"
+    },
+    {
+      "id": "amb-04",
+      "SMOLMOE_ENV": "dev",
+      "esperado": "dev",
+      "aviso": "nenhum",
+      "nota": "dev"
+    },
+    {
+      "id": "amb-05",
+      "SMOLMOE_ENV": "development",
+      "esperado": "dev",
+      "aviso": "nenhum",
+      "nota": "development"
+    },
+    {
+      "id": "amb-06",
+      "SMOLMOE_ENV": "prod",
+      "esperado": "producao",
+      "aviso": "nenhum",
+      "nota": "prod"
+    },
+    {
+      "id": "amb-07",
+      "SMOLMOE_ENV": "production",
+      "esperado": "producao",
+      "aviso": "nenhum",
+      "nota": "production"
+    },
+    {
+      "id": "amb-08",
+      "SMOLMOE_ENV": "PROD",
+      "esperado": "producao",
+      "aviso": "nenhum",
+      "nota": "maiúsculas"
+    },
+    {
+      "id": "amb-09",
+      "SMOLMOE_ENV": "Production",
+      "esperado": "producao",
+      "aviso": "nenhum",
+      "nota": "inicial maiúscula"
+    },
+    {
+      "id": "amb-10",
+      "SMOLMOE_ENV": "DEV",
+      "esperado": "dev",
+      "aviso": "nenhum",
+      "nota": "maiúsculas em dev (regra 1: escolha a confirmar)"
+    },
+    {
+      "id": "amb-11",
+      "SMOLMOE_ENV": "Development",
+      "esperado": "dev",
+      "aviso": "nenhum",
+      "nota": "inicial maiúscula em dev"
+    },
+    {
+      "id": "amb-12",
+      "SMOLMOE_ENV": " dev",
+      "esperado": "dev",
+      "aviso": "nenhum",
+      "nota": "espaço antes"
+    },
+    {
+      "id": "amb-13",
+      "SMOLMOE_ENV": "prod ",
+      "esperado": "producao",
+      "aviso": "nenhum",
+      "nota": "espaço depois"
+    },
+    {
+      "id": "amb-14",
+      "SMOLMOE_ENV": "\tdev\r\n",
+      "esperado": "dev",
+      "aviso": "nenhum",
+      "nota": "tab e CRLF (valor copiado de um arquivo do Windows)"
+    },
+    {
+      "id": "amb-15",
+      "SMOLMOE_ENV": "d ev",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "espaço no meio",
+      "mostra": "d ev"
+    },
+    {
+      "id": "amb-16",
+      "SMOLMOE_ENV": "producao",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "em português: não é um dos valores",
+      "mostra": "producao"
+    },
+    {
+      "id": "amb-17",
+      "SMOLMOE_ENV": "produção",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "em português com acento",
+      "mostra": "produção"
+    },
+    {
+      "id": "amb-18",
+      "SMOLMOE_ENV": "desenvolvimento",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "dev em português: inválido vale produção",
+      "mostra": "desenvolvimento"
+    },
+    {
+      "id": "amb-19",
+      "SMOLMOE_ENV": "staging",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "outro nome comum",
+      "mostra": "staging"
+    },
+    {
+      "id": "amb-20",
+      "SMOLMOE_ENV": "test",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "outro nome comum",
+      "mostra": "test"
+    },
+    {
+      "id": "amb-21",
+      "SMOLMOE_ENV": "devel",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "abreviação fora da lista",
+      "mostra": "devel"
+    },
+    {
+      "id": "amb-22",
+      "SMOLMOE_ENV": "dev,prod",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "dois valores",
+      "mostra": "dev,prod"
+    },
+    {
+      "id": "amb-23",
+      "SMOLMOE_ENV": "1",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "número",
+      "mostra": "1"
+    },
+    {
+      "id": "amb-24",
+      "SMOLMOE_ENV": "\"dev\"",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "nota": "aspas dentro do valor (erro de .env)",
+      "mostra": "\"dev\""
+    },
+    {
+      "id": "amb-25",
+      "SMOLMOE_ENV": "\u001b[31mprod",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": "\\x1b[31mprod",
+      "nota": "ESC: o aviso não pode mandar a sequência ao terminal (AM-2)"
+    },
+    {
+      "id": "amb-26",
+      "SMOLMOE_ENV": "dev\u0007",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": "dev\\x07",
+      "nota": "BEL no fim: não é branco, fica inválido"
+    },
+    {
+      "id": "amb-27",
+      "SMOLMOE_ENV": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…",
+      "nota": "valor de 300 caracteres: o aviso corta em 64 (AM-2)"
+    },
+    {
+      "id": "amb-28",
+      "SMOLMOE_ENV": " dev",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": " dev",
+      "nota": "NBSP antes: só brancos ASCII são aparados"
+    },
+    {
+      "id": "amb-29",
+      "SMOLMOE_ENV": "PRODUCTION",
+      "esperado": "producao",
+      "aviso": "nenhum",
+      "nota": "comparação ASCII sem locale (tr_TR: I → ı)"
+    },
+    {
+      "id": "amb-30",
+      "SMOLMOE_ENV": "31mprod",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": "\\x9b31mprod",
+      "nota": "CSI de 8 bits (C1): escapado como \\x9b"
+    },
+    {
+      "id": "amb-31",
+      "SMOLMOE_ENV": "çççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççç",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": "çççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççççç…",
+      "nota": "300 × ç: o corte conta caracteres, não bytes"
+    },
+    {
+      "id": "amb-32",
+      "SMOLMOE_ENV": "prod",
+      "esperado": "producao",
+      "aviso": "invalido",
+      "mostra": "prod\\x7f",
+      "nota": "DEL no fim: escapado como \\x7f"
+    }
+  ]
+}
