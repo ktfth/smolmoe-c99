@@ -120,6 +120,9 @@ antigo precisa dar o novo). `SM_FUZZ_ITERS=20000 build/test-inventory` roda uma 
   (o trojan de userland clássico) não aparece no `--comparar`. Também ficam de fora `modprobe.d`, `udev/rules.d`,
   `update-motd.d`, `apt.conf.d`, `NetworkManager/dispatcher.d` e `~/.ssh/rc`. Para verificar pacotes, use o
   gerenciador da distribuição (`debsums`, `rpm -Va`) a partir de um sistema limpo.
+- **A leitura reproduz a glibc 2.30 em diante** (conferida na 2.39). Em musl (Alpine) ou numa glibc mais antiga, a
+  própria máquina pode ler uma linha fora do padrão de outro jeito: a cauda repetida de uma linha recuada, por
+  exemplo, só existe na glibc 2.30+. Uma conta assim pode sair como nota em vez de alerta, ou o contrário.
 - **Só os arquivos locais.** Contas vindas de outro módulo NSS (LDAP, SSSD, um `libnss_*.so` plantado) não aparecem;
   o `/etc/nsswitch.conf` é acompanhado em `config`, então uma mudança nele aparece no `--comparar`. Linhas `+`/`-`
   do nss_compat em `/etc/passwd` são lidas como contas comuns; o que elas incluem do NIS/LDAP não é consultado.
