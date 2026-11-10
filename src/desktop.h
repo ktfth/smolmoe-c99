@@ -2,8 +2,9 @@
  * defaults: greedy decoding, the Portuguese system prompt, the tools when the
  * model has them. The model comes from a self-contained .smoe, from a .smoe
  * with config.ini and tokenizer.qbp (or .spb) beside it (the layout of
- * models/), or from the container appended to the running executable
- * (smolmoe-bundle).
+ * models/), from the container appended to the running executable
+ * (smolmoe-bundle), or from <stem>.smoe beside that executable when the
+ * weights do not fit in a Windows executable.
  *
  * Any thread may call these functions, one call at a time. Expected problems
  * (a missing file, a file that is not a model, a model without chat) come back
@@ -52,7 +53,7 @@ typedef struct DesktopInfo {
 
 typedef struct Desktop Desktop;
 
-/* Whether this executable carries a model. */
+/* Whether this executable carries a model, appended or as a sibling .smoe. */
 int desktop_has_bundle(void);
 
 /* Opens a model and processes the system prompt. Returns NULL with a message

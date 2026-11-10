@@ -14,8 +14,7 @@ void sampler_init(Sampler *s, uint32_t vocab, const unsigned char *banned, float
     s->top_p = top_p;
     s->rng = seed;
     cap = s->top_k ? s->top_k : vocab;
-    s->ids = (uint32_t *)mem_alloc(mem, cap, sizeof(uint32_t));
-    s->logits = (float *)mem_alloc(mem, cap, sizeof(float));
+    s->ranked = (SamplerRank *)mem_alloc(mem, cap, sizeof(SamplerRank));
     s->probs = (double *)mem_alloc(mem, cap, sizeof(double));
 }
 
@@ -42,33 +41,35 @@ static uint32_t collect_top_k(Sampler *s, const float *logits) {
     for (i = 0; i < s->vocab; ++i) {
         float l = logits[i];
         uint32_t pos;
-        if (s->banned[i] || (n == k && !(l > s->logits[n - 1]))) continue;
+        if (s->banned[i] || (n == k && !(l > s->ranked[n - 1].logit))) continue;
         pos = n < k ? n++ : k - 1;
-        while (pos > 0 && l > s->logits[pos - 1]) {
-            s->logits[pos] = s->logits[pos - 1];
-            s->ids[pos] = s->ids[pos - 1];
+        while (pos > 0 && l > s->ranked[pos - 1].logit) {
+            s->ranked[pos] = s->ranked[pos - 1];
             --pos;
         }
-        s->logits[pos] = l;
-        s->ids[pos] = i;
+        s->ranked[pos].logit = l;
+        s->ranked[pos].id = i;
     }
     return n;
 }
 
-static const float *sort_logits;
-static int by_logit(const void *a, const void *b) {
-    uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
-    if (sort_logits[x] != sort_logits[y]) return sort_logits[x] > sort_logits[y] ? -1 : 1;
-    return x < y ? -1 : x > y;
+/* The key is inside the record, so the comparator is reentrant. */
+static int by_rank(const void *a, const void *b) {
+    const SamplerRank *x = (const SamplerRank *)a, *y = (const SamplerRank *)b;
+    if (x->logit != y->logit) return x->logit > y->logit ? -1 : 1;
+    if (x->id < y->id) return -1;
+    return x->id > y->id ? 1 : 0;
 }
 
 static uint32_t collect_all(Sampler *s, const float *logits) {
     uint32_t i, n = 0;
-    for (i = 0; i < s->vocab; ++i)
-        if (!s->banned[i]) s->ids[n++] = i;
-    sort_logits = logits;
-    qsort(s->ids, n, sizeof(*s->ids), by_logit);
-    for (i = 0; i < n; ++i) s->logits[i] = logits[s->ids[i]];
+    for (i = 0; i < s->vocab; ++i) {
+        if (s->banned[i]) continue;
+        s->ranked[n].id = i;
+        s->ranked[n].logit = logits[i];
+        ++n;
+    }
+    qsort(s->ranked, n, sizeof(*s->ranked), by_rank);
     return n;
 }
 
@@ -79,7 +80,7 @@ uint32_t sampler_next(Sampler *s, const float *logits) {
     n = s->top_k ? collect_top_k(s, logits) : collect_all(s, logits);
     if (!n) die("every token is banned");
     for (i = 0; i < n; ++i) {
-        s->probs[i] = exp(((double)s->logits[i] - (double)s->logits[0]) / (double)s->temperature);
+        s->probs[i] = exp(((double)s->ranked[i].logit - (double)s->ranked[0].logit) / (double)s->temperature);
         total += s->probs[i];
     }
     kept = n;
@@ -93,7 +94,7 @@ uint32_t sampler_next(Sampler *s, const float *logits) {
     target = (double)(xorshift32(&s->rng) >> 8) / 16777216.0 * total;
     for (i = 0; i < kept; ++i) {
         target -= s->probs[i];
-        if (target < 0) return s->ids[i];
+        if (target < 0) return s->ranked[i].id;
     }
-    return s->ids[kept - 1];
+    return s->ranked[kept - 1].id;
 }

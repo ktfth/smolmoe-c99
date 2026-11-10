@@ -2,6 +2,7 @@
  * with a function target attribute and selected at runtime. Integer lanes match
  * the scalar kernel, including a weight byte of -128. */
 #include "kernels.h"
+#include "compat.h"
 
 #if defined(SM_HAVE_NEON)
 #  include "f16.h"
@@ -74,7 +75,7 @@ static float sm_reduce(float32x4_t lo, float32x4_t hi) {
 }
 
 /* |w| as a u8 (wrapping -128 -> 128) times sign(w)*x, the USDOT form of w*x. */
-__attribute__((target("+i8mm")))
+SM_TARGET_NEON_I8MM
 static int32x4_t sm_usdot(int8x16_t w, int8x16_t x) {
     uint8x16_t neg = vcltq_s8(w, vdupq_n_s8(0));
     uint8x16_t aw = vbslq_u8(neg, vreinterpretq_u8_s8(vnegq_s8(w)), vreinterpretq_u8_s8(w));
@@ -96,25 +97,25 @@ static int32x4_t sm_usdot(int8x16_t w, int8x16_t x) {
 #  define SM_SFX neon_dotprod
 #  define SM_KIND 1
 #  define SM_FAST 0
-#  define SM_TGT __attribute__((target("+dotprod")))
+#  define SM_TGT SM_TARGET_NEON_DOT
 #  include "kernels_neon.inc"
 
 #  define SM_SFX neon_dotprod_fast
 #  define SM_KIND 1
 #  define SM_FAST 1
-#  define SM_TGT __attribute__((target("+dotprod")))
+#  define SM_TGT SM_TARGET_NEON_DOT
 #  include "kernels_neon.inc"
 
 #  define SM_SFX neon_i8mm
 #  define SM_KIND 2
 #  define SM_FAST 0
-#  define SM_TGT __attribute__((target("+i8mm")))
+#  define SM_TGT SM_TARGET_NEON_I8MM
 #  include "kernels_neon.inc"
 
 #  define SM_SFX neon_i8mm_fast
 #  define SM_KIND 2
 #  define SM_FAST 1
-#  define SM_TGT __attribute__((target("+i8mm")))
+#  define SM_TGT SM_TARGET_NEON_I8MM
 #  include "kernels_neon.inc"
 
 #endif

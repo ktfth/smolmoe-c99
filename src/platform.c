@@ -96,18 +96,30 @@ static char *narrow(const wchar_t *w) {
     return s;
 }
 
-/* System message in UTF-8 (the ANSI variant would use the local code page). */
-static const char *win_error(void) {
-    static char buf[512];
+/* System message in UTF-8, written into buf (the ANSI API would use the local
+ * code page). The buffer belongs to the caller, so two threads can fail at once. */
+static void win_error(char *buf, size_t buflen) {
     wchar_t wide[256];
+    char *text;
     int len;
-    DWORD n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(), 0,
-                             wide, (DWORD)(sizeof(wide) / sizeof(*wide)), NULL);
-    if (!n) return "unknown Windows error";
-    len = WideCharToMultiByte(CP_UTF8, 0, wide, (int)n, buf, (int)sizeof(buf) - 1, NULL, NULL);
-    if (len <= 0) return "unknown Windows error";
+    DWORD n;
+    if (!buflen) return;
+    buf[0] = 0;
+    if (buflen > 2147483647u) buflen = 2147483647u;
+    n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, GetLastError(), 0, wide,
+                       (DWORD)(sizeof(wide) / sizeof(*wide)), NULL);
+    if (!n) {
+        snprintf(buf, buflen, "unknown Windows error");
+        return;
+    }
+    len = WideCharToMultiByte(CP_UTF8, 0, wide, (int)n, buf, (int)buflen - 1, NULL, NULL);
+    if (len <= 0) {
+        snprintf(buf, buflen, "unknown Windows error");
+        return;
+    }
     buf[len] = 0;
-    return trim(buf);
+    text = trim(buf);
+    if (text != buf) memmove(buf, text, strlen(text) + 1);
 }
 
 int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
@@ -117,19 +129,24 @@ int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
     LARGE_INTEGER size;
     HANDLE mapping = NULL;
     void *view = NULL;
+    char detail[512];
     free(w);
     memset(m, 0, sizeof(*m));
     if (file == INVALID_HANDLE_VALUE) {
-        snprintf(err, errlen, "cannot open %s: %s", path, win_error());
+        win_error(detail, sizeof(detail));
+        snprintf(err, errlen, "cannot open %s: %s", path, detail);
         return 0;
     }
     if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0) snprintf(err, errlen, "empty or unreadable file: %s", path);
     else if ((uint64_t)size.QuadPart > (uint64_t)SIZE_MAX)
         snprintf(err, errlen, "file too large to map on this platform: %s", path);
-    else if (!(mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL)))
-        snprintf(err, errlen, "cannot map %s: %s", path, win_error());
-    else if (!(view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0)))
-        snprintf(err, errlen, "cannot map view of %s: %s", path, win_error());
+    else if (!(mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL))) {
+        win_error(detail, sizeof(detail));
+        snprintf(err, errlen, "cannot map %s: %s", path, detail);
+    } else if (!(view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0))) {
+        win_error(detail, sizeof(detail));
+        snprintf(err, errlen, "cannot map view of %s: %s", path, detail);
+    }
     if (!view) {
         if (mapping) CloseHandle(mapping);
         CloseHandle(file);

@@ -1,4 +1,5 @@
 #include "vecmath.h"
+#include "compat.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -94,7 +95,7 @@ void gelu_mul_scalar(float *up, const float *gate, size_t n) {
 #if defined(SM_HAVE_AVX2)
 /* exp_det() on 4 clamped, finite lanes, operation for operation, before the
  * final rounding to binary32. */
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static __m256d exp_pd(__m256d x) {
     const __m256d shift = _mm256_set1_pd(SHIFT);
     __m256d z = _mm256_mul_pd(_mm256_set1_pd(INV_LN2_N), x), kd = _mm256_add_pd(z, shift), r, p;
@@ -110,7 +111,7 @@ static __m256d exp_pd(__m256d x) {
     return _mm256_mul_pd(p, _mm256_castsi256_pd(_mm256_add_epi64(t, _mm256_slli_epi64(ki, 47))));
 }
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static __m256 exp_avx2(__m256 x) {
     const __m256 nan = _mm256_cmp_ps(x, x, _CMP_UNORD_Q);
     const __m256 c = _mm256_min_ps(_mm256_max_ps(x, _mm256_set1_ps(EXP_LO)), _mm256_set1_ps(EXP_HI));
@@ -119,7 +120,7 @@ static __m256 exp_avx2(__m256 x) {
     return _mm256_blendv_ps(_mm256_insertf128_ps(_mm256_castps128_ps256(lo), hi, 1), x, nan);
 }
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 void silu_mul_avx2(float *up, const float *gate, size_t n) {
     const __m256 sign = _mm256_set1_ps(-0.0f), one = _mm256_set1_ps(1.0f);
     size_t i;

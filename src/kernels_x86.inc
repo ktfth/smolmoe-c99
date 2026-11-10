@@ -31,7 +31,7 @@
 #  define SM_OUT(acc) sm_reduce8(acc)
 #endif
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static float SM_DOT(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
     SM_ACC acc = SM_ZERO;
     uint32_t blk;
@@ -42,7 +42,7 @@ static float SM_DOT(const unsigned char *w, const float *xd, const int8_t *xq, u
     return SM_OUT(acc);
 }
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static void SM_X4F(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,
                    float out[4]) {
     const size_t qs = (size_t)stride * QK;
@@ -69,7 +69,7 @@ static void SM_X4F(const unsigned char *w, const float *xd, const int8_t *xq, ui
 }
 
 /* Four weight rows, one activation: the decode microkernel. */
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static void SM_R4F(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
                    float out[4]) {
     const unsigned char *r1 = w + row_bytes, *r2 = r1 + row_bytes, *r3 = r2 + row_bytes;
@@ -94,7 +94,7 @@ static void SM_R4F(const unsigned char *w, size_t row_bytes, const float *xd, co
 
 /* Two weight rows against four activations. pair_stride/block_stride describe
  * either the original matrix (row_bytes, 36) or an interleaved repack (36, 72). */
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static void SM_TILE(const unsigned char *w, size_t pair_stride, size_t block_stride, const float *xd,
                     const int8_t *xq, uint32_t nb, float *out, size_t stride) {
     const unsigned char *w1 = w + pair_stride;
@@ -142,7 +142,7 @@ static void SM_TILE(const unsigned char *w, size_t pair_stride, size_t block_str
     out[3 * stride + 1] = SM_OUT(b3);
 }
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static float SM_Q5DOT(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
     SM_ACC acc = SM_ZERO;
     uint32_t blk;
@@ -153,7 +153,7 @@ static float SM_Q5DOT(const unsigned char *w, const float *xd, const int8_t *xq,
     return SM_OUT(acc);
 }
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static void SM_Q5X4F(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,
                      float out[4]) {
     const size_t qs = (size_t)stride * QK;
@@ -179,7 +179,7 @@ static void SM_Q5X4F(const unsigned char *w, const float *xd, const int8_t *xq, 
     out[3] = SM_OUT(a3);
 }
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 static void SM_Q5R4F(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
                      float out[4]) {
     const unsigned char *r1 = w + row_bytes, *r2 = r1 + row_bytes, *r3 = r2 + row_bytes;
@@ -202,7 +202,7 @@ static void SM_Q5R4F(const unsigned char *w, size_t row_bytes, const float *xd, 
     out[3] = SM_OUT(a3);
 }
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 void SM_G8(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
            uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch) {
     unsigned char *pack = scratch ? sm_align64(scratch) : NULL;
@@ -248,7 +248,7 @@ void SM_G8(const unsigned char *w, size_t row_bytes, const float *xd, const int8
     }
 }
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 void SM_G5(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
            uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch) {
     unsigned char *pack = scratch ? sm_align64(scratch) : NULL;
@@ -297,29 +297,29 @@ void SM_G5(const unsigned char *w, size_t row_bytes, const float *xd, const int8
 }
 
 #if !defined(SM_SKIP_DOT)
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 float SM_Q8(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
     return SM_DOT(w, xd, xq, nb);
 }
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 void SM_Q8X4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride, float out[4]) {
     SM_X4F(w, xd, xq, nb, stride, out);
 }
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 float SM_Q5(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
     return SM_Q5DOT(w, xd, xq, nb);
 }
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 void SM_Q5X4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride, float out[4]) {
     SM_Q5X4F(w, xd, xq, nb, stride, out);
 }
 #endif
 
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 void SM_Q8R4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb, float out[4]) {
     SM_R4F(w, row_bytes, xd, xq, nb, out);
 }
-__attribute__((target(SM_TARGET)))
+SM_TARGET_ISA(SM_TARGET)
 void SM_Q5R4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb, float out[4]) {
     SM_Q5R4F(w, row_bytes, xd, xq, nb, out);
 }
