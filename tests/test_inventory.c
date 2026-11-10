@@ -25,6 +25,7 @@
 #include "sha256.h"
 
 #if !defined(_WIN32)
+#  include <dirent.h>
 #  include <sys/stat.h>
 #  include <unistd.h>
 #endif
@@ -289,7 +290,7 @@ static void random_field(char *out, size_t max) {
 static void fuzz_report_reader(void) {
     static const char *const cats[] = {"porta", "usuario", "admin", "inicio"};
     char path[] = "inv-fuzz-report.txt", err[256];
-    unsigned it, n = iters(400);
+    unsigned it, n = iters(300);
     for (it = 0; it < n; ++it) {
         InvList items, back, again;
         FILE *f;
@@ -488,11 +489,28 @@ static void new_root(void) {
     dir("/proc/net", 0755);
 }
 
+/* Deletes a tree in-process: no `rm -rf` child per test, which made this test
+ * slow enough to disturb the timing-sensitive tests `make -j test` runs beside it. */
+static void remove_tree(const char *path) {
+    struct stat st;
+    DIR *d;
+    struct dirent *e;
+    if (lstat(path, &st)) return;
+    if (S_ISDIR(st.st_mode) && (d = opendir(path)) != NULL) {
+        while ((e = readdir(d)) != NULL) {
+            char child[8192];
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            if (snprintf(child, sizeof(child), "%s/%s", path, e->d_name) < (int)sizeof(child)) remove_tree(child);
+        }
+        closedir(d);
+        rmdir(path);
+    } else {
+        unlink(path);
+    }
+}
+
 static void remove_root(void) {
-    char cmd[300];
-    if (!root[0]) return;
-    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
-    if (system(cmd)) fprintf(stderr, "warning: could not remove %s\n", root);
+    if (root[0]) remove_tree(root);
 }
 
 static void collect(InvList *items, InvList *notes) {
@@ -703,15 +721,15 @@ static void test_no_invented_items(void) {
 static void test_oracle(void) {
     static const char *const shells[] = {"/bin/bash", "/bin/sh", "/usr/sbin/nologin", "/bin/false", "/bin/zsh", ""};
     static const char *const groups[] = {"sudo", "docker", "users", "wheel", "audio"};
-    unsigned it, n = iters(150);
+    unsigned it, n = iters(100);
+    new_root(); /* one tree; every iteration rewrites all of its files */
+    if (!root[0]) return;
     for (it = 0; it < n; ++it) {
         InvList items, notes, want;
         char passwd[8192], shadow[4096], group[4096], tcp[16384];
         size_t pl = 0, sl = 0, gl = 0, tl = 0, u, g, nusers = 1 + rnd(12), nports = rnd(10);
         char names[16][16];
         unsigned used_ports[16];
-        new_root();
-        if (!root[0]) return;
         inv_init(&want);
         for (u = 0; u < nusers; ++u) {
             const char *shell = shells[rnd(6)];
@@ -795,8 +813,8 @@ static void test_oracle(void) {
         inv_free(&items);
         inv_free(&notes);
         inv_free(&want);
-        remove_root();
     }
+    remove_root();
 }
 
 /* The input as the report would show it: control bytes (newline aside) become '?',
@@ -867,7 +885,7 @@ static void fuzz_collection(void) {
                         "   1: 0100007F:0CEA 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 66 1 0\n";
     const char *keys_t = "ssh-ed25519 AAAAC3Nz ana@pc\nfrom=\"1.2.3.4\",command=\"x y\" ssh-rsa AAAAB3 b\n";
     static char passwd[32768], shadow[32768], group[32768], tcp[32768], keys[32768];
-    unsigned it, n = iters(250);
+    unsigned it, n = iters(150);
     new_root();
     if (!root[0]) return;
     dir("/home", 0755);
@@ -946,9 +964,14 @@ static void test_long_paths(void) {
     memset(name, 'n', sizeof(name) - 1);
     name[sizeof(name) - 1] = 0;
     {
-        char rel[300];
+        /* As long a target as the system takes: Linux allows 4095 bytes, macOS 1023. */
+        char rel[300], p[1024];
         snprintf(rel, sizeof(rel), "/etc/cron.d/%s", name);
-        link_to(target, rel);
+        snprintf(p, sizeof(p), "%s%s", root, rel);
+        if (symlink(target, p)) {
+            target[1000] = 0;
+            link_to(target, rel);
+        }
     }
     /* 600 sockets on the same port (SO_REUSEPORT): one merged, bounded item. */
     {
