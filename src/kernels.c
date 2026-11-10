@@ -18,6 +18,9 @@
 DotQ8 dot_q8 = dot_q8_scalar, dot_q5 = dot_q5_scalar;
 DotQ8x4 dot_q8_x4 = dot_q8_scalar_x4, dot_q5_x4 = dot_q5_scalar_x4;
 QuantizeQ8 quantize_q8 = quantize_q8_scalar;
+AttendF32 attend_f32 = attend_f32_scalar;
+AttendF16 attend_f16 = attend_f16_scalar;
+PackF16 pack_f16 = pack_f16_scalar;
 
 static uint16_t rd_u16(const unsigned char *p) {
     return (uint16_t)(p[0] | p[1] << 8);
@@ -467,12 +470,34 @@ void dot_q5_wasm_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
 }
 #endif
 
+#if defined(SM_HAVE_AVX2)
+__attribute__((target("avx2,f16c")))
+static void attend_f32_avx2(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out);
+__attribute__((target("avx2,f16c")))
+static void attend_f16_avx2(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out);
+__attribute__((target("avx2,f16c")))
+static void pack_f16_avx2(const float *src, uint16_t *dst, uint32_t n);
+#elif defined(SM_HAVE_NEON)
+static void attend_f32_neon(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out);
+static void attend_f16_neon(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out);
+#elif defined(SM_HAVE_WASM_SIMD)
+static void attend_f32_wasm(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out);
+#endif
+
 const char *kernels_select(int force_scalar) {
     dot_q8 = dot_q8_scalar;
     dot_q8_x4 = dot_q8_scalar_x4;
     dot_q5 = dot_q5_scalar;
     dot_q5_x4 = dot_q5_scalar_x4;
     quantize_q8 = quantize_q8_scalar;
+    attend_f32 = attend_f32_scalar;
+    attend_f16 = attend_f16_scalar;
+    pack_f16 = pack_f16_scalar;
     vecmath_select(0);
 #if defined(SM_HAVE_AVX2)
     /* F16C converts Q5 block scales exactly, matching f16_to_f32(). */
@@ -482,6 +507,9 @@ const char *kernels_select(int force_scalar) {
         dot_q5 = dot_q5_avx2;
         dot_q5_x4 = dot_q5_avx2_x4;
         quantize_q8 = quantize_q8_avx2;
+        attend_f32 = attend_f32_avx2;
+        attend_f16 = attend_f16_avx2;
+        pack_f16 = pack_f16_avx2;
         vecmath_select(1);
         return "avx2";
     }
@@ -492,6 +520,8 @@ const char *kernels_select(int force_scalar) {
         dot_q5 = dot_q5_neon;
         dot_q5_x4 = dot_q5_neon_x4;
         quantize_q8 = quantize_q8_neon;
+        attend_f32 = attend_f32_neon;
+        attend_f16 = attend_f16_neon;
         vecmath_select(1);
         return "neon";
     }
@@ -502,6 +532,7 @@ const char *kernels_select(int force_scalar) {
         dot_q5 = dot_q5_wasm;
         dot_q5_x4 = dot_q5_wasm_x4;
         quantize_q8 = quantize_q8_wasm;
+        attend_f32 = attend_f32_wasm;
         vecmath_select(1);
         return "simd128";
     }
@@ -729,3 +760,267 @@ float dot_f32(const float *a, const float *b, uint32_t n) {
     for (; i < n; ++i) sum += a[i] * b[i];
     return sum;
 }
+
+static float dot_f16_scalar(const float *a, const uint16_t *b, uint32_t n) {
+    float acc[8] = {0, 0, 0, 0, 0, 0, 0, 0}, sum;
+    uint32_t i, lane;
+    for (i = 0; i + 8 <= n; i += 8)
+        for (lane = 0; lane < 8; ++lane) acc[lane] += a[i + lane] * f16_to_f32(b[i + lane]);
+    sum = reduce8(acc);
+    for (; i < n; ++i) sum += a[i] * f16_to_f32(b[i]);
+    return sum;
+}
+
+static void saxpy_f32_scalar(float *out, float w, const float *v, uint32_t n) {
+    uint32_t j;
+    for (j = 0; j < n; ++j) out[j] += w * v[j];
+}
+
+static void saxpy_f16_scalar(float *out, float w, const uint16_t *v, uint32_t n) {
+    uint32_t j;
+    for (j = 0; j < n; ++j) out[j] += w * f16_to_f32(v[j]);
+}
+
+void pack_f16_scalar(const float *src, uint16_t *dst, uint32_t n) {
+    uint32_t i;
+    for (i = 0; i < n; ++i) dst[i] = f32_to_f16(src[i]);
+}
+
+/* Raw scores are already in scores[start..pos]. Same max, exp and sum as a
+ * fused loop: the max does not change the stored values it is taken from. */
+static float softmax_inv(float *scores, uint32_t start, uint32_t pos) {
+    uint32_t p;
+    float high = -FLT_MAX, total = 0;
+    for (p = start; p <= pos; ++p)
+        if (scores[p] > high) high = scores[p];
+    for (p = start; p <= pos; ++p) {
+        scores[p] = exp_det(scores[p] - high);
+        total += scores[p];
+    }
+    return 1.0f / total;
+}
+
+void attend_f32_scalar(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                       uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f32(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f32_scalar(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+
+void attend_f16_scalar(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                       uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f16_scalar(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f16_scalar(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+
+#if defined(SM_HAVE_AVX2)
+__attribute__((target("avx2,f16c")))
+static float reduce256(__m256 v) {
+    float a[8];
+    _mm256_storeu_ps(a, v);
+    return reduce8(a);
+}
+
+__attribute__((target("avx2,f16c")))
+static float dot_f32_avx2(const float *a, const float *b, uint32_t n) {
+    __m256 acc = _mm256_setzero_ps();
+    float sum;
+    uint32_t i = 0;
+    for (; i + 8 <= n; i += 8)
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i)));
+    sum = reduce256(acc);
+    for (; i < n; ++i) sum += a[i] * b[i];
+    return sum;
+}
+
+__attribute__((target("avx2,f16c")))
+static float dot_f16_avx2(const float *a, const uint16_t *b, uint32_t n) {
+    __m256 acc = _mm256_setzero_ps();
+    float sum;
+    uint32_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m256 bf = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(const void *)(b + i)));
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(_mm256_loadu_ps(a + i), bf));
+    }
+    sum = reduce256(acc);
+    for (; i < n; ++i) sum += a[i] * f16_to_f32(b[i]);
+    return sum;
+}
+
+__attribute__((target("avx2,f16c")))
+static void saxpy_f32_avx2(float *out, float w, const float *v, uint32_t n) {
+    __m256 ww = _mm256_set1_ps(w);
+    uint32_t j = 0;
+    for (; j + 8 <= n; j += 8)
+        _mm256_storeu_ps(out + j, _mm256_add_ps(_mm256_loadu_ps(out + j), _mm256_mul_ps(ww, _mm256_loadu_ps(v + j))));
+    for (; j < n; ++j) out[j] += w * v[j];
+}
+
+__attribute__((target("avx2,f16c")))
+static void saxpy_f16_avx2(float *out, float w, const uint16_t *v, uint32_t n) {
+    __m256 ww = _mm256_set1_ps(w);
+    uint32_t j = 0;
+    for (; j + 8 <= n; j += 8) {
+        __m256 vf = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(const void *)(v + j)));
+        _mm256_storeu_ps(out + j, _mm256_add_ps(_mm256_loadu_ps(out + j), _mm256_mul_ps(ww, vf)));
+    }
+    for (; j < n; ++j) out[j] += w * f16_to_f32(v[j]);
+}
+
+__attribute__((target("avx2,f16c")))
+static void pack_f16_avx2(const float *src, uint16_t *dst, uint32_t n) {
+    uint32_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        __m128i h = _mm256_cvtps_ph(_mm256_loadu_ps(src + i), _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        _mm_storeu_si128((__m128i *)(void *)(dst + i), h);
+    }
+    for (; i < n; ++i) dst[i] = f32_to_f16(src[i]);
+}
+
+__attribute__((target("avx2,f16c")))
+static void attend_f32_avx2(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f32_avx2(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f32_avx2(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+
+__attribute__((target("avx2,f16c")))
+static void attend_f16_avx2(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f16_avx2(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f16_avx2(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+#elif defined(SM_HAVE_NEON)
+static float reduce_neon(float32x4_t lo, float32x4_t hi) {
+    float a[8];
+    vst1q_f32(a, lo);
+    vst1q_f32(a + 4, hi);
+    return reduce8(a);
+}
+
+static float dot_f32_neon(const float *a, const float *b, uint32_t n) {
+    float32x4_t lo = vdupq_n_f32(0), hi = vdupq_n_f32(0);
+    float sum;
+    uint32_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        lo = vaddq_f32(lo, vmulq_f32(vld1q_f32(a + i), vld1q_f32(b + i)));
+        hi = vaddq_f32(hi, vmulq_f32(vld1q_f32(a + i + 4), vld1q_f32(b + i + 4)));
+    }
+    sum = reduce_neon(lo, hi);
+    for (; i < n; ++i) sum += a[i] * b[i];
+    return sum;
+}
+
+/* f16 -> f32 is the scalar converter (exact); the eight products then follow
+ * the same lanes as dot_f32. NEON fp16 arithmetic is not required. */
+static float dot_f16_neon(const float *a, const uint16_t *b, uint32_t n) {
+    float32x4_t lo = vdupq_n_f32(0), hi = vdupq_n_f32(0);
+    float sum;
+    uint32_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        float bf[8];
+        uint32_t k;
+        for (k = 0; k < 8; ++k) bf[k] = f16_to_f32(b[i + k]);
+        lo = vaddq_f32(lo, vmulq_f32(vld1q_f32(a + i), vld1q_f32(bf)));
+        hi = vaddq_f32(hi, vmulq_f32(vld1q_f32(a + i + 4), vld1q_f32(bf + 4)));
+    }
+    sum = reduce_neon(lo, hi);
+    for (; i < n; ++i) sum += a[i] * f16_to_f32(b[i]);
+    return sum;
+}
+
+static void saxpy_f32_neon(float *out, float w, const float *v, uint32_t n) {
+    float32x4_t ww = vdupq_n_f32(w);
+    uint32_t j = 0;
+    for (; j + 4 <= n; j += 4)
+        vst1q_f32(out + j, vaddq_f32(vld1q_f32(out + j), vmulq_f32(ww, vld1q_f32(v + j))));
+    for (; j < n; ++j) out[j] += w * v[j];
+}
+
+static void saxpy_f16_neon(float *out, float w, const uint16_t *v, uint32_t n) {
+    float32x4_t ww = vdupq_n_f32(w);
+    uint32_t j = 0;
+    for (; j + 4 <= n; j += 4) {
+        float bf[4];
+        bf[0] = f16_to_f32(v[j]);
+        bf[1] = f16_to_f32(v[j + 1]);
+        bf[2] = f16_to_f32(v[j + 2]);
+        bf[3] = f16_to_f32(v[j + 3]);
+        vst1q_f32(out + j, vaddq_f32(vld1q_f32(out + j), vmulq_f32(ww, vld1q_f32(bf))));
+    }
+    for (; j < n; ++j) out[j] += w * f16_to_f32(v[j]);
+}
+
+static void attend_f32_neon(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f32_neon(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f32_neon(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+
+static void attend_f16_neon(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f16_neon(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f16_neon(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+#elif defined(SM_HAVE_WASM_SIMD)
+static float reduce_wasm_attn(v128_t lo, v128_t hi) {
+    float a[8];
+    wasm_v128_store(a, lo);
+    wasm_v128_store(a + 4, hi);
+    return reduce8(a);
+}
+
+static float dot_f32_wasm(const float *a, const float *b, uint32_t n) {
+    v128_t lo = wasm_f32x4_splat(0), hi = wasm_f32x4_splat(0);
+    float sum;
+    uint32_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        lo = wasm_f32x4_add(lo, wasm_f32x4_mul(wasm_v128_load(a + i), wasm_v128_load(b + i)));
+        hi = wasm_f32x4_add(hi, wasm_f32x4_mul(wasm_v128_load(a + i + 4), wasm_v128_load(b + i + 4)));
+    }
+    sum = reduce_wasm_attn(lo, hi);
+    for (; i < n; ++i) sum += a[i] * b[i];
+    return sum;
+}
+
+static void saxpy_f32_wasm(float *out, float w, const float *v, uint32_t n) {
+    v128_t ww = wasm_f32x4_splat(w);
+    uint32_t j = 0;
+    for (; j + 4 <= n; j += 4)
+        wasm_v128_store(out + j, wasm_f32x4_add(wasm_v128_load(out + j), wasm_f32x4_mul(ww, wasm_v128_load(v + j))));
+    for (; j < n; ++j) out[j] += w * v[j];
+}
+
+static void attend_f32_wasm(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                            uint32_t start, uint32_t pos, float *scores, float *out) {
+    uint32_t p;
+    float factor = 1.0f / sqrtf((float)hd), inv;
+    for (p = start; p <= pos; ++p) scores[p] = dot_f32_wasm(q, keys + (size_t)p * stride, hd) * factor;
+    inv = softmax_inv(scores, start, pos);
+    memset(out, 0, hd * sizeof(float));
+    for (p = start; p <= pos; ++p) saxpy_f32_wasm(out, scores[p] * inv, values + (size_t)p * stride, hd);
+}
+#endif

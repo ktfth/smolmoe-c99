@@ -35,6 +35,7 @@ export interface Stats {
   readonly decode_tokens_per_second: number;
   readonly expert_calls: number;
   readonly logits_hash: string;
+  readonly system_kv?: "off" | "miss" | "hit";
 }
 
 export interface RunResult {
@@ -44,7 +45,12 @@ export interface RunResult {
 }
 
 export function run(args: readonly (string | number)[], binary: string = BINARY): RunResult {
-  const proc = Bun.spawnSync([binary, ...args.map(String)], { stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawnSync([binary, ...args.map(String)], {
+    stdout: "pipe",
+    stderr: "pipe",
+    /* Keep the per-user system-prompt KV cache out of the suite. */
+    env: { ...process.env, SMOLMOE_KV_CACHE: "0" },
+  });
   return {
     code: proc.exitCode ?? -1,
     stdout: Buffer.from(proc.stdout),
@@ -60,6 +66,8 @@ export function runWithInput(args: readonly (string | number)[], input: string, 
     stdout: "pipe",
     stderr: "pipe",
     cwd,
+    /* Keep the per-user system-prompt KV cache out of the suite. */
+    env: { ...process.env, SMOLMOE_KV_CACHE: "0" },
   });
   return { code: proc.exitCode ?? -1, stdout: Buffer.from(proc.stdout), stderr: proc.stderr.toString() };
 }

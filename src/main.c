@@ -36,6 +36,7 @@ typedef struct Options {
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
     int scalar, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock, profile;
+    int kv_f16;
     int shell_escape; /* "!comando": 0 on in a terminal, 1 also on piped input, -1 off */
     int memory_given; /* --memory-mib: otherwise the KV cache is added to the default budget */
     ToolClock clock; /* --now */
@@ -47,6 +48,7 @@ typedef struct Stats {
     uint64_t logits_hash;
     double nll;
     uint32_t nll_tokens;
+    int system_kv;
 } Stats;
 
 /* Where the weights (and possibly the embedded config/tokenizer) come from. */
@@ -87,6 +89,7 @@ static void usage(FILE *out) {
           "  --threads N          worker threads (default: physical cores)\n"
           "  --batch N            prompt tokens per forward pass (default 32)\n"
           "  --memory-mib N       heap ceiling, excluding mapped weights (default 512 plus the KV cache of up to 2048 positions)\n"
+          "  --kv-f16             store the KV cache in float16 (half the memory; opt-in, numerics change)\n"
           "  --scalar             disable SIMD kernels\n"
           "diagnostics\n"
           "  --stats FILE         JSON statistics (always printed to stderr)\n"
@@ -96,7 +99,11 @@ static void usage(FILE *out) {
           "  --token-ids FILE     prompt and generated token IDs, one per line\n"
           "  --perplexity         score the prompt (teacher-forced NLL, perplexity); no generation\n"
           "  --tokenize-only      encode and render the prompt; no weights needed\n"
-          "  --version, --help\n", out);
+          "  --version, --help\n"
+          "\n"
+          "The chat keeps the system prompt's KV in the user cache directory and reloads it\n"
+          "on the next launch (SMOLMOE_KV_CACHE=0 disables it, SMOLMOE_KV_CACHE=DIR chooses\n"
+          "the directory).\n", out);
 }
 
 static void parse_value(Options *o, const char *opt, const char *value) {
@@ -163,6 +170,7 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--shell-escape")) { o->shell_escape = 1; continue; }
         if (!strcmp(opt, "--no-shell-escape")) { o->shell_escape = -1; continue; }
         if (!strcmp(opt, "--profile")) { o->profile = 1; continue; }
+        if (!strcmp(opt, "--kv-f16")) { o->kv_f16 = 1; continue; }
         if (opt[0] != '-' && !o->model) { o->model = opt; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         parse_value(o, opt, argv[++a]);
@@ -289,7 +297,10 @@ static void print_stats(FILE *f, const char *backend, const Options *o, const Mo
         double mean = st->nll_tokens ? st->nll / st->nll_tokens : 0;
         fprintf(f, ",\"perplexity_tokens\":%u,\"nll\":%.6f,\"perplexity\":%.6f", st->nll_tokens, mean, exp(mean));
     }
-    if (o->interactive) fprintf(f, ",\"tool_calls\":%u", st->tool_calls);
+    if (o->interactive) {
+        const char *kv = st->system_kv == 2 ? "hit" : (st->system_kv == 1 ? "miss" : "off");
+        fprintf(f, ",\"tool_calls\":%u,\"system_kv\":\"%s\"", st->tool_calls, kv);
+    }
     if (o->profile) {
         uint32_t p;
         fputs(",\"profile\":{", f);
@@ -429,6 +440,7 @@ typedef struct Run {
     int tools;
     uint32_t tool_open, tool_close;
     unsigned char *banned; /* the sampler's; the chat allows the tool markers per message */
+    Memory *mem;
 } Run;
 
 static uint32_t default_threads(void) {
@@ -517,6 +529,7 @@ static void run_chat(const Run *r) {
     engine.tool_close = r->tool_close;
     engine.fixed_clock = r->o->fixed_clock ? &r->o->clock : NULL;
     engine.banned = r->banned;
+    engine.mem = r->mem;
     engine.max_reply = r->o->tokens;
     cc.engine = &engine;
     cc.out = r->out;
@@ -534,6 +547,7 @@ static void run_chat(const Run *r) {
     st->ended = st->prefill_end + cs->decode_seconds;
     st->first = cs->generated ? st->loaded + cs->first_token_seconds : 0;
     st->tool_calls = cs->tool_calls;
+    st->system_kv = cs->system_kv;
 }
 
 /* Chat tools are on when the vocabulary has the call markers, --no-tools is
@@ -588,7 +602,8 @@ int main(int argc, char **argv) {
      * covers it up to the default context, so a 4B model opens without
      * --memory-mib while a huge --context still needs an explicit budget. */
     if (!o.memory_given)
-        mem.limit = add_size(mem.limit, kv_cache_bytes(&c, context < DEFAULT_CONTEXT ? context : DEFAULT_CONTEXT));
+        mem.limit = add_size(mem.limit, kv_cache_bytes(&c, context < DEFAULT_CONTEXT ? context : DEFAULT_CONTEXT,
+                                                      o.kv_f16));
 
     run.o = &o;
     run.st = &st;
@@ -635,7 +650,7 @@ int main(int argc, char **argv) {
     {
         uint32_t batch = o.batch < context ? o.batch : context;
         int every_logit = o.trace || o.hash_logits || o.perplexity;
-        model_init(&model, &c, &src.mf, context, batch, every_logit ? batch : 1, pool, &mem);
+        model_init(&model, &c, &src.mf, context, batch, every_logit ? batch : 1, pool, &mem, o.kv_f16);
         model.profiling = o.profile;
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
@@ -644,6 +659,7 @@ int main(int argc, char **argv) {
     if (o.interactive) enable_tools(&run, context, &mem);
     sampler_init(&sampler, c.vocab, banned, o.temperature, o.top_k, o.top_p, o.seed, &mem);
     run.model = &model;
+    run.mem = &mem;
     run.sampler = &sampler;
     run.trace = open_output(o.trace);
     stats_out = open_output(o.stats); /* before the chat: "!cd" moves relative paths */

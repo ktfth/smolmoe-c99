@@ -89,7 +89,8 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
     web.backend = kernels_select(0);
     web.pool = pool_create(threads, &web.mem);
     modelfile_verify_payload(&web.mf, web.pool);
-    model_init(&web.model, &web.c, &web.mf, context, WEB_BATCH < context ? WEB_BATCH : context, 1, web.pool, &web.mem);
+    model_init(&web.model, &web.c, &web.mf, context, WEB_BATCH < context ? WEB_BATCH : context, 1, web.pool,
+               &web.mem, 0);
 
     web.message_cap = context * WEB_BYTES_PER_TOKEN;
     encode_cap = (uint32_t)strlen(CHAT_DEFAULT_SYSTEM) + TOOLS_PROMPT_BYTES;
@@ -113,6 +114,7 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
     web.engine.tool_close = close_marker;
     web.engine.banned = banned;
     web.engine.fixed_clock = &web.clock;
+    web.engine.mem = &web.mem;
     web.engine.sink.text = sink_text;
     web.engine.sink.reply_end = sink_reply_end;
     web.engine.sink.notice = sink_notice;

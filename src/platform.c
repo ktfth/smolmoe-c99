@@ -311,6 +311,27 @@ unsigned console_original_codepage(void) {
     return original_output_cp != CP_UTF8 ? (unsigned)original_output_cp : 0;
 }
 
+static int make_directory_one(const char *path) {
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    wchar_t *w;
+    DWORD attr;
+    BOOL ok;
+    if (n <= 0) return 0;
+    w = (wchar_t *)malloc((size_t)n * sizeof(*w));
+    if (!w) return 0;
+    if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, w, n)) {
+        free(w);
+        return 0;
+    }
+    ok = CreateDirectoryW(w, NULL);
+    if (!ok && GetLastError() == ERROR_ALREADY_EXISTS) {
+        attr = GetFileAttributesW(w);
+        ok = attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
+    }
+    free(w);
+    return ok != 0;
+}
+
 void platform_init(int *argc, char ***argv) {
     int n, i;
     LPWSTR *wide = CommandLineToArgvW(GetCommandLineW(), &n);
@@ -472,7 +493,72 @@ unsigned console_original_codepage(void) {
     return 0;
 }
 
+static int make_directory_one(const char *path) {
+    struct stat st;
+    if (mkdir(path, 0700) == 0) return 1;
+    if (errno != EEXIST) return 0;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 #endif
+
+static int volume_root(const char *path) {
+    if (!path[0]) return 1;
+    if ((path[0] == '/' || path[0] == '\\') && !path[1]) return 1;
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':' && !path[2])
+        return 1;
+    return 0;
+}
+
+int ensure_directory(const char *path) {
+    char buf[PATH_CAPACITY];
+    size_t n, i;
+    if (!path || !path[0]) return 0;
+    n = strlen(path);
+    if (n >= sizeof(buf)) return 0;
+    memcpy(buf, path, n + 1);
+    for (i = 1; i <= n; ++i) {
+        if (i != n && buf[i] != '/' && buf[i] != '\\') continue;
+        buf[i] = 0;
+        if (!volume_root(buf) && !make_directory_one(buf)) return 0;
+        if (i < n) buf[i] = '/';
+    }
+    return 1;
+}
+
+int user_cache_dir(char *buf, size_t cap) {
+#if defined(__wasm__)
+    (void)buf;
+    (void)cap;
+    return 0;
+#elif defined(_WIN32)
+    const char *p = getenv("LOCALAPPDATA");
+    int wrote;
+    if (!p || !p[0]) p = getenv("USERPROFILE");
+    if (!p || !p[0]) return 0;
+    wrote = snprintf(buf, cap, "%s", p);
+    return wrote > 0 && (size_t)wrote < cap;
+#else
+    const char *xdg = getenv("XDG_CACHE_HOME"), *home;
+    int wrote;
+    if (xdg && xdg[0]) {
+        wrote = snprintf(buf, cap, "%s", xdg);
+        return wrote > 0 && (size_t)wrote < cap;
+    }
+    home = getenv("HOME");
+    if (!home || !home[0]) return 0;
+    wrote = snprintf(buf, cap, "%s/.cache", home);
+    return wrote > 0 && (size_t)wrote < cap;
+#endif
+}
+
+uint32_t process_id(void) {
+#if defined(_WIN32)
+    return (uint32_t)GetCurrentProcessId();
+#else
+    return (uint32_t)getpid();
+#endif
+}
 
 void map_file(const char *path, MappedFile *m) {
     char err[PATH_CAPACITY + 256];
