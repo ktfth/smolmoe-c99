@@ -168,6 +168,7 @@ static void start_engine(Desktop *d, const DesktopOptions *o) {
     e->banned = banned;
     e->fixed_clock = NULL;
     e->sink = o->sink;
+    e->mem = &d->mem;
     engine_start(e);
 }
 
@@ -185,7 +186,7 @@ Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
     }
     context = o->context ? o->context : DESKTOP_DEFAULT_CONTEXT;
     if (context > d->c.max_context) context = d->c.max_context;
-    d->mem.limit = add_size(d->mem.limit, kv_cache_bytes(&d->c, context));
+    d->mem.limit = add_size(d->mem.limit, kv_cache_bytes(&d->c, context, 0));
     threads = o->threads ? o->threads : cpu_physical_cores();
     if (threads > DESKTOP_MAX_THREADS) threads = DESKTOP_MAX_THREADS;
 
@@ -195,7 +196,7 @@ Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]) {
     modelfile_verify_payload(&d->mf, d->pool);
     if (o->stage) o->stage(o->sink.ctx, DESKTOP_PREPARING);
     model_init(&d->model, &d->c, &d->mf, context, DESKTOP_BATCH < context ? DESKTOP_BATCH : context, 1, d->pool,
-               &d->mem);
+               &d->mem, 0);
     start_engine(d, o);
     return d;
 }

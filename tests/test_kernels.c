@@ -179,14 +179,19 @@ static const char *simd_backend(void) {
     CHECK(dot_q8 == dot_q8_avx2 && dot_q8_x4 == dot_q8_avx2_x4 && dot_q5 == dot_q5_avx2 &&
           dot_q5_x4 == dot_q5_avx2_x4 && quantize_q8 == quantize_q8_avx2 && silu_mul == silu_mul_avx2,
           "%s: a dispatch pointer does not reach the SIMD code", name);
+    CHECK(attend_f32 != attend_f32_scalar && attend_f16 != attend_f16_scalar && pack_f16 != pack_f16_scalar,
+          "%s: attention is still on the scalar path", name);
 #elif defined(SM_HAVE_NEON)
     CHECK(dot_q8 == dot_q8_neon && dot_q8_x4 == dot_q8_neon_x4 && dot_q5 == dot_q5_neon &&
           dot_q5_x4 == dot_q5_neon_x4 && quantize_q8 == quantize_q8_neon && silu_mul == silu_mul_neon,
           "%s: a dispatch pointer does not reach the SIMD code", name);
+    CHECK(attend_f32 != attend_f32_scalar && attend_f16 != attend_f16_scalar,
+          "%s: attention is still on the scalar path", name);
 #elif defined(SM_HAVE_WASM_SIMD)
     CHECK(dot_q8 == dot_q8_wasm && dot_q8_x4 == dot_q8_wasm_x4 && dot_q5 == dot_q5_wasm &&
           dot_q5_x4 == dot_q5_wasm_x4 && quantize_q8 == quantize_q8_wasm && silu_mul == silu_mul_wasm,
           "%s: a dispatch pointer does not reach the SIMD code", name);
+    CHECK(attend_f32 != attend_f32_scalar, "%s: attention is still on the scalar path", name);
 #endif
     return name;
 }
@@ -394,6 +399,50 @@ static void test_dot_f32(void) {
     CHECK(fabs(dot_f32(a, b, 19) - exact) < 1e-5, "dot_f32");
 }
 
+/* Attention over a strided KV: SIMD must match the scalar head, including f16. */
+static void test_attention_backends(void) {
+    enum { HD = 24, POS = 40, STRIDE = 32 };
+    float q[HD], keys[POS * STRIDE], values[POS * STRIDE], out_s[HD], out_v[HD];
+    float scores_s[POS], scores_v[POS];
+    uint16_t k16[POS * STRIDE], v16[POS * STRIDE];
+    uint32_t trial, i, p;
+    if (!simd_backend()) return;
+    for (trial = 0; trial < 20; ++trial) {
+        uint32_t hd = 2 + next() % (HD - 1);
+        uint32_t npos = 1 + next() % POS;
+        uint32_t start = next() % npos;
+        uint32_t stride = hd + next() % (STRIDE - hd + 1);
+        for (i = 0; i < hd; ++i) q[i] = uniform(-4.0f, 4.0f);
+        for (p = 0; p < npos * stride; ++p) {
+            keys[p] = uniform(-3.0f, 3.0f);
+            values[p] = uniform(-3.0f, 3.0f);
+        }
+        keys[0] = -0.0f;
+        attend_f32_scalar(q, keys, values, stride, hd, start, npos - 1, scores_s, out_s);
+        attend_f32(q, keys, values, stride, hd, start, npos - 1, scores_v, out_v);
+        for (i = 0; i < hd; ++i)
+            CHECK(memcmp(out_s + i, out_v + i, sizeof(float)) == 0, "f32 attend trial %u lane %u", trial, i);
+        for (p = start; p < npos; ++p)
+            CHECK(memcmp(scores_s + p, scores_v + p, sizeof(float)) == 0, "f32 scores trial %u pos %u", trial, p);
+        pack_f16_scalar(keys, k16, npos * stride);
+        pack_f16_scalar(values, v16, npos * stride);
+        {
+            uint16_t got[8], want_pack[npos * stride];
+            float edge[8] = {0, -0.0f, 1.0f, -2.0f, 65504.0f, 65520.0f, INFINITY, 1.0f + 1.0f / 2048};
+            pack_f16(edge, got, 8);
+            for (i = 0; i < 8; ++i) CHECK(got[i] == f32_to_f16(edge[i]), "pack f16 edge %u", i);
+            pack_f16(keys, want_pack, npos * stride);
+            CHECK(memcmp(want_pack, k16, npos * stride * sizeof(uint16_t)) == 0, "pack f16 row trial %u", trial);
+        }
+        attend_f16_scalar(q, k16, v16, stride, hd, start, npos - 1, scores_s, out_s);
+        attend_f16(q, k16, v16, stride, hd, start, npos - 1, scores_v, out_v);
+        for (i = 0; i < hd; ++i)
+            CHECK(memcmp(out_s + i, out_v + i, sizeof(float)) == 0, "f16 attend trial %u lane %u", trial, i);
+        for (p = start; p < npos; ++p)
+            CHECK(memcmp(scores_s + p, scores_v + p, sizeof(float)) == 0, "f16 scores trial %u pos %u", trial, p);
+    }
+}
+
 typedef struct SumTask {
     const float *values;
     uint32_t n;
@@ -469,6 +518,7 @@ int main(void) {
     test_silu_backends();
     test_quantize_backends();
     test_dot_f32();
+    test_attention_backends();
     test_split_range();
     test_pool();
     if (failures) {

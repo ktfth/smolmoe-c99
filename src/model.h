@@ -56,7 +56,12 @@ typedef struct Model {
     uint32_t *selected, *members;
     double *inv_freq, *inv_freq_local;
     float *rope_cos, *rope_sin, *rope_cos_local, *rope_sin_local;
-    float *keys, *values, *scores;
+    /* KV cache: f32, or f16 when kv_f16 (token-major, kv_dim elements). */
+    unsigned char *keys, *values;
+    int kv_f16;
+    const unsigned char *checkpoint;
+    uint64_t checkpoint_bytes;
+    float *scores;
     uint64_t expert_calls;
     int profiling;
     double phase_seconds[MODEL_PHASES];
@@ -66,8 +71,10 @@ const char *model_phase_name(ModelPhase p);
 
 /* logit_rows: 1 for normal generation, or the batch size when every prompt
  * token's logits are needed (--trace, --hash-logits). */
+/* kv_f16 stores keys and values in float16. Default 0 keeps the f32 cache,
+ * which is the bit-exact path the logit goldens are measured on. */
 void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
-                uint32_t logit_rows, Pool *pool, Memory *mem);
+                uint32_t logit_rows, Pool *pool, Memory *mem, int kv_f16);
 
 /* Runs tokens[0..n) at positions pos0..pos0+n-1. LOGITS_LAST writes the last
  * token's logits to m->logits; LOGITS_ALL writes n rows of vocab_size. */
@@ -79,7 +86,11 @@ void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, 
 
 size_t model_kv_bytes(const Model *m);
 
-/* Bytes of the F32 keys and values for `context` positions. */
-size_t kv_cache_bytes(const Config *c, uint32_t context);
+/* Bytes of the keys and values for `context` positions (f16 when kv_f16). */
+size_t kv_cache_bytes(const Config *c, uint32_t context, int kv_f16);
+
+/* Pointer to position 0 of one layer's keys (values = 0) or values (values = 1).
+ * The next position is kv_dim elements later; element size is 2 or 4. */
+void *model_kv_layer(Model *m, uint32_t layer, int values);
 
 #endif

@@ -109,7 +109,27 @@ void dequantize_q5_row(const unsigned char *w, uint32_t cols, float *out);
  * from a small candidate set to minimize squared error. Used by the converter. */
 void quantize_q5_row(const float *x, uint32_t cols, unsigned char *out);
 
-/* Sum of a[i]*b[i] in a fixed 8-lane order (vectorizable, deterministic). */
+/* Sum of a[i]*b[i] in a fixed 8-lane order. The scalar reference for attention. */
 float dot_f32(const float *a, const float *b, uint32_t n);
+
+/* One query head over KV positions [start, pos]. keys/values at position p
+ * begin at p * stride (a head packed inside a token). The f32 path is
+ * bit-identical on every backend; f16 rounds each stored element with
+ * f32_to_f16 and then does the same 8-lane dot. */
+typedef void (*AttendF32)(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                          uint32_t start, uint32_t pos, float *scores, float *out);
+typedef void (*AttendF16)(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                          uint32_t start, uint32_t pos, float *scores, float *out);
+void attend_f32_scalar(const float *q, const float *keys, const float *values, uint32_t stride, uint32_t hd,
+                       uint32_t start, uint32_t pos, float *scores, float *out);
+void attend_f16_scalar(const float *q, const uint16_t *keys, const uint16_t *values, uint32_t stride, uint32_t hd,
+                       uint32_t start, uint32_t pos, float *scores, float *out);
+extern AttendF32 attend_f32;
+extern AttendF16 attend_f16;
+
+/* f32_to_f16() over n values. The SIMD path matches the scalar one bit for bit. */
+typedef void (*PackF16)(const float *src, uint16_t *dst, uint32_t n);
+void pack_f16_scalar(const float *src, uint16_t *dst, uint32_t n);
+extern PackF16 pack_f16;
 
 #endif

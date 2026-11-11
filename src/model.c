@@ -81,7 +81,7 @@ static void *buffer(Memory *mem, size_t rows, size_t cols, size_t size) {
 }
 
 void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
-                uint32_t logit_rows, Pool *pool, Memory *mem) {
+                uint32_t logit_rows, Pool *pool, Memory *mem, int kv_f16) {
     uint64_t expected;
     uint32_t i, half, nb_max, threads = pool_threads(pool);
     memset(m, 0, sizeof(*m));
@@ -140,17 +140,30 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     m->rope_sin = (float *)buffer(mem, batch, half, sizeof(float));
     m->rope_cos_local = (float *)buffer(mem, batch, half, sizeof(float));
     m->rope_sin_local = (float *)buffer(mem, batch, half, sizeof(float));
-    m->keys = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
-    m->values = (float *)buffer(mem, mul_size(c->layers, context), m->kv_dim, sizeof(float));
+    m->kv_f16 = kv_f16 ? 1 : 0;
+    m->checkpoint = f->base;
+    m->checkpoint_bytes = f->size;
+    {
+        size_t elem = m->kv_f16 ? sizeof(uint16_t) : sizeof(float);
+        m->keys = (unsigned char *)buffer(mem, mul_size(c->layers, context), m->kv_dim, elem);
+        m->values = (unsigned char *)buffer(mem, mul_size(c->layers, context), m->kv_dim, elem);
+    }
     m->scores = (float *)buffer(mem, threads, context, sizeof(float));
 }
 
-size_t kv_cache_bytes(const Config *c, uint32_t context) {
+size_t kv_cache_bytes(const Config *c, uint32_t context, int kv_f16) {
     size_t kv_dim = (size_t)c->kv_heads * c->head_dim;
-    return mul_size(mul_size(mul_size(c->layers, context), kv_dim), 2 * sizeof(float));
+    size_t elem = kv_f16 ? sizeof(uint16_t) : sizeof(float);
+    return mul_size(mul_size(mul_size(c->layers, context), kv_dim), 2 * elem);
 }
 
-size_t model_kv_bytes(const Model *m) { return kv_cache_bytes(&m->c, m->context); }
+size_t model_kv_bytes(const Model *m) { return kv_cache_bytes(&m->c, m->context, m->kv_f16); }
+
+void *model_kv_layer(Model *m, uint32_t layer, int values) {
+    size_t elem = m->kv_f16 ? sizeof(uint16_t) : sizeof(float);
+    unsigned char *base = values ? m->values : m->keys;
+    return base + (size_t)layer * m->context * m->kv_dim * elem;
+}
 
 /* ---- parallel matrix-vector products ----------------------------------- */
 
@@ -387,29 +400,16 @@ static int is_local_layer(const Config *c, uint32_t layer) {
 
 static void attend(Model *m, uint32_t layer, size_t layer_base, uint32_t t, uint32_t h, uint32_t pos, float *scores) {
     const Config *c = &m->c;
-    uint32_t hd = m->head_dim, kh = h / (c->heads / c->kv_heads), p, j;
+    uint32_t hd = m->head_dim, kh = h / (c->heads / c->kv_heads);
     uint32_t start = is_local_layer(c, layer) && pos >= c->sliding_window ? pos - c->sliding_window + 1 : 0;
     const float *q = m->q + (size_t)t * m->q_dim + (size_t)h * hd;
-    const float *keys = m->keys + layer_base + (size_t)kh * hd;
-    const float *values = m->values + layer_base + (size_t)kh * hd;
     float *out = m->att + (size_t)t * m->q_dim + (size_t)h * hd;
-    float factor = 1.0f / sqrtf((float)hd), high = -FLT_MAX, total = 0, inv;
-    for (p = start; p <= pos; ++p) {
-        float s = dot_f32(q, keys + (size_t)p * m->kv_dim, hd) * factor;
-        scores[p] = s;
-        if (s > high) high = s;
-    }
-    for (p = start; p <= pos; ++p) {
-        scores[p] = exp_det(scores[p] - high);
-        total += scores[p];
-    }
-    inv = 1.0f / total;
-    for (j = 0; j < hd; ++j) out[j] = 0;
-    for (p = start; p <= pos; ++p) {
-        const float *v = values + (size_t)p * m->kv_dim;
-        float w = scores[p] * inv;
-        for (j = 0; j < hd; ++j) out[j] += w * v[j];
-    }
+    size_t elem = m->kv_f16 ? sizeof(uint16_t) : sizeof(float);
+    const unsigned char *keys = m->keys + (layer_base + (size_t)kh * hd) * elem;
+    const unsigned char *values = m->values + (layer_base + (size_t)kh * hd) * elem;
+    if (m->kv_f16)
+        attend_f16(q, (const uint16_t *)keys, (const uint16_t *)values, m->kv_dim, hd, start, pos, scores, out);
+    else attend_f32(q, (const float *)keys, (const float *)values, m->kv_dim, hd, start, pos, scores, out);
 }
 
 static void attention_task(void *ctx, uint32_t index, uint32_t count) {
@@ -440,14 +440,20 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
     matmul(m, qkv, 3, m->xd, m->xq, n);
     lap(m, PHASE_QKV, &clock);
     for (t = 0; t < n; ++t) {
-        size_t slot = ((size_t)l * m->context + pos0 + t) * m->kv_dim;
+        size_t elem = m->kv_f16 ? sizeof(uint16_t) : sizeof(float);
+        size_t slot_bytes = ((size_t)l * m->context + pos0 + t) * m->kv_dim * elem;
         float *qt = m->q + (size_t)t * m->q_dim, *kt = m->k + (size_t)t * m->kv_dim;
         if (L->q_norm) norm_rows_inplace(qt, L->q_norm, c->heads, m->head_dim, c->eps);
         if (L->k_norm) norm_rows_inplace(kt, L->k_norm, c->kv_heads, m->head_dim, c->eps);
         rope(qt, c->heads, m->head_dim, half, rcos + t * half, rsin + t * half);
         rope(kt, c->kv_heads, m->head_dim, half, rcos + t * half, rsin + t * half);
-        memcpy(m->keys + slot, kt, m->kv_dim * sizeof(float));
-        memcpy(m->values + slot, m->v + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
+        if (m->kv_f16) {
+            pack_f16(kt, (uint16_t *)(m->keys + slot_bytes), m->kv_dim);
+            pack_f16(m->v + (size_t)t * m->kv_dim, (uint16_t *)(m->values + slot_bytes), m->kv_dim);
+        } else {
+            memcpy(m->keys + slot_bytes, kt, m->kv_dim * sizeof(float));
+            memcpy(m->values + slot_bytes, m->v + (size_t)t * m->kv_dim, m->kv_dim * sizeof(float));
+        }
     }
     lap(m, PHASE_ROPE, &clock);
     task.m = m;

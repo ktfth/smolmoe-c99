@@ -1,9 +1,11 @@
 #include "engine.h"
 #include "config.h"
 #include "platform.h"
+#include "sha256.h"
 #include "util.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define CLOSE_RESERVE 4u     /* "<|im_end|>\n" after a reply */
@@ -60,6 +62,42 @@ static void notice_call(Notice *n, const Calls *calls, uint32_t k) {
 }
 
 static void say(const Engine *e, const char *line) { e->sink.notice(e->sink.ctx, line); }
+
+/* The turn log is the token ids after the system prompt. Replaying it from
+ * system_len rebuilds the KV cache with RoPE at the new positions; the system
+ * prompt itself stays where engine_start put it. */
+static void remember(Engine *e, const uint32_t *ids, uint32_t n) {
+    if (!n) return;
+    if (e->hist_len + n > e->hist_cap) die("internal error: history overflow");
+    memcpy(e->hist + e->hist_len, ids, n * sizeof(uint32_t));
+    e->hist_len += n;
+}
+
+static uint32_t committed(const Engine *e) {
+    uint32_t i, n = 0;
+    for (i = 0; i < e->nturns; ++i) n += e->turns[i];
+    return n;
+}
+
+static void close_turn(Engine *e) {
+    uint32_t done = committed(e);
+    if (e->hist_len < done || e->nturns >= e->hist_cap) die("internal error: turn log");
+    e->turns[e->nturns++] = e->hist_len - done;
+}
+
+/* keep is a turn boundary: the prefix of turns that sums to it. */
+static void trim_hist(Engine *e, uint32_t keep) {
+    uint32_t n = 0, i;
+    if (keep > e->hist_len) die("internal error: trim past the history");
+    for (i = 0; i < e->nturns; ++i) {
+        if (n + e->turns[i] > keep) break;
+        n += e->turns[i];
+    }
+    if (n != keep) die("internal error: trim is not on a turn boundary");
+    e->nturns = i;
+    e->hist_len = keep;
+    e->pos = e->system_len + keep;
+}
 
 static void open_call(Calls *calls) {
     calls->open = 1;
@@ -151,7 +189,9 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
             tool_call_grounded(calls->text[0], calls->len[0], e->message)) {
             calls->open = 0;
         }
-        model_forward(m, &token, 1, e->pos++, LOGITS_LAST);
+        model_forward(m, &token, 1, e->pos, LOGITS_LAST);
+        remember(e, &token, 1);
+        ++e->pos;
         ++generated;
         if (prefix && !calls->open) break;
     }
@@ -168,6 +208,7 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
 static void assistant_turn(Engine *e, uint32_t n, Calls *calls, const char *prefix, uint32_t prefix_len) {
     double t0 = now_seconds(), t1;
     model_prefill(e->model, e->ids, n, e->pos, 1);
+    remember(e, e->ids, n);
     e->pos += n;
     t1 = now_seconds();
     e->stats.generated += reply(e, t0, calls, prefix, prefix_len);
@@ -176,7 +217,9 @@ static void assistant_turn(Engine *e, uint32_t n, Calls *calls, const char *pref
     e->stats.prompt_tokens += n;
     n = tokenizer_chat_close(e->tok, e->ids);
     model_prefill(e->model, e->ids, n, e->pos, 0);
+    remember(e, e->ids, n);
     e->pos += n;
+    close_turn(e);
 }
 
 /* Runs the captured calls and encodes their results as one user turn, as the
@@ -252,8 +295,43 @@ static int all_grounded(const Engine *e, const Calls *calls) {
     return grounded;
 }
 
-static int fits(const Engine *e, uint32_t n) {
-    return e->pos + n + e->max_reply + CLOSE_RESERVE <= e->model->context;
+static int fits_at(const Engine *e, uint32_t pos, uint32_t n) {
+    uint64_t need = (uint64_t)pos + n + e->max_reply + CLOSE_RESERVE;
+    return need <= e->model->context;
+}
+
+/* Drop whole turns that end at or before e->anchor until n tokens fit, then
+ * replay what remains. The system prompt's KV is left in place. */
+static void replay(Engine *e) {
+    double t0 = now_seconds();
+    e->pos = e->system_len;
+    if (e->hist_len) {
+        model_prefill(e->model, e->hist, e->hist_len, e->pos, 0);
+        e->pos += e->hist_len;
+    }
+    e->stats.prefill_seconds += now_seconds() - t0;
+    e->stats.prompt_tokens += e->hist_len;
+}
+
+static int ensure_room(Engine *e, uint32_t n) {
+    uint32_t drop = 0, skip = 0;
+    if (e->pos != e->system_len + e->hist_len) die("internal error: history and KV diverged");
+    if (fits_at(e, e->pos, n)) return 1;
+    if (e->anchor > e->hist_len) die("internal error: anchor past the history");
+    while (drop < e->nturns && skip + e->turns[drop] <= e->anchor &&
+           !fits_at(e, e->system_len + (e->hist_len - skip), n)) {
+        skip += e->turns[drop++];
+    }
+    if (!fits_at(e, e->system_len + (e->hist_len - skip), n)) return 0;
+    if (!drop) return 1;
+    memmove(e->hist, e->hist + skip, (e->hist_len - skip) * sizeof(uint32_t));
+    memmove(e->turns, e->turns + drop, (e->nturns - drop) * sizeof(uint32_t));
+    e->hist_len -= skip;
+    e->nturns -= drop;
+    e->anchor -= skip;
+    replay(e);
+    say(e, "(contexto cheio: mensagens antigas saíram da conversa)");
+    return 1;
 }
 
 /* The message clearly needs one tool (tools_forced_choice) but the model
@@ -269,7 +347,7 @@ static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)e->message, len, 1, e->ids);
     e->ids[n++] = e->tool_open;
     n += tokenizer_encode(e->tok, (const unsigned char *)prefix, plen, e->ids + n, 0, NULL);
-    if (!fits(e, n)) return 0;
+    if (!ensure_room(e, n)) return 0;
     note.len = 0;
     notice_put(&note, "(chamada refeita com ");
     notice_name(&note, tool);
@@ -280,39 +358,38 @@ static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     return 1;
 }
 
-/* A reply stopped inside a tool call leaves the history with its message
- * (from `start`); one stopped in plain text stays as far as it got. */
-static void drop_stopped_call(Engine *e, Calls *calls, uint32_t start) {
+/* A reply stopped inside a tool call leaves the history without this message;
+ * one stopped in plain text stays as far as it got. */
+static void drop_stopped_call(Engine *e, Calls *calls) {
     if (!calls->count) return;
     calls->count = 0;
-    e->pos = start;
+    trim_hist(e, e->anchor);
     say(e, "(resposta interrompida durante uma ferramenta: a mensagem saiu da conversa)");
 }
 
 /* The first reply to a user message. If any call in it does not fit the
- * message, the whole reply is rolled back (the KV cache is overwritten from
- * `start`, so the history never holds a call without its result). Then, when
- * the message clearly needs one tool, that call is opened for the model;
- * otherwise, or if that call does not fit either, the model answers again with
- * the tools banned. */
+ * message, the whole reply is rolled back to the anchor (the history never
+ * holds a call without its result). Then, when the message clearly needs one
+ * tool, that call is opened for the model; otherwise, or if that call does not
+ * fit either, the model answers again with the tools banned. */
 static void first_reply(Engine *e, Calls *calls, uint32_t len) {
     const unsigned char *text = (const unsigned char *)e->message;
-    uint32_t start = e->pos, n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
+    uint32_t n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
     offer_tools(e, e->tools && tools_relevant(e->message));
     assistant_turn(e, n, calls, NULL, 0);
     if (e->stopped) {
-        drop_stopped_call(e, calls, start);
+        drop_stopped_call(e, calls);
         return;
     }
     if (calls->count ? all_grounded(e, calls) : (!e->tools || !chosen_tool(e->message))) return;
-    e->pos = start;
+    trim_hist(e, e->anchor);
     if (forced_reply(e, calls, len)) {
         if (e->stopped) {
-            drop_stopped_call(e, calls, start);
+            drop_stopped_call(e, calls);
             return;
         }
         if (calls->count && all_grounded(e, calls)) return;
-        e->pos = start;
+        trim_hist(e, e->anchor);
     }
     offer_tools(e, 0);
     n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
@@ -321,35 +398,26 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
 
 /* One tool round: run the calls, then the model answers with the tools banned
  * (a 0.5B model chains calls badly). Returns 0 when the results do not fit. */
-static int tool_round(Engine *e, Calls *calls, uint32_t start) {
+static int tool_round(Engine *e, Calls *calls) {
     uint32_t n;
     if (!calls->count) return 1;
-    if (e->model->c.gemma3) e->pos = start;
+    if (e->model->c.gemma3) trim_hist(e, e->anchor);
     n = tool_results(e, calls);
-    if (!fits(e, n)) return 0;
+    if (!ensure_room(e, n)) return 0;
     offer_tools(e, 0);
     assistant_turn(e, n, calls, NULL, 0);
     return 1;
 }
 
-/* One user message: the reply and its tool round. When a tool result does not
- * fit, the conversation restarts from the system prompt and the message is
- * answered again, once. */
+/* One user message: the reply and its tool round. A tool result that still
+ * does not fit after the older turns are dropped leaves the history without
+ * that attempt. */
 static void answer(Engine *e, uint32_t len) {
     Calls calls;
-    uint32_t start = e->pos;
-    int fresh = start == e->system_len;
     first_reply(e, &calls, len);
-    if (e->stopped || tool_round(e, &calls, start)) return;
-    if (!fresh) {
-        e->pos = e->system_len;
-        say(e, "(contexto cheio: conversa reiniciada)");
-        first_reply(e, &calls, len);
-        if (e->stopped || tool_round(e, &calls, e->system_len)) return;
-    }
-    /* Do not leave a call without its result in the history. */
-    e->pos = e->system_len;
-    say(e, "(o resultado da ferramenta não cabe no contexto: conversa reiniciada; aumente --context)");
+    if (e->stopped || tool_round(e, &calls)) return;
+    trim_hist(e, e->anchor);
+    say(e, "(o resultado da ferramenta não cabe no contexto; aumente --context)");
 }
 
 const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t context, uint32_t *ids,
@@ -369,30 +437,228 @@ const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t con
     return text;
 }
 
+/* Bump when a stored system-prompt prefix would no longer match a fresh prefill. */
+#define SYSTEM_KV_EPOCH "smkv1"
+#define CACHE_PATH 4096u
+
+static void hash_u32(Sha256 *s, uint32_t x) {
+    unsigned char b[4];
+    b[0] = (unsigned char)x;
+    b[1] = (unsigned char)(x >> 8);
+    b[2] = (unsigned char)(x >> 16);
+    b[3] = (unsigned char)(x >> 24);
+    sha256_update(s, b, 4);
+}
+
+static void hash_mem(Sha256 *s, const void *p, size_t n) { sha256_update(s, p, n); }
+
+static void to_hex(const unsigned char d[32], char out[65]) {
+    static const char h[] = "0123456789abcdef";
+    uint32_t i;
+    for (i = 0; i < 32; ++i) {
+        out[2 * i] = h[d[i] >> 4];
+        out[2 * i + 1] = h[d[i] & 15];
+    }
+    out[64] = 0;
+}
+
+static int write_u32(FILE *f, uint32_t x) {
+    unsigned char b[4] = {(unsigned char)x, (unsigned char)(x >> 8), (unsigned char)(x >> 16), (unsigned char)(x >> 24)};
+    return fwrite(b, 1, 4, f) == 4;
+}
+
+static int read_u32(FILE *f, uint32_t *x) {
+    unsigned char b[4];
+    if (fread(b, 1, 4, f) != 4) return 0;
+    *x = (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
+    return 1;
+}
+
+/* 0 when the cache is off or the directory cannot be created. WebAssembly has
+ * no environment in the browser host: calling getenv would pull WASI's
+ * environ init, which exits if environ_sizes_get is missing. */
+static int kv_directory(char *buf, size_t cap) {
+#if defined(__wasm__)
+    (void)buf;
+    (void)cap;
+    return 0;
+#else
+    const char *env = getenv("SMOLMOE_KV_CACHE");
+    size_t n;
+    if (env && env[0] == '0' && !env[1]) return 0;
+    if (env && env[0]) {
+        if (strlen(env) + 1 > cap) return 0;
+        memcpy(buf, env, strlen(env) + 1);
+        return ensure_directory(buf);
+    }
+    if (!user_cache_dir(buf, cap)) return 0;
+    n = strlen(buf);
+    if (n + 9 >= cap) return 0;
+    memcpy(buf + n, "/smolmoe", 9);
+    return ensure_directory(buf);
+#endif
+}
+
+static int system_kv_key(const Engine *e, const uint32_t *ids, uint32_t n, unsigned char out[32]) {
+    const Config *c = &e->model->c;
+    const Model *m = e->model;
+    Sha256 s;
+    unsigned char dtype = (unsigned char)m->kv_f16;
+    uint32_t i;
+    if (!m->checkpoint || m->checkpoint_bytes > SIZE_MAX) return 0;
+    sha256_init(&s);
+    sha256_update(&s, SYSTEM_KV_EPOCH, sizeof(SYSTEM_KV_EPOCH) - 1);
+    sha256_update(&s, SMOLMOE_VERSION, strlen(SMOLMOE_VERSION));
+    sha256_update(&s, &dtype, 1);
+    hash_u32(&s, c->dim);
+    hash_u32(&s, c->hidden);
+    hash_u32(&s, c->layers);
+    hash_u32(&s, c->heads);
+    hash_u32(&s, c->kv_heads);
+    hash_u32(&s, c->experts);
+    hash_u32(&s, c->top_k);
+    hash_u32(&s, c->vocab);
+    hash_u32(&s, c->shared);
+    hash_u32(&s, c->qkv_bias);
+    hash_u32(&s, c->gemma3);
+    hash_u32(&s, c->head_dim);
+    hash_u32(&s, c->rotary_dim);
+    hash_u32(&s, c->sliding_window);
+    hash_mem(&s, &c->eps, sizeof(c->eps));
+    hash_mem(&s, &c->theta, sizeof(c->theta));
+    hash_mem(&s, &c->local_theta, sizeof(c->local_theta));
+    hash_mem(&s, &c->rope_factor, sizeof(c->rope_factor));
+    hash_u32(&s, n);
+    for (i = 0; i < n; ++i) hash_u32(&s, ids[i]);
+    sha256_update(&s, m->checkpoint, (size_t)m->checkpoint_bytes);
+    sha256_final(&s, out);
+    return 1;
+}
+
+static void hash_prefix(Model *m, uint32_t ntok, Sha256 *s) {
+    uint32_t layer;
+    size_t bytes = mul_size(mul_size(ntok, m->kv_dim), m->kv_f16 ? 2u : 4u);
+    for (layer = 0; layer < m->c.layers; ++layer) {
+        sha256_update(s, model_kv_layer(m, layer, 0), bytes);
+        sha256_update(s, model_kv_layer(m, layer, 1), bytes);
+    }
+}
+
+static const unsigned char KV_MAGIC[8] = {'S', 'M', 'K', 'V', 'C', '1', 0, 1};
+
+/* Loads positions [0, n) when the file matches. A short or corrupt file leaves
+ * those positions dirty; the caller prefills them. Returns 1 on a hit. */
+static int load_system_kv(Engine *e, const char *path, uint32_t n) {
+    Model *m = e->model;
+    unsigned char got[32], expect[32], magic[8];
+    uint32_t kn, layers, kv_dim, elem, layer;
+    size_t bytes;
+    Sha256 s;
+    FILE *f;
+    int ok = 0;
+    f = open_file(path, "rb");
+    if (!f) return 0;
+    if (fread(magic, 1, 8, f) != 8 || memcmp(magic, KV_MAGIC, 8) || !read_u32(f, &kn) || !read_u32(f, &layers) ||
+        !read_u32(f, &kv_dim) || !read_u32(f, &elem))
+        goto done;
+    if (kn != n || layers != m->c.layers || kv_dim != m->kv_dim || elem != (m->kv_f16 ? 2u : 4u)) goto done;
+    bytes = mul_size(mul_size(n, m->kv_dim), elem);
+    for (layer = 0; layer < layers; ++layer) {
+        if (fread(model_kv_layer(m, layer, 0), 1, bytes, f) != bytes ||
+            fread(model_kv_layer(m, layer, 1), 1, bytes, f) != bytes)
+            goto done;
+    }
+    if (fread(got, 1, 32, f) != 32) goto done;
+    sha256_init(&s);
+    hash_prefix(m, n, &s);
+    sha256_final(&s, expect);
+    ok = memcmp(got, expect, 32) == 0;
+done:
+    fclose(f);
+    return ok;
+}
+
+static void save_system_kv(Engine *e, const char *dir, const unsigned char key[32], uint32_t n) {
+    Model *m = e->model;
+    char final_path[CACHE_PATH], tmp[CACHE_PATH], hex[65];
+    unsigned char digest[32];
+    uint32_t layer;
+    size_t bytes;
+    Sha256 s;
+    FILE *f;
+    int wrote, npath;
+    to_hex(key, hex);
+    npath = snprintf(final_path, sizeof(final_path), "%s/%s", dir, hex);
+    if (npath < 0 || npath >= (int)sizeof(final_path)) return;
+    npath = snprintf(tmp, sizeof(tmp), "%s.%u.tmp", final_path, process_id());
+    if (npath < 0 || npath >= (int)sizeof(tmp)) return;
+    f = open_file(tmp, "wb");
+    if (!f) return;
+    bytes = mul_size(mul_size(n, m->kv_dim), m->kv_f16 ? 2u : 4u);
+    wrote = fwrite(KV_MAGIC, 1, 8, f) == 8 && write_u32(f, n) && write_u32(f, m->c.layers) && write_u32(f, m->kv_dim) &&
+            write_u32(f, m->kv_f16 ? 2u : 4u);
+    for (layer = 0; wrote && layer < m->c.layers; ++layer)
+        wrote = fwrite(model_kv_layer(m, layer, 0), 1, bytes, f) == bytes &&
+                fwrite(model_kv_layer(m, layer, 1), 1, bytes, f) == bytes;
+    sha256_init(&s);
+    hash_prefix(m, n, &s);
+    sha256_final(&s, digest);
+    wrote = wrote && fwrite(digest, 1, 32, f) == 32;
+    if (fclose(f) || !wrote) {
+        remove(tmp);
+        return;
+    }
+    if (!replace_file(tmp, final_path)) remove(tmp);
+}
+
 void engine_start(Engine *e) {
     const char *tools_hdr = e->model->c.gemma3 ? strstr(e->system, "\n\n# Tools") : NULL;
     uint32_t sys_len = tools_hdr ? (uint32_t)(tools_hdr - e->system) : (uint32_t)strlen(e->system);
     uint32_t n = tokenizer_chat_turn(e->tok, "system", (const unsigned char *)e->system, sys_len, 0, e->ids);
+    char dir[CACHE_PATH];
+    unsigned char key[32];
+    int cached = kv_directory(dir, sizeof(dir));
+    int keyed = 0;
     double t0;
+    if (!e->mem) die("internal error: engine has no heap");
     memset(&e->stats, 0, sizeof(e->stats));
+    if (!e->hist) {
+        e->hist_cap = e->model->context;
+        e->hist = (uint32_t *)mem_alloc(e->mem, e->hist_cap, sizeof(uint32_t));
+        e->turns = (uint32_t *)mem_alloc(e->mem, e->hist_cap, sizeof(uint32_t));
+    }
+    e->hist_len = e->nturns = e->anchor = 0;
     if (n + CLOSE_RESERVE + 16 > e->model->context) die("the system prompt does not fit in --context");
-    t0 = now_seconds();
-    model_prefill(e->model, e->ids, n, 0, 0);
-    e->stats.prefill_seconds = now_seconds() - t0;
-    e->stats.prompt_tokens = e->system_len = e->pos = n;
+    keyed = cached && system_kv_key(e, e->ids, n, key);
+    if (keyed) {
+        char path[CACHE_PATH], hex[65];
+        int npath;
+        to_hex(key, hex);
+        npath = snprintf(path, sizeof(path), "%s/%s", dir, hex);
+        if (npath > 0 && npath < (int)sizeof(path) && load_system_kv(e, path, n)) e->stats.system_kv = 2;
+    }
+    if (e->stats.system_kv != 2) {
+        t0 = now_seconds();
+        model_prefill(e->model, e->ids, n, 0, 0);
+        e->stats.prefill_seconds = now_seconds() - t0;
+        e->stats.prompt_tokens = n;
+        if (keyed) {
+            e->stats.system_kv = 1;
+            save_system_kv(e, dir, key, n);
+        }
+    }
+    e->system_len = e->pos = n;
     e->message = NULL;
 }
 
 int engine_send(Engine *e, const char *text, uint32_t len) {
     uint32_t n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)text, len, 1, e->ids);
     e->stopped = 0;
-    if (!fits(e, n)) {
-        if (e->system_len + n + e->max_reply + CLOSE_RESERVE > e->model->context) {
-            say(e, "(mensagem longa demais para o contexto; aumente --context)");
-            return 0;
-        }
-        e->pos = e->system_len;
-        say(e, "(contexto cheio: conversa reiniciada)");
+    /* Anything already committed may leave; the message about to be added may not. */
+    e->anchor = e->hist_len;
+    if (!ensure_room(e, n)) {
+        say(e, "(mensagem longa demais para o contexto; aumente --context)");
+        return 0;
     }
     e->message = text;
     answer(e, len);
@@ -403,5 +669,8 @@ int engine_send(Engine *e, const char *text, uint32_t len) {
 
 void engine_reset(Engine *e) {
     e->pos = e->system_len;
+    e->hist_len = 0;
+    e->nturns = 0;
+    e->anchor = 0;
     e->stopped = 0;
 }
