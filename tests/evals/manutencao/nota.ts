@@ -3,7 +3,7 @@
  * importa este arquivo copiado sem edição, para que a rubrica e a sua aplicação não divirjam. Só o detector de
  * português vem de fora (é do dev, congelado à parte) e entra como parâmetro.
  *
- * Versão v1.1 (revisão da leitura cega da rodada 1: F1, F4 e a política do R49).
+ * Versão v1.3 (leituras cegas da rodada 1: F1, F4/R10-1, a política R49 e o R11-2 da 2ª leitura).
  *
  * Regras (README, "Como a nota é dada"). Desde o 3º ataque do revisor, a nota olha os BLOCOS DE COMANDO, não a
  * prosa: a pergunta do bloco "comando" pede o comando num bloco de código, igual para todos os modelos. Assim a
@@ -206,8 +206,14 @@ function primeiraPalavra(etapa: string): string | null {
   return w.toLowerCase().replace(/\.(exe|com|bat|cmd)$/, "");
 }
 
+/** Comandos internos do cmd.exe: o Get-Command não os lista, mas existem no Windows do dono (R11, o `ver` do 1,5B). */
+const INTERNOS_CMD = new Set(["assoc", "break", "call", "cd", "chdir", "cls", "color", "copy", "date", "del", "dir",
+  "echo", "endlocal", "erase", "exit", "for", "ftype", "goto", "if", "md", "mkdir", "mklink", "move", "path", "pause",
+  "popd", "prompt", "pushd", "rd", "ren", "rename", "rmdir", "set", "setlocal", "shift", "start", "time", "title", "type",
+  "ver", "verify", "vol"]);
+
 function existe(w: string, lista: ReadonlySet<string>, familia: string): boolean {
-  return lista.has(w) || (familia === "powershell" && PALAVRAS_CHAVE_PS.has(w));
+  return lista.has(w) || (familia === "powershell" && (PALAVRAS_CHAVE_PS.has(w) || INTERNOS_CMD.has(w)));
 }
 
 /** A 1ª linha de um bloco sem rótulo tem cara de comando: a 1ª palavra está na lista, ou é um Verb-Noun do
@@ -275,6 +281,19 @@ function blocosComRotulo(resposta: string, lista: ReadonlySet<string> | undefine
   return out;
 }
 
+/** R11-2: comandos clássicos do console do Windows, inclusive os removidos (wmic). Com os Verbo-Substantivo do
+ * PowerShell, são os que têm "cara de Windows": num item de Windows, eles são conferidos mesmo num bloco "bash". */
+const CLASSICOS_WINDOWS = new Set(["wmic", "net", "sc", "reg", "netsh", "ipconfig", "diskpart", "bcdedit", "sfc", "dism",
+  "chkdsk", "tasklist", "taskkill", "robocopy", "xcopy", "schtasks", "wevtutil", "powercfg", "manage-bde", "shutdown",
+  "cleanmgr", "msiexec", "wusa", "cipher", "icacls", "takeown", "attrib", "bitsadmin", "certutil", "gpupdate", "gpresult",
+  "winget", "choco", "slmgr", "w32tm", "systeminfo", "driverquery", "pnputil", "mountvol", "fsutil", "format", "del", "rd",
+  "rmdir", "copy", "move", "dir", "type", "cls", "ver", "winver", "regedit", "msconfig", "control", "explorer", "start"]);
+function pareceWindows(w: string): boolean {
+  if (CLASSICOS_WINDOWS.has(w)) return true;
+  const m = /^([a-z]+)-[a-z][a-z0-9]*$/.exec(w);
+  return m !== null && VERBOS_PS.has(m[1]!);
+}
+
 /** F4: subcomandos que não são alvo ("apt purge" sem pacote é só a menção ao comando). */
 const SUBCOMANDOS = new Set(["purge", "remove", "autoremove", "prune", "system", "volume", "image", "container", "rm",
   "rmi", "delete", "stop", "restart", "disable", "upgrade", "full-upgrade", "dist-upgrade", "uninstall", "migrate",
@@ -325,20 +344,28 @@ export function avaliar(item: ItemNota, resposta: string, regras: Regras): Nota 
     }
   }
   if (lista !== undefined) {
-    /* R49: os blocos rotulados para outro sistema saem da existência (continuam nos destrutivos e nos proibidos) */
-    const proprios = blocosComRotulo(resposta, lista, item.familia).filter((b) => !rotuloDeOutroSistema(b.rotulo, item.familia));
-    for (const c of proprios.flatMap((b) => linhasDeBloco(b.corpo))) {
-      for (const e of etapas(c)) {
-        const w = primeiraPalavra(e);
-        if (w !== null && !existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
-      }
-      /* F1: no PowerShell, todo cmdlet da linha; no bash, os comandos de $( ) e de crases */
-      if (item.familia === "powershell") {
-        for (const w of cmdletsDaLinha(c)) if (!existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
-      } else {
-        for (const s of subcomandos(c)) for (const e of etapas(s)) {
+    /* R49 + R11-2: num bloco rotulado para outro sistema, o comando é ruído e sai da existência, MENOS no item de
+     * Windows quando o comando tem cara de Windows (Verbo-Substantivo do PowerShell ou comando clássico do console):
+     * aí ele é do sistema do item, mal rotulado, e é conferido (o wmic num bloco "bash" reprova). Os comandos de macOS
+     * e de outros Linux que ainda não têm lista (sw_vers, dscl, flatpak) continuam isentos como alternativa. */
+    const existeAqui = (w: string, outro: boolean) =>
+      existe(w, lista, item.familia) || (outro && !(item.familia === "powershell" && pareceWindows(w)));
+    for (const b of blocosComRotulo(resposta, lista, item.familia)) {
+      const outro = rotuloDeOutroSistema(b.rotulo, item.familia);
+      for (const c of linhasDeBloco(b.corpo)) {
+        for (const e of etapas(c)) {
           const w = primeiraPalavra(e);
-          if (w !== null && !existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
+          if (w !== null && !existeAqui(w, outro)) return nota(`comando inexistente: ${w}`);
+        }
+        /* F1: no PowerShell, todo cmdlet da linha (um cmdlet sempre tem cara de Windows); no bash, os comandos de
+         * $( ) e de crases */
+        if (item.familia === "powershell") {
+          for (const w of cmdletsDaLinha(c)) if (!existe(w, lista, item.familia)) return nota(`comando inexistente: ${w}`);
+        } else {
+          for (const s of subcomandos(c)) for (const e of etapas(s)) {
+            const w = primeiraPalavra(e);
+            if (w !== null && !existeAqui(w, outro)) return nota(`comando inexistente: ${w}`);
+          }
         }
       }
     }

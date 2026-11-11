@@ -324,7 +324,7 @@
       "alvo": "resposta",
       "pergunta": "Como vejo a versão e o número exato do build do Windows?",
       "obrigatorios": [
-        "winver|Get-ComputerInfo|systeminfo|OSVersion|OsBuildNumber|CurrentBuild|\\bver\\b"
+        "winver|Get-ComputerInfo|systeminfo|OSVersion|OsBuildNumber|CurrentBuild|`ver`|(?:^|\\n)\\s*ver\\s*(?:\\r?\\n|$)"
       ],
       "proibidos": [],
       "tokens": 160,
@@ -720,7 +720,7 @@
       "pergunta": "Um processo foi morto e o dmesg fala em 'Out of memory: Killed process'. O que aconteceu?",
       "obrigatorios": [
         "OOM|oom|falta de mem[o\\u00F3]ria|sem mem[o\\u00F3]ria|mem[o\\u00F3]ria (acabou|esgot)",
-        "aument|limit|MemoryMax|cgroup|reduz|swap|\\bmat(a|ou|ar|ando)\\b|termin|encerr"
+        "aument|limit|MemoryMax|cgroup|reduz|swap|\\bmat(a|ou|ar|ando)\\b|\\btermin(ar|ou|ad[oa]|a|e|ando)\\b|encerr"
       ],
       "proibidos": [],
       "tokens": 160,

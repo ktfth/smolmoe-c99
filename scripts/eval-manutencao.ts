@@ -52,9 +52,9 @@ export interface Conjunto {
 }
 export const CONJUNTOS: readonly Conjunto[] = [
   { itens: "manutencao.json", manifesto: "MANIFEST.sha256", nota: "nota.ts",
-    sha: "7290a81a19e8310e978c14d6e3c57aad6a10d34670f73e8f68c3616ddd9cb755" },
+    sha: "ae2d97983c27c3b10eaf5a60af23b3e93bd4a3f6c5e4b82250bb9fe7b98eece5" },
   { itens: "duvidas.json", manifesto: "MANIFEST-duvidas.sha256", nota: "nota-duvidas.ts",
-    sha: "fd20a5e8aa6485fdc809320793cbdf038c9a3cb675115fe6451e75060d8671c4" },
+    sha: "41dabf4b6f7b3e3afedcfa57c33e1347af40e30e3e01b3fdef3e7980e4020562" },
 ];
 
 export type Avaliar = (item: ItemNota, resposta: string, regras: Regras) => Nota;

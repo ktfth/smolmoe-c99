@@ -785,12 +785,33 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
   prosa só conta com alvo), mais as políticas: bloco de outro sistema fica fora da conferência de existência; um
   placeholder no lugar do nome dado continua errado. Antes de congelar, o revisor restringiu o F4 à remoção de pacote
   (R10-1): sem isso, `docker system prune -a`, `docker volume prune` e `Clear-RecycleBin` citados na prosa passavam
-  sem aviso. **Nenhuma pergunta mudou.** Shas finais: `MANIFEST.sha256` (v1.2)
+  sem aviso. **Nenhuma pergunta mudou.** Shas da v1.2: `MANIFEST.sha256`
   `7290a81a19e8310e978c14d6e3c57aad6a10d34670f73e8f68c3616ddd9cb755` e `MANIFEST-duvidas.sha256`
   `fd20a5e8aa6485fdc809320793cbdf038c9a3cb675115fe6451e75060d8671c4` (os intermediários `9e68430a` e `e5bd4aff`
-  ficaram superados). Todas as respostas gravadas, inclusive as do Phi, recebem a nota de novo com esses shas
-  (`--renotar`, sem rodar os modelos), e a decisão usa só eles. Uma nova leitura cega, com outra semente e com o Phi,
-  valida a revisão.
+  ficaram superados). Todas as respostas gravadas, inclusive as do Phi, receberam a nota de novo com esses shas
+  (`--renotar`, sem rodar os modelos). Uma nova leitura cega, com outra semente e com o Phi, valida a revisão.
+- **Correção da 2ª leitura cega (v1.3), 2026-11-10.** A leitura cega da v1.2, com outra semente e com o Phi, achou
+  dois furos na mesma regra da v1.2, sem mudar o gatilho nem abrir revisão nova:
+  - **R11-1:** o `ver` do cmd só conta como código (em crase ou sozinho na linha), não como palavra da prosa; o
+    "terminar" da prosa passa a casar só nas formas `termin(ar|ou|ad[oa]|a|e|ando)`. Os comandos internos do cmd
+    entram na lista da família powershell.
+  - **R11-2, forma da revisão 30, que caiu:** "o comando de um bloco de outro sistema só sai da existência se estiver
+    na lista de alguma família". Só existem as listas do Windows e do Ubuntu do WSL, então ela derrubava 9 respostas
+    certas do Phi (dúvidas de 41/90 para 32/90; todas por alternativa de macOS ou de outro Linux citada à parte:
+    `smartctl`, `spctl`, `dislocker`, `systemd-resolve`, `flatpak`, `dscl`, `sw_vers`, `nautilus`, `debsums`, nos
+    itens win-008, 009, 010, 014, 017, 022, 024, 031 e 036). Os outros modelos não mudavam.
+  - **R11-2, forma aplicada:** num bloco rotulado para outro sistema, o comando continua fora da existência, menos no
+    item de Windows quando o comando tem cara de Windows (Verbo-Substantivo do PowerShell ou comando clássico do
+    console): aí é do sistema do item, mal rotulado, e é conferido (o `wmic` num bloco `bash` reprova). Os comandos
+    de macOS e de Linux sem lista continuam isentos como alternativa.
+  - **Viradas da v1.2 para a v1.3** nas 600 respostas, todas no win-024: 0,5B −1, Gemma −1, 1,5B +1, Phi 0. Dúvidas:
+    0,5B 9/90, 1,5B 35/90, Gemma 15/90, Phi 41/90 (35,7% a 55,8%). Phi contra 1,5B, pareado só nas dúvidas: 16 a 10,
+    p = 0,1635, sem diferença pela regra.
+  - **Nenhuma pergunta mudou.** Shas finais: `MANIFEST.sha256` (v1.3)
+    `ae2d97983c27c3b10eaf5a60af23b3e93bd4a3f6c5e4b82250bb9fe7b98eece5` e `MANIFEST-duvidas.sha256`
+    `41dabf4b6f7b3e3afedcfa57c33e1347af40e30e3e01b3fdef3e7980e4020562`, copiados sem editar da pasta do adversário
+    depois do OK do revisor. A decisão usa só eles (`build/rodada-1-v13.jsonl`). As 9 respostas do Phi acima vão
+    para a 3ª leitura do revisor.
 - **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
   log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]
