@@ -4,11 +4,16 @@
  * Activations are quantized per 32-value block to {f32 scale, int8 q[32]}.
  * A block's integer dot product is exact, and the float accumulation follows
  * a fixed 8-lane order that the scalar and SIMD kernels reproduce bit for bit.
- * Results therefore do not depend on the backend, thread count or batch size. */
+ * Results therefore do not depend on the backend, thread count or batch size.
+ *
+ * kernels_set_fast() keeps those integer lanes but updates each one with a
+ * single FMA. The final reduction is unchanged, so fast backends still match
+ * each other; they do not match the default mul+add kernels. */
 #ifndef SMOLMOE_KERNELS_H
 #define SMOLMOE_KERNELS_H
 
 #include <float.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* The bit-identity contract needs plain binary32 evaluation (x87 extended
@@ -23,8 +28,8 @@
 #  define SM_HAVE_AVX2 1
 #endif
 
-/* NEON (Advanced SIMD) is part of every AArch64 CPU: no runtime check. The Q5
- * unpacking assumes little-endian lanes, as every AArch64 OS we target uses. */
+/* Baseline NEON is part of every AArch64 CPU. SDOT and i8mm are picked at
+ * runtime. Q5 unpacking assumes little-endian lanes, as every target OS does. */
 #if !defined(SM_NO_SIMD) && defined(__aarch64__) && defined(__ARM_NEON) && \
     (!defined(__BYTE_ORDER__) || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 #  define SM_HAVE_NEON 1
@@ -47,9 +52,36 @@ typedef float (*DotQ8)(const unsigned char *w, const float *xd, const int8_t *xq
  * and interleaving 4 independent accumulators hides FP add latency. */
 typedef void (*DotQ8x4)(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                         uint32_t stride, float out[4]);
+/* Four weight rows spaced `row_bytes` apart, one activation. out[i] equals
+ * dot_q8() of row i. Four independent accumulators hide the lane-add latency
+ * of a single-token decode. */
+typedef void (*DotQ8R4)(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq,
+                        uint32_t nb, float out[4]);
+/* nrows weight rows by ntok activation rows. out[token * stride + row] equals
+ * the dot of that pair. `scratch` is gemm_scratch_bytes(nb) bytes, or NULL to
+ * skip the repack (still exact, one streaming pass). */
+typedef void (*GemmQ8)(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq,
+                       uint32_t nrows, uint32_t ntok, uint32_t nb, float *out, size_t stride,
+                       unsigned char *scratch);
 
 extern DotQ8 dot_q8, dot_q5;
 extern DotQ8x4 dot_q8_x4, dot_q5_x4;
+extern DotQ8R4 dot_q8_r4, dot_q5_r4;
+extern GemmQ8 gemm_q8, gemm_q5;
+
+/* Bytes of scratch one matrix tile needs for `nb` blocks (two repacked rows). */
+size_t gemm_scratch_bytes(uint32_t nb);
+
+/* Default is the bit-exact mul+add contract. --fast (call before
+ * kernels_select, or again afterwards) uses a lane-wise FMA instead. */
+void kernels_set_fast(int fast);
+int kernels_fast(void);
+
+/* Nonzero when this process can run the matching kernel. */
+int kernels_cpu_avxvnni(void);
+int kernels_cpu_avx512vnni(void);
+int kernels_cpu_dotprod(void);
+int kernels_cpu_i8mm(void);
 
 /* Selects the fastest supported backend; returns its name. */
 const char *kernels_select(int force_scalar);
@@ -60,6 +92,43 @@ void dot_q8_scalar_x4(const unsigned char *w, const float *xd, const int8_t *xq,
 float dot_q5_scalar(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 void dot_q5_scalar_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                       uint32_t stride, float out[4]);
+void dot_q8_scalar_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                      float out[4]);
+void dot_q5_scalar_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                      float out[4]);
+void gemm_q8_scalar(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                    uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+void gemm_q5_scalar(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                    uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+float dot_q8_scalar_fast(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
+void dot_q8_scalar_fast_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,
+                           float out[4]);
+void dot_q8_scalar_fast_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                           float out[4]);
+float dot_q5_scalar_fast(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
+void dot_q5_scalar_fast_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,
+                           float out[4]);
+void dot_q5_scalar_fast_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                           float out[4]);
+void gemm_q8_scalar_fast(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                         uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+void gemm_q5_scalar_fast(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                         uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+#define SM_DECLARE_KERNEL(sfx)                                                                                      \
+    float dot_q8_##sfx(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);                      \
+    void dot_q8_##sfx##_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,  \
+                           float out[4]);                                                                            \
+    void dot_q8_##sfx##_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb, \
+                           float out[4]);                                                                            \
+    float dot_q5_##sfx(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);                      \
+    void dot_q5_##sfx##_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,  \
+                           float out[4]);                                                                            \
+    void dot_q5_##sfx##_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb, \
+                           float out[4]);                                                                            \
+    void gemm_q8_##sfx(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,  \
+                       uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);               \
+    void gemm_q5_##sfx(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,  \
+                       uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
 #if defined(SM_HAVE_AVX2)
 float dot_q8_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 void dot_q8_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
@@ -67,6 +136,19 @@ void dot_q8_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
 float dot_q5_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 void dot_q5_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                     uint32_t stride, float out[4]);
+void dot_q8_avx2_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                    float out[4]);
+void dot_q5_avx2_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                    float out[4]);
+void gemm_q8_avx2(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                  uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+void gemm_q5_avx2(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                  uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+SM_DECLARE_KERNEL(avx2_fast)
+SM_DECLARE_KERNEL(avxvnni)
+SM_DECLARE_KERNEL(avxvnni_fast)
+SM_DECLARE_KERNEL(avx512vnni)
+SM_DECLARE_KERNEL(avx512vnni_fast)
 #endif
 #if defined(SM_HAVE_NEON)
 float dot_q8_neon(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
@@ -75,6 +157,19 @@ void dot_q8_neon_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
 float dot_q5_neon(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);
 void dot_q5_neon_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                     uint32_t stride, float out[4]);
+void dot_q8_neon_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                    float out[4]);
+void dot_q5_neon_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                    float out[4]);
+void gemm_q8_neon(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                  uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+void gemm_q5_neon(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                  uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch);
+SM_DECLARE_KERNEL(neon_fast)
+SM_DECLARE_KERNEL(neon_dotprod)
+SM_DECLARE_KERNEL(neon_dotprod_fast)
+SM_DECLARE_KERNEL(neon_i8mm)
+SM_DECLARE_KERNEL(neon_i8mm_fast)
 #endif
 #if defined(SM_HAVE_WASM_SIMD)
 float dot_q8_wasm(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb);

@@ -60,6 +60,9 @@ typedef struct Model {
     uint64_t expert_calls;
     int profiling;
     double phase_seconds[MODEL_PHASES];
+    /* Per-thread scratch for the prefill repack (gemm_scratch_bytes). */
+    unsigned char *pack;
+    size_t pack_stride;
 } Model;
 
 const char *model_phase_name(ModelPhase p);

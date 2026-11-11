@@ -17,7 +17,11 @@
 
 DotQ8 dot_q8 = dot_q8_scalar, dot_q5 = dot_q5_scalar;
 DotQ8x4 dot_q8_x4 = dot_q8_scalar_x4, dot_q5_x4 = dot_q5_scalar_x4;
+DotQ8R4 dot_q8_r4 = dot_q8_scalar_r4, dot_q5_r4 = dot_q5_scalar_r4;
+GemmQ8 gemm_q8 = gemm_q8_scalar, gemm_q5 = gemm_q5_scalar;
 QuantizeQ8 quantize_q8 = quantize_q8_scalar;
+
+static int want_fast, did_select, forced_scalar;
 
 static uint16_t rd_u16(const unsigned char *p) {
     return (uint16_t)(p[0] | p[1] << 8);
@@ -81,6 +85,126 @@ void dot_q5_scalar_x4(const unsigned char *w, const float *xd, const int8_t *xq,
     uint32_t t;
     for (t = 0; t < 4; ++t)
         out[t] = dot_q5_scalar(w, xd + (size_t)t * stride, xq + (size_t)t * stride * QK, nb);
+}
+
+void dot_q8_scalar_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                      float out[4]) {
+    uint32_t i;
+    for (i = 0; i < 4; ++i) out[i] = dot_q8_scalar(w + (size_t)i * row_bytes, xd, xq, nb);
+}
+
+void dot_q5_scalar_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                      float out[4]) {
+    uint32_t i;
+    for (i = 0; i < 4; ++i) out[i] = dot_q5_scalar(w + (size_t)i * row_bytes, xd, xq, nb);
+}
+
+/* Fast contract: the same eight lanes and the same final reduction as the
+ * exact kernel, but each lane update is one fmaf instead of a mul and an add. */
+static float q8_fast_sum(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    float acc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t b, lane, k;
+    for (b = 0; b < nb; ++b, w += Q8_BLOCK_BYTES, xq += QK) {
+        const int8_t *wq = (const int8_t *)(w + 4);
+        float d = rd_f32(w) * xd[b];
+        for (lane = 0; lane < 8; ++lane) {
+            int32_t sum = 0;
+            for (k = 0; k < 4; ++k) sum += (int32_t)wq[4 * lane + k] * (int32_t)xq[4 * lane + k];
+            acc[lane] = fmaf(d, (float)sum, acc[lane]);
+        }
+    }
+    return reduce8(acc);
+}
+
+static float q5_fast_sum(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    float acc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int8_t wq[QK];
+    uint32_t b, lane, k;
+    for (b = 0; b < nb; ++b, w += Q5_BLOCK_BYTES, xq += QK) {
+        float d;
+        unpack_q5(w + 2, wq);
+        d = f16_to_f32(rd_u16(w)) * xd[b];
+        for (lane = 0; lane < 8; ++lane) {
+            int32_t sum = 0;
+            for (k = 0; k < 4; ++k) sum += (int32_t)wq[4 * lane + k] * (int32_t)xq[4 * lane + k];
+            acc[lane] = fmaf(d, (float)sum, acc[lane]);
+        }
+    }
+    return reduce8(acc);
+}
+
+float dot_q8_scalar_fast(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    return q8_fast_sum(w, xd, xq, nb);
+}
+
+float dot_q5_scalar_fast(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
+    return q5_fast_sum(w, xd, xq, nb);
+}
+
+void dot_q8_scalar_fast_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,
+                           float out[4]) {
+    uint32_t t;
+    for (t = 0; t < 4; ++t)
+        out[t] = q8_fast_sum(w, xd + (size_t)t * stride, xq + (size_t)t * stride * QK, nb);
+}
+
+void dot_q5_scalar_fast_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb, uint32_t stride,
+                           float out[4]) {
+    uint32_t t;
+    for (t = 0; t < 4; ++t)
+        out[t] = q5_fast_sum(w, xd + (size_t)t * stride, xq + (size_t)t * stride * QK, nb);
+}
+
+void dot_q8_scalar_fast_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                           float out[4]) {
+    uint32_t i;
+    for (i = 0; i < 4; ++i) out[i] = q8_fast_sum(w + (size_t)i * row_bytes, xd, xq, nb);
+}
+
+void dot_q5_scalar_fast_r4(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nb,
+                           float out[4]) {
+    uint32_t i;
+    for (i = 0; i < 4; ++i) out[i] = q5_fast_sum(w + (size_t)i * row_bytes, xd, xq, nb);
+}
+
+static void gemm_scalar(DotQ8 dot, DotQ8x4 x4, const unsigned char *w, size_t row_bytes, const float *xd,
+                        const int8_t *xq, uint32_t nrows, uint32_t ntok, uint32_t nb, float *out, size_t stride) {
+    uint32_t r, t, i;
+    if (!nrows || !ntok) return;
+    for (r = 0; r < nrows; ++r) {
+        const unsigned char *row = w + (size_t)r * row_bytes;
+        for (t = 0; t + 4 <= ntok; t += 4) {
+            float y[4];
+            x4(row, xd + (size_t)t * nb, xq + (size_t)t * nb * QK, nb, nb, y);
+            for (i = 0; i < 4; ++i) out[(size_t)(t + i) * stride + r] = y[i];
+        }
+        for (; t < ntok; ++t)
+            out[(size_t)t * stride + r] = dot(row, xd + (size_t)t * nb, xq + (size_t)t * nb * QK, nb);
+    }
+}
+
+void gemm_q8_scalar(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                    uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch) {
+    (void)scratch;
+    gemm_scalar(dot_q8_scalar, dot_q8_scalar_x4, w, row_bytes, xd, xq, nrows, ntok, nb, out, stride);
+}
+
+void gemm_q5_scalar(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                    uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch) {
+    (void)scratch;
+    gemm_scalar(dot_q5_scalar, dot_q5_scalar_x4, w, row_bytes, xd, xq, nrows, ntok, nb, out, stride);
+}
+
+void gemm_q8_scalar_fast(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                         uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch) {
+    (void)scratch;
+    gemm_scalar(dot_q8_scalar_fast, dot_q8_scalar_fast_x4, w, row_bytes, xd, xq, nrows, ntok, nb, out, stride);
+}
+
+void gemm_q5_scalar_fast(const unsigned char *w, size_t row_bytes, const float *xd, const int8_t *xq, uint32_t nrows,
+                         uint32_t ntok, uint32_t nb, float *out, size_t stride, unsigned char *scratch) {
+    (void)scratch;
+    gemm_scalar(dot_q5_scalar_fast, dot_q5_scalar_fast_x4, w, row_bytes, xd, xq, nrows, ntok, nb, out, stride);
 }
 
 #if defined(SM_HAVE_AVX2)
@@ -467,48 +591,288 @@ void dot_q5_wasm_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
 }
 #endif
 
-const char *kernels_select(int force_scalar) {
-    dot_q8 = dot_q8_scalar;
-    dot_q8_x4 = dot_q8_scalar_x4;
-    dot_q5 = dot_q5_scalar;
-    dot_q5_x4 = dot_q5_scalar_x4;
+size_t gemm_scratch_bytes(uint32_t nb) { return (size_t)2 * nb * Q8_BLOCK_BYTES + 64u; }
+
+void kernels_set_fast(int fast) {
+    want_fast = fast ? 1 : 0;
+    if (did_select) kernels_select(forced_scalar);
+}
+
+int kernels_fast(void) { return want_fast; }
+
+int kernels_cpu_avxvnni(void) {
+#if defined(SM_HAVE_AVX2)
+    unsigned int eax, ebx, ecx, edx, max_sub;
+    /* Clang 18 has no "avxvnni" feature string. AVX-VNNI is CPUID.(EAX=7,ECX=1):EAX[4]. */
+    if (!__builtin_cpu_supports("avx2") || !__builtin_cpu_supports("f16c")) return 0;
+    __asm__ volatile("cpuid" : "=a"(max_sub), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+    if (max_sub < 1) return 0;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(1));
+    return (eax & (1u << 4)) != 0;
+#else
+    return 0;
+#endif
+}
+
+int kernels_cpu_avx512vnni(void) {
+#if defined(SM_HAVE_AVX2)
+    return __builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c") && __builtin_cpu_supports("avx512f") &&
+           __builtin_cpu_supports("avx512vl") && __builtin_cpu_supports("avx512vnni");
+#else
+    return 0;
+#endif
+}
+
+#if defined(SM_HAVE_NEON) && defined(__linux__)
+#  include <sys/auxv.h>
+#  ifndef HWCAP_ASIMDDP
+#    define HWCAP_ASIMDDP (1UL << 20)
+#  endif
+#  ifndef HWCAP2_I8MM
+#    define HWCAP2_I8MM (1UL << 13)
+#  endif
+#endif
+#if defined(SM_HAVE_NEON) && defined(__APPLE__)
+#  include <sys/sysctl.h>
+#  include <sys/types.h>
+#endif
+
+#if defined(SM_HAVE_NEON) && defined(_WIN32)
+extern int __stdcall IsProcessorFeaturePresent(unsigned);
+#  define SM_PF_ARM_V82_DP 43u /* PF_ARM_V82_DP_INSTRUCTIONS_AVAILABLE */
+#endif
+
+int kernels_cpu_dotprod(void) {
+#if defined(SM_HAVE_NEON) && defined(__linux__)
+    return (getauxval(AT_HWCAP) & HWCAP_ASIMDDP) != 0;
+#elif defined(SM_HAVE_NEON) && defined(__APPLE__)
+    int v = 0;
+    size_t n = sizeof(v);
+    return sysctlbyname("hw.optional.arm.FEAT_DotProd", &v, &n, NULL, 0) == 0 && v;
+#elif defined(SM_HAVE_NEON) && defined(_WIN32)
+    return IsProcessorFeaturePresent(SM_PF_ARM_V82_DP) != 0;
+#else
+    return 0;
+#endif
+}
+
+int kernels_cpu_i8mm(void) {
+#if defined(SM_HAVE_NEON) && defined(__linux__)
+    return (getauxval(AT_HWCAP2) & HWCAP2_I8MM) != 0;
+#elif defined(SM_HAVE_NEON) && defined(__APPLE__)
+    int v = 0;
+    size_t n = sizeof(v);
+    return sysctlbyname("hw.optional.arm.FEAT_I8MM", &v, &n, NULL, 0) == 0 && v;
+#else
+    return 0;
+#endif
+}
+
+static void select_scalar(void) {
+    if (want_fast) {
+        dot_q8 = dot_q8_scalar_fast;
+        dot_q8_x4 = dot_q8_scalar_fast_x4;
+        dot_q8_r4 = dot_q8_scalar_fast_r4;
+        dot_q5 = dot_q5_scalar_fast;
+        dot_q5_x4 = dot_q5_scalar_fast_x4;
+        dot_q5_r4 = dot_q5_scalar_fast_r4;
+        gemm_q8 = gemm_q8_scalar_fast;
+        gemm_q5 = gemm_q5_scalar_fast;
+    } else {
+        dot_q8 = dot_q8_scalar;
+        dot_q8_x4 = dot_q8_scalar_x4;
+        dot_q8_r4 = dot_q8_scalar_r4;
+        dot_q5 = dot_q5_scalar;
+        dot_q5_x4 = dot_q5_scalar_x4;
+        dot_q5_r4 = dot_q5_scalar_r4;
+        gemm_q8 = gemm_q8_scalar;
+        gemm_q5 = gemm_q5_scalar;
+    }
     quantize_q8 = quantize_q8_scalar;
     vecmath_select(0);
+}
+
+const char *kernels_select(int force_scalar) {
+    const char *name;
+    did_select = 1;
+    forced_scalar = force_scalar;
+    select_scalar();
+    name = want_fast ? "scalar-fast" : "scalar";
+    if (force_scalar) return name;
 #if defined(SM_HAVE_AVX2)
-    /* F16C converts Q5 block scales exactly, matching f16_to_f32(). */
-    if (!force_scalar && __builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
-        dot_q8 = dot_q8_avx2;
-        dot_q8_x4 = dot_q8_avx2_x4;
-        dot_q5 = dot_q5_avx2;
-        dot_q5_x4 = dot_q5_avx2_x4;
+    /* F16C converts Q5 block scales exactly, matching f16_to_f32(). Fast mode
+     * needs FMA; without it the scalar fast chain keeps the contract. */
+    if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+        int fma = __builtin_cpu_supports("fma");
         quantize_q8 = quantize_q8_avx2;
         vecmath_select(1);
-        return "avx2";
+        if (kernels_cpu_avx512vnni()) {
+            if (want_fast && fma) {
+                dot_q8 = dot_q8_avx512vnni_fast;
+                dot_q8_x4 = dot_q8_avx512vnni_fast_x4;
+                dot_q8_r4 = dot_q8_avx512vnni_fast_r4;
+                dot_q5 = dot_q5_avx512vnni_fast;
+                dot_q5_x4 = dot_q5_avx512vnni_fast_x4;
+                dot_q5_r4 = dot_q5_avx512vnni_fast_r4;
+                gemm_q8 = gemm_q8_avx512vnni_fast;
+                gemm_q5 = gemm_q5_avx512vnni_fast;
+                return "avx512vnni-fast";
+            }
+            if (!want_fast) {
+                dot_q8 = dot_q8_avx512vnni;
+                dot_q8_x4 = dot_q8_avx512vnni_x4;
+                dot_q8_r4 = dot_q8_avx512vnni_r4;
+                dot_q5 = dot_q5_avx512vnni;
+                dot_q5_x4 = dot_q5_avx512vnni_x4;
+                dot_q5_r4 = dot_q5_avx512vnni_r4;
+                gemm_q8 = gemm_q8_avx512vnni;
+                gemm_q5 = gemm_q5_avx512vnni;
+                return "avx512vnni";
+            }
+        }
+        if (kernels_cpu_avxvnni()) {
+            if (want_fast && fma) {
+                dot_q8 = dot_q8_avxvnni_fast;
+                dot_q8_x4 = dot_q8_avxvnni_fast_x4;
+                dot_q8_r4 = dot_q8_avxvnni_fast_r4;
+                dot_q5 = dot_q5_avxvnni_fast;
+                dot_q5_x4 = dot_q5_avxvnni_fast_x4;
+                dot_q5_r4 = dot_q5_avxvnni_fast_r4;
+                gemm_q8 = gemm_q8_avxvnni_fast;
+                gemm_q5 = gemm_q5_avxvnni_fast;
+                return "avxvnni-fast";
+            }
+            if (!want_fast) {
+                dot_q8 = dot_q8_avxvnni;
+                dot_q8_x4 = dot_q8_avxvnni_x4;
+                dot_q8_r4 = dot_q8_avxvnni_r4;
+                dot_q5 = dot_q5_avxvnni;
+                dot_q5_x4 = dot_q5_avxvnni_x4;
+                dot_q5_r4 = dot_q5_avxvnni_r4;
+                gemm_q8 = gemm_q8_avxvnni;
+                gemm_q5 = gemm_q5_avxvnni;
+                return "avxvnni";
+            }
+        }
+        if (want_fast && fma) {
+            dot_q8 = dot_q8_avx2_fast;
+            dot_q8_x4 = dot_q8_avx2_fast_x4;
+            dot_q8_r4 = dot_q8_avx2_fast_r4;
+            dot_q5 = dot_q5_avx2_fast;
+            dot_q5_x4 = dot_q5_avx2_fast_x4;
+            dot_q5_r4 = dot_q5_avx2_fast_r4;
+            gemm_q8 = gemm_q8_avx2_fast;
+            gemm_q5 = gemm_q5_avx2_fast;
+            return "avx2-fast";
+        }
+        if (!want_fast) {
+            dot_q8 = dot_q8_avx2;
+            dot_q8_x4 = dot_q8_avx2_x4;
+            dot_q8_r4 = dot_q8_avx2_r4;
+            dot_q5 = dot_q5_avx2;
+            dot_q5_x4 = dot_q5_avx2_x4;
+            dot_q5_r4 = dot_q5_avx2_r4;
+            gemm_q8 = gemm_q8_avx2;
+            gemm_q5 = gemm_q5_avx2;
+            return "avx2";
+        }
     }
 #elif defined(SM_HAVE_NEON)
-    if (!force_scalar) {
-        dot_q8 = dot_q8_neon;
-        dot_q8_x4 = dot_q8_neon_x4;
-        dot_q5 = dot_q5_neon;
-        dot_q5_x4 = dot_q5_neon_x4;
-        quantize_q8 = quantize_q8_neon;
-        vecmath_select(1);
-        return "neon";
+    quantize_q8 = quantize_q8_neon;
+    vecmath_select(1);
+    if (kernels_cpu_i8mm()) {
+        if (want_fast) {
+            dot_q8 = dot_q8_neon_i8mm_fast;
+            dot_q8_x4 = dot_q8_neon_i8mm_fast_x4;
+            dot_q8_r4 = dot_q8_neon_i8mm_fast_r4;
+            dot_q5 = dot_q5_neon_i8mm_fast;
+            dot_q5_x4 = dot_q5_neon_i8mm_fast_x4;
+            dot_q5_r4 = dot_q5_neon_i8mm_fast_r4;
+            gemm_q8 = gemm_q8_neon_i8mm_fast;
+            gemm_q5 = gemm_q5_neon_i8mm_fast;
+            return "neon-i8mm-fast";
+        }
+        dot_q8 = dot_q8_neon_i8mm;
+        dot_q8_x4 = dot_q8_neon_i8mm_x4;
+        dot_q8_r4 = dot_q8_neon_i8mm_r4;
+        dot_q5 = dot_q5_neon_i8mm;
+        dot_q5_x4 = dot_q5_neon_i8mm_x4;
+        dot_q5_r4 = dot_q5_neon_i8mm_r4;
+        gemm_q8 = gemm_q8_neon_i8mm;
+        gemm_q5 = gemm_q5_neon_i8mm;
+        return "neon-i8mm";
     }
+    if (kernels_cpu_dotprod()) {
+        if (want_fast) {
+            dot_q8 = dot_q8_neon_dotprod_fast;
+            dot_q8_x4 = dot_q8_neon_dotprod_fast_x4;
+            dot_q8_r4 = dot_q8_neon_dotprod_fast_r4;
+            dot_q5 = dot_q5_neon_dotprod_fast;
+            dot_q5_x4 = dot_q5_neon_dotprod_fast_x4;
+            dot_q5_r4 = dot_q5_neon_dotprod_fast_r4;
+            gemm_q8 = gemm_q8_neon_dotprod_fast;
+            gemm_q5 = gemm_q5_neon_dotprod_fast;
+            return "neon-dotprod-fast";
+        }
+        dot_q8 = dot_q8_neon_dotprod;
+        dot_q8_x4 = dot_q8_neon_dotprod_x4;
+        dot_q8_r4 = dot_q8_neon_dotprod_r4;
+        dot_q5 = dot_q5_neon_dotprod;
+        dot_q5_x4 = dot_q5_neon_dotprod_x4;
+        dot_q5_r4 = dot_q5_neon_dotprod_r4;
+        gemm_q8 = gemm_q8_neon_dotprod;
+        gemm_q5 = gemm_q5_neon_dotprod;
+        return "neon-dotprod";
+    }
+    if (want_fast) {
+        dot_q8 = dot_q8_neon_fast;
+        dot_q8_x4 = dot_q8_neon_fast_x4;
+        dot_q8_r4 = dot_q8_neon_fast_r4;
+        dot_q5 = dot_q5_neon_fast;
+        dot_q5_x4 = dot_q5_neon_fast_x4;
+        dot_q5_r4 = dot_q5_neon_fast_r4;
+        gemm_q8 = gemm_q8_neon_fast;
+        gemm_q5 = gemm_q5_neon_fast;
+        return "neon-fast";
+    }
+    dot_q8 = dot_q8_neon;
+    dot_q8_x4 = dot_q8_neon_x4;
+    dot_q8_r4 = dot_q8_neon_r4;
+    dot_q5 = dot_q5_neon;
+    dot_q5_x4 = dot_q5_neon_x4;
+    dot_q5_r4 = dot_q5_neon_r4;
+    gemm_q8 = gemm_q8_neon;
+    gemm_q5 = gemm_q5_neon;
+    return "neon";
 #elif defined(SM_HAVE_WASM_SIMD)
-    if (!force_scalar) {
-        dot_q8 = dot_q8_wasm;
-        dot_q8_x4 = dot_q8_wasm_x4;
-        dot_q5 = dot_q5_wasm;
-        dot_q5_x4 = dot_q5_wasm_x4;
-        quantize_q8 = quantize_q8_wasm;
-        vecmath_select(1);
-        return "simd128";
+    dot_q8 = dot_q8_wasm;
+    dot_q8_x4 = dot_q8_wasm_x4;
+    dot_q8_r4 = dot_q8_scalar_r4;
+    dot_q5 = dot_q5_wasm;
+    dot_q5_x4 = dot_q5_wasm_x4;
+    dot_q5_r4 = dot_q5_scalar_r4;
+    gemm_q8 = gemm_q8_scalar;
+    gemm_q5 = gemm_q5_scalar;
+    quantize_q8 = quantize_q8_wasm;
+    vecmath_select(1);
+    /* WASM has no FMA. Fast mode stays on the scalar fast chain so the
+     * one-accumulator contract still holds; the SIMD dots stay exact. */
+    if (want_fast) {
+        dot_q8 = dot_q8_scalar_fast;
+        dot_q8_x4 = dot_q8_scalar_fast_x4;
+        dot_q8_r4 = dot_q8_scalar_fast_r4;
+        dot_q5 = dot_q5_scalar_fast;
+        dot_q5_x4 = dot_q5_scalar_fast_x4;
+        dot_q5_r4 = dot_q5_scalar_fast_r4;
+        gemm_q8 = gemm_q8_scalar_fast;
+        gemm_q5 = gemm_q5_scalar_fast;
+        return "scalar-fast";
     }
+    return "simd128";
 #else
     (void)force_scalar;
 #endif
-    return "scalar";
+    return name;
 }
 
 /* 1/scale stays finite, so x * inv never leaves [-127, 127] (and both

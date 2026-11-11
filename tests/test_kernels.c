@@ -176,13 +176,36 @@ static const char *simd_backend(void) {
     }
     /* A pointer left on the scalar version would make every comparison pass trivially. */
 #if defined(SM_HAVE_AVX2)
-    CHECK(dot_q8 == dot_q8_avx2 && dot_q8_x4 == dot_q8_avx2_x4 && dot_q5 == dot_q5_avx2 &&
-          dot_q5_x4 == dot_q5_avx2_x4 && quantize_q8 == quantize_q8_avx2 && silu_mul == silu_mul_avx2,
-          "%s: a dispatch pointer does not reach the SIMD code", name);
+    CHECK(quantize_q8 == quantize_q8_avx2 && silu_mul == silu_mul_avx2, "%s: quantize/silu not on AVX2", name);
+    if (!strcmp(name, "avx512vnni"))
+        CHECK(dot_q8 == dot_q8_avx512vnni && dot_q8_x4 == dot_q8_avx512vnni_x4 && dot_q8_r4 == dot_q8_avx512vnni_r4 &&
+                  gemm_q8 == gemm_q8_avx512vnni && dot_q5 == dot_q5_avx512vnni && dot_q5_r4 == dot_q5_avx512vnni_r4 &&
+                  gemm_q5 == gemm_q5_avx512vnni,
+              "%s: dispatch pointer", name);
+    else if (!strcmp(name, "avxvnni"))
+        CHECK(dot_q8 == dot_q8_avxvnni && dot_q8_x4 == dot_q8_avxvnni_x4 && dot_q8_r4 == dot_q8_avxvnni_r4 &&
+                  gemm_q8 == gemm_q8_avxvnni && dot_q5 == dot_q5_avxvnni,
+              "%s: dispatch pointer", name);
+    else if (!strcmp(name, "avx2"))
+        CHECK(dot_q8 == dot_q8_avx2 && dot_q8_x4 == dot_q8_avx2_x4 && dot_q8_r4 == dot_q8_avx2_r4 &&
+                  gemm_q8 == gemm_q8_avx2 && dot_q5 == dot_q5_avx2 && gemm_q5 == gemm_q5_avx2,
+              "%s: dispatch pointer", name);
+    else
+        CHECK(0, "unexpected backend %s", name);
 #elif defined(SM_HAVE_NEON)
-    CHECK(dot_q8 == dot_q8_neon && dot_q8_x4 == dot_q8_neon_x4 && dot_q5 == dot_q5_neon &&
-          dot_q5_x4 == dot_q5_neon_x4 && quantize_q8 == quantize_q8_neon && silu_mul == silu_mul_neon,
-          "%s: a dispatch pointer does not reach the SIMD code", name);
+    CHECK(quantize_q8 == quantize_q8_neon && silu_mul == silu_mul_neon, "%s: quantize/silu not on NEON", name);
+    if (!strcmp(name, "neon-i8mm"))
+        CHECK(dot_q8 == dot_q8_neon_i8mm && gemm_q8 == gemm_q8_neon_i8mm && dot_q8_r4 == dot_q8_neon_i8mm_r4,
+              "%s: dispatch pointer", name);
+    else if (!strcmp(name, "neon-dotprod"))
+        CHECK(dot_q8 == dot_q8_neon_dotprod && gemm_q8 == gemm_q8_neon_dotprod && dot_q8_r4 == dot_q8_neon_dotprod_r4,
+              "%s: dispatch pointer", name);
+    else if (!strcmp(name, "neon"))
+        CHECK(dot_q8 == dot_q8_neon && dot_q8_x4 == dot_q8_neon_x4 && dot_q8_r4 == dot_q8_neon_r4 &&
+                  gemm_q8 == gemm_q8_neon && dot_q5 == dot_q5_neon,
+              "%s: dispatch pointer", name);
+    else
+        CHECK(0, "unexpected backend %s", name);
 #elif defined(SM_HAVE_WASM_SIMD)
     CHECK(dot_q8 == dot_q8_wasm && dot_q8_x4 == dot_q8_wasm_x4 && dot_q5 == dot_q5_wasm &&
           dot_q5_x4 == dot_q5_wasm_x4 && quantize_q8 == quantize_q8_wasm && silu_mul == silu_mul_wasm,
@@ -455,6 +478,223 @@ static void test_split_range(void) {
         }
 }
 
+/* The two-block tie that is 0 with separate mul+add and 2^-12 with one FMA. */
+static float fma_probe(DotQ8 dot) {
+    unsigned char w[2 * Q8_BLOCK_BYTES];
+    float xd[2], scale1 = 1.0f, scale2 = 1.0f + 1.0f / 4096.0f;
+    int8_t xq[2 * QK];
+    memset(w, 0, sizeof(w));
+    memset(xq, 0, sizeof(xq));
+    memcpy(w, &scale1, 4);
+    memcpy(w + Q8_BLOCK_BYTES, &scale2, 4);
+    w[4] = 127;
+    w[5] = 17;
+    w[Q8_BLOCK_BYTES + 4] = 127;
+    w[Q8_BLOCK_BYTES + 5] = 1;
+    xq[0] = -32;
+    xq[1] = -2;
+    xq[QK] = 32;
+    xq[QK + 1] = 33;
+    xd[0] = xd[1] = 1.0f;
+    return dot(w, xd, xq, 2);
+}
+
+static int bits_eq(float a, float b) { return memcmp(&a, &b, sizeof(a)) == 0; }
+
+static void check_q8_family(const char *name, int fast, DotQ8 dot, DotQ8x4 x4, DotQ8R4 r4, GemmQ8 gemm) {
+    static unsigned char w[8 * 40 * Q8_BLOCK_BYTES];
+    static float x[16 * 40 * QK], xd[16 * 40], out[16 * 16], y4[4];
+    static int8_t xq[16 * 40 * QK];
+    static unsigned char scratch[2 * 40 * Q8_BLOCK_BYTES + 64];
+    uint32_t trial;
+    float probe = fma_probe(dot), got, want;
+    if (fast) CHECK(probe == 0x1p-12f, "%s fast probe %a", name, (double)probe);
+    else CHECK(probe == 0.0f, "%s exact probe %a", name, (double)probe);
+    for (trial = 0; trial < 20; ++trial) {
+        uint32_t nb = 1 + next() % 36, i, t, r;
+        uint32_t nrows = 1 + next() % 7, ntok = 1 + next() % 12, stride = nrows + 1 + next() % 3;
+        DotQ8 ref = fast ? dot_q8_scalar_fast : dot_q8_scalar;
+        random_weights(w, 4 * nb, trial % 2);
+        for (i = 0; i < 4 * nb * QK; ++i) x[i] = uniform(-30.0f, 30.0f);
+        quantize_q8(x, 4 * nb * QK, xd, xq);
+        got = dot(w, xd, xq, nb);
+        want = ref(w, xd, xq, nb);
+        CHECK(bits_eq(got, want), "%s dot %u %a %a", name, trial, (double)got, (double)want);
+        x4(w, xd, xq, nb, nb, y4);
+        for (t = 0; t < 4; ++t)
+            CHECK(bits_eq(y4[t], ref(w, xd + t * nb, xq + t * nb * QK, nb)), "%s x4 %u", name, trial);
+        r4(w, (size_t)nb * Q8_BLOCK_BYTES, xd, xq, nb, y4);
+        for (t = 0; t < 4; ++t)
+            CHECK(bits_eq(y4[t], ref(w + (size_t)t * nb * Q8_BLOCK_BYTES, xd, xq, nb)), "%s r4 %u", name, trial);
+        for (i = 0; i < ntok * nb * QK; ++i) x[i] = uniform(-8.0f, 8.0f);
+        quantize_q8(x, ntok * nb * QK, xd, xq);
+        random_weights(w, nrows * nb, trial % 3 == 0);
+        gemm(w, (size_t)nb * Q8_BLOCK_BYTES, xd, xq, nrows, ntok, nb, out, stride, scratch);
+        for (t = 0; t < ntok; ++t)
+            for (r = 0; r < nrows; ++r)
+                CHECK(bits_eq(out[(size_t)t * stride + r],
+                              ref(w + (size_t)r * nb * Q8_BLOCK_BYTES, xd + (size_t)t * nb, xq + (size_t)t * nb * QK, nb)),
+                      "%s gemm trial %u t %u r %u", name, trial, t, r);
+        if (ntok >= 8) {
+            gemm(w, (size_t)nb * Q8_BLOCK_BYTES, xd, xq, nrows, ntok, nb, out, stride, NULL);
+            for (t = 0; t < ntok; ++t)
+                for (r = 0; r < nrows; ++r)
+                    CHECK(bits_eq(out[(size_t)t * stride + r], ref(w + (size_t)r * nb * Q8_BLOCK_BYTES,
+                                                                   xd + (size_t)t * nb, xq + (size_t)t * nb * QK, nb)),
+                          "%s gemm nopack %u", name, trial);
+        }
+    }
+}
+
+static void check_q5_family(const char *name, int fast, DotQ8 dot, DotQ8x4 x4, DotQ8R4 r4, GemmQ8 gemm) {
+    static unsigned char w[8 * 40 * Q5_BLOCK_BYTES];
+    static float x[12 * 40 * QK], xd[12 * 40], out[16 * 16], y4[4];
+    static int8_t xq[12 * 40 * QK];
+    static unsigned char scratch[2 * 40 * Q8_BLOCK_BYTES + 64];
+    uint32_t trial, i, t;
+    DotQ8 ref = fast ? dot_q5_scalar_fast : dot_q5_scalar;
+    for (trial = 0; trial < 12; ++trial) {
+        uint32_t nb = 1 + next() % 8, nrows = 1 + next() % 5, ntok = 1 + next() % 10, r;
+        uint32_t stride = nrows + 2;
+        random_q5(w, 4 * nb, 1.5f);
+        for (i = 0; i < 4 * nb * QK; ++i) x[i] = uniform(-5.0f, 5.0f);
+        quantize_q8(x, 4 * nb * QK, xd, xq);
+        CHECK(bits_eq(dot(w, xd, xq, nb), ref(w, xd, xq, nb)), "%s q5 dot %u", name, trial);
+        x4(w, xd, xq, nb, nb, y4);
+        for (t = 0; t < 4; ++t)
+            CHECK(bits_eq(y4[t], ref(w, xd + t * nb, xq + t * nb * QK, nb)), "%s q5 x4", name);
+        r4(w, (size_t)nb * Q5_BLOCK_BYTES, xd, xq, nb, y4);
+        for (t = 0; t < 4; ++t)
+            CHECK(bits_eq(y4[t], ref(w + (size_t)t * nb * Q5_BLOCK_BYTES, xd, xq, nb)), "%s q5 r4", name);
+        for (i = 0; i < ntok * nb * QK; ++i) x[i] = uniform(-3.0f, 3.0f);
+        quantize_q8(x, ntok * nb * QK, xd, xq);
+        random_q5(w, nrows * nb, 0.8f);
+        gemm(w, (size_t)nb * Q5_BLOCK_BYTES, xd, xq, nrows, ntok, nb, out, stride, ntok >= 8 ? scratch : NULL);
+        for (t = 0; t < ntok; ++t)
+            for (r = 0; r < nrows; ++r)
+                CHECK(bits_eq(out[(size_t)t * stride + r],
+                              ref(w + (size_t)r * nb * Q5_BLOCK_BYTES, xd + (size_t)t * nb, xq + (size_t)t * nb * QK, nb)),
+                      "%s q5 gemm t %u r %u", name, t, r);
+    }
+}
+
+/* Wide rows take the interleaved repack (row_bytes > 16 KiB). */
+static void test_repack_wide(const char *name, int q5, GemmQ8 gemm, DotQ8 ref) {
+    const uint32_t nb = 480, nrows = 3, ntok = 9, stride = 5;
+    size_t row_bytes = (size_t)nb * (q5 ? Q5_BLOCK_BYTES : Q8_BLOCK_BYTES);
+    unsigned char *w = (unsigned char *)malloc(nrows * row_bytes);
+    float *x = (float *)malloc((size_t)ntok * nb * QK * sizeof(float));
+    float *xd = (float *)malloc((size_t)ntok * nb * sizeof(float));
+    int8_t *xq = (int8_t *)malloc((size_t)ntok * nb * QK);
+    float *out = (float *)malloc((size_t)ntok * stride * sizeof(float));
+    unsigned char *scratch = (unsigned char *)malloc(gemm_scratch_bytes(nb));
+    uint32_t i, t, r;
+    CHECK(w && x && xd && xq && out && scratch, "%s wide alloc", name);
+    if (!w || !x || !xd || !xq || !out || !scratch) return;
+    if (q5) {
+        for (r = 0; r < nrows; ++r) {
+            uint32_t done = 0;
+            while (done < nb) {
+                uint32_t n = nb - done > 64 ? 64 : nb - done;
+                random_q5(w + (size_t)r * row_bytes + done * Q5_BLOCK_BYTES, n, 1.0f);
+                done += n;
+            }
+        }
+    } else {
+        for (r = 0; r < nrows; ++r) random_weights(w + (size_t)r * row_bytes, nb, 1);
+    }
+    for (i = 0; i < ntok * nb * QK; ++i) x[i] = uniform(-2.0f, 2.0f);
+    quantize_q8(x, ntok * nb * QK, xd, xq);
+    gemm(w, row_bytes, xd, xq, nrows, ntok, nb, out, stride, scratch);
+    for (t = 0; t < ntok; ++t)
+        for (r = 0; r < nrows; ++r)
+            CHECK(bits_eq(out[(size_t)t * stride + r],
+                          ref(w + (size_t)r * row_bytes, xd + (size_t)t * nb, xq + (size_t)t * nb * QK, nb)),
+                  "%s wide repack t %u r %u", name, t, r);
+    free(w);
+    free(x);
+    free(xd);
+    free(xq);
+    free(out);
+    free(scratch);
+}
+
+static void test_isa_kernels(void) {
+    check_q8_family("scalar", 0, dot_q8_scalar, dot_q8_scalar_x4, dot_q8_scalar_r4, gemm_q8_scalar);
+    check_q5_family("scalar", 0, dot_q5_scalar, dot_q5_scalar_x4, dot_q5_scalar_r4, gemm_q5_scalar);
+    check_q8_family("scalar-fast", 1, dot_q8_scalar_fast, dot_q8_scalar_fast_x4, dot_q8_scalar_fast_r4, gemm_q8_scalar_fast);
+    check_q5_family("scalar-fast", 1, dot_q5_scalar_fast, dot_q5_scalar_fast_x4, dot_q5_scalar_fast_r4, gemm_q5_scalar_fast);
+#if defined(SM_HAVE_AVX2)
+    check_q8_family("avx2", 0, dot_q8_avx2, dot_q8_avx2_x4, dot_q8_avx2_r4, gemm_q8_avx2);
+    check_q5_family("avx2", 0, dot_q5_avx2, dot_q5_avx2_x4, dot_q5_avx2_r4, gemm_q5_avx2);
+    check_q8_family("avx2-fast", 1, dot_q8_avx2_fast, dot_q8_avx2_fast_x4, dot_q8_avx2_fast_r4, gemm_q8_avx2_fast);
+    check_q5_family("avx2-fast", 1, dot_q5_avx2_fast, dot_q5_avx2_fast_x4, dot_q5_avx2_fast_r4, gemm_q5_avx2_fast);
+    if (kernels_cpu_avxvnni()) {
+        check_q8_family("avxvnni", 0, dot_q8_avxvnni, dot_q8_avxvnni_x4, dot_q8_avxvnni_r4, gemm_q8_avxvnni);
+        check_q5_family("avxvnni", 0, dot_q5_avxvnni, dot_q5_avxvnni_x4, dot_q5_avxvnni_r4, gemm_q5_avxvnni);
+        check_q8_family("avxvnni-fast", 1, dot_q8_avxvnni_fast, dot_q8_avxvnni_fast_x4, dot_q8_avxvnni_fast_r4,
+                        gemm_q8_avxvnni_fast);
+        check_q5_family("avxvnni-fast", 1, dot_q5_avxvnni_fast, dot_q5_avxvnni_fast_x4, dot_q5_avxvnni_fast_r4,
+                        gemm_q5_avxvnni_fast);
+    }
+    if (kernels_cpu_avx512vnni()) {
+        check_q8_family("avx512vnni", 0, dot_q8_avx512vnni, dot_q8_avx512vnni_x4, dot_q8_avx512vnni_r4, gemm_q8_avx512vnni);
+        check_q5_family("avx512vnni", 0, dot_q5_avx512vnni, dot_q5_avx512vnni_x4, dot_q5_avx512vnni_r4, gemm_q5_avx512vnni);
+        check_q8_family("avx512vnni-fast", 1, dot_q8_avx512vnni_fast, dot_q8_avx512vnni_fast_x4, dot_q8_avx512vnni_fast_r4,
+                        gemm_q8_avx512vnni_fast);
+        check_q5_family("avx512vnni-fast", 1, dot_q5_avx512vnni_fast, dot_q5_avx512vnni_fast_x4, dot_q5_avx512vnni_fast_r4,
+                        gemm_q5_avx512vnni_fast);
+    }
+#endif
+#if defined(SM_HAVE_NEON)
+    check_q8_family("neon", 0, dot_q8_neon, dot_q8_neon_x4, dot_q8_neon_r4, gemm_q8_neon);
+    check_q5_family("neon", 0, dot_q5_neon, dot_q5_neon_x4, dot_q5_neon_r4, gemm_q5_neon);
+    check_q8_family("neon-fast", 1, dot_q8_neon_fast, dot_q8_neon_fast_x4, dot_q8_neon_fast_r4, gemm_q8_neon_fast);
+    check_q5_family("neon-fast", 1, dot_q5_neon_fast, dot_q5_neon_fast_x4, dot_q5_neon_fast_r4, gemm_q5_neon_fast);
+    if (kernels_cpu_dotprod()) {
+        check_q8_family("neon-dotprod", 0, dot_q8_neon_dotprod, dot_q8_neon_dotprod_x4, dot_q8_neon_dotprod_r4,
+                        gemm_q8_neon_dotprod);
+        check_q5_family("neon-dotprod", 0, dot_q5_neon_dotprod, dot_q5_neon_dotprod_x4, dot_q5_neon_dotprod_r4,
+                        gemm_q5_neon_dotprod);
+        check_q8_family("neon-dotprod-fast", 1, dot_q8_neon_dotprod_fast, dot_q8_neon_dotprod_fast_x4,
+                        dot_q8_neon_dotprod_fast_r4, gemm_q8_neon_dotprod_fast);
+        check_q5_family("neon-dotprod-fast", 1, dot_q5_neon_dotprod_fast, dot_q5_neon_dotprod_fast_x4,
+                        dot_q5_neon_dotprod_fast_r4, gemm_q5_neon_dotprod_fast);
+    }
+    if (kernels_cpu_i8mm()) {
+        check_q8_family("neon-i8mm", 0, dot_q8_neon_i8mm, dot_q8_neon_i8mm_x4, dot_q8_neon_i8mm_r4, gemm_q8_neon_i8mm);
+        check_q5_family("neon-i8mm", 0, dot_q5_neon_i8mm, dot_q5_neon_i8mm_x4, dot_q5_neon_i8mm_r4, gemm_q5_neon_i8mm);
+        check_q8_family("neon-i8mm-fast", 1, dot_q8_neon_i8mm_fast, dot_q8_neon_i8mm_fast_x4, dot_q8_neon_i8mm_fast_r4,
+                        gemm_q8_neon_i8mm_fast);
+        check_q5_family("neon-i8mm-fast", 1, dot_q5_neon_i8mm_fast, dot_q5_neon_i8mm_fast_x4, dot_q5_neon_i8mm_fast_r4,
+                        gemm_q5_neon_i8mm_fast);
+    }
+#endif
+    test_repack_wide("scalar", 0, gemm_q8_scalar, dot_q8_scalar);
+    test_repack_wide("scalar-q5", 1, gemm_q5_scalar, dot_q5_scalar);
+#if defined(SM_HAVE_AVX2)
+    test_repack_wide("avx2", 0, gemm_q8_avx2, dot_q8_avx2);
+    test_repack_wide("avx2-q5", 1, gemm_q5_avx2, dot_q5_avx2);
+    test_repack_wide("avx2-fast", 0, gemm_q8_avx2_fast, dot_q8_avx2_fast);
+    if (kernels_cpu_avxvnni()) test_repack_wide("avxvnni", 0, gemm_q8_avxvnni, dot_q8_avxvnni);
+    if (kernels_cpu_avx512vnni()) test_repack_wide("avx512vnni", 0, gemm_q8_avx512vnni, dot_q8_avx512vnni);
+#endif
+#if defined(SM_HAVE_NEON)
+    test_repack_wide("neon", 0, gemm_q8_neon, dot_q8_neon);
+    test_repack_wide("neon-q5", 1, gemm_q5_neon, dot_q5_neon);
+    if (kernels_cpu_dotprod()) test_repack_wide("neon-dotprod", 0, gemm_q8_neon_dotprod, dot_q8_neon_dotprod);
+    if (kernels_cpu_i8mm()) test_repack_wide("neon-i8mm", 0, gemm_q8_neon_i8mm, dot_q8_neon_i8mm);
+#endif
+    kernels_set_fast(1);
+    {
+        const char *fast = kernels_select(0);
+        CHECK(strstr(fast, "fast") != NULL, "fast select returned %s", fast);
+        CHECK(fma_probe(dot_q8) == 0x1p-12f, "dispatched fast probe");
+    }
+    kernels_set_fast(0);
+    kernels_select(0);
+}
+
 int main(void) {
     test_f16();
     test_quantize();
@@ -465,6 +705,7 @@ int main(void) {
     test_backends_bit_identical();
     test_no_fused_multiply_add();
     test_backend_edges();
+    test_isa_kernels();
     test_exp_det();
     test_silu_backends();
     test_quantize_backends();
