@@ -9,7 +9,6 @@ historico	history	r-win-03
 impressora	printer	r-win-04
 endereco ip	ip address	r-win-04
 reinicia	restart	r-win-04
-roteador	router dhcp	r-win-05
 senha	password	r-win-06
 wi-fi	wi-fi wireless wlan	r-win-06
 sem fio	wireless wi-fi	r-win-07
@@ -32,8 +31,6 @@ pasta	folder	r-win-13
 compatibilidade	compatibility	r-win-14
 monitor	monitor display	r-win-15
 detecta	detect	r-win-15
-hibernac	hibernation hibernate	r-win-16
-desativ	disable	r-win-16
 suspens	sleep	r-win-17
 acord	wake	r-win-17
 firewall	firewall	r-win-18
@@ -69,8 +66,11 @@ variaveis de ambiente	environment variables	r-ctn-07
 pelo nome	name network	r-ctn-08
 volumes	volumes	r-ctn-09
 guarda	data directory storage	r-ctn-09
-endereco ip	ip address	r-ctn-10
 banco	database	r-ctn-11
 pronto	healthy ready	r-ctn-11
 navegador	browser	r-ctn-12
 porta	port	r-ctn-12
+endereco mac	mac address	r-win-05
+variavel de ambiente	environment variable	r-win-16
+permanente	permanent persistent	r-win-16
+troco o nome	rename	r-ctn-10

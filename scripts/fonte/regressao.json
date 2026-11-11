@@ -6,7 +6,7 @@
     { "id": "r-win-02", "bloco": "windows", "pergunta": "O som parou de funcionar depois de uma atualização do Windows. Como reinstalo o driver de áudio?", "fato": "Device Manager|Uninstall device" },
     { "id": "r-win-03", "bloco": "windows", "pergunta": "Como vejo o histórico das atualizações instaladas no Windows?", "fato": "update history|Get-HotFix|wmic qfe" },
     { "id": "r-win-04", "bloco": "windows", "pergunta": "A impressora de rede some quando o computador reinicia. Como adiciono de novo pelo endereço IP?", "fato": "TCP/IP port|Add-PrinterPort|Add-Printer\\b" },
-    { "id": "r-win-05", "bloco": "windows", "pergunta": "Como peço um novo endereço IP ao roteador pelo terminal do Windows?", "fato": "ipconfig /release|ipconfig /renew" },
+    { "id": "r-win-05", "bloco": "windows", "pergunta": "Como vejo o endereço MAC da placa de rede pelo terminal do Windows?", "fato": "getmac|MacAddress" },
     { "id": "r-win-06", "bloco": "windows", "pergunta": "Como vejo a senha de uma rede Wi-Fi salva no Windows?", "fato": "netsh wlan show profile|key=clear" },
     { "id": "r-win-07", "bloco": "windows", "pergunta": "A rede sem fio não aparece. Como desligo e religo o adaptador de rede pelo PowerShell?", "fato": "Restart-NetAdapter|Disable-NetAdapter|netsh interface set interface" },
     { "id": "r-win-08", "bloco": "windows", "pergunta": "A pesquisa do Windows não encontra mais os meus arquivos. Como reconstruo o índice de pesquisa?", "fato": "Indexing Options|Rebuild" },
@@ -17,7 +17,7 @@
     { "id": "r-win-13", "bloco": "windows", "pergunta": "Como compartilho uma pasta na rede local pelo PowerShell?", "fato": "New-SmbShare" },
     { "id": "r-win-14", "bloco": "windows", "pergunta": "Um programa antigo não abre no Windows 11. Como uso o modo de compatibilidade?", "fato": "compatibility mode|Program Compatibility Troubleshooter" },
     { "id": "r-win-15", "bloco": "windows", "pergunta": "O Windows não detecta o segundo monitor. O que verifico?", "fato": "\\bDetect\\b|Windows logo key \\+ P|display adapter" },
-    { "id": "r-win-16", "bloco": "windows", "pergunta": "Como desativo a hibernação para o arquivo hiberfil.sys sumir?", "fato": "powercfg(\\.exe)? (/h|-h|/hibernate|-hibernate) off" },
+    { "id": "r-win-16", "bloco": "windows", "pergunta": "Como crio uma variável de ambiente permanente no Windows pelo terminal?", "fato": "setx|SetEnvironmentVariable|Environment Variables" },
     { "id": "r-win-17", "bloco": "windows", "pergunta": "O Windows acorda sozinho da suspensão. Como descubro o que o acordou?", "fato": "powercfg(\\.exe)? (/|-)(lastwake|waketimers|requests|devicequery)" },
     { "id": "r-win-18", "bloco": "windows", "pergunta": "Como libero um programa no Firewall do Windows pelo terminal?", "fato": "New-NetFirewallRule|netsh advfirewall" },
     { "id": "r-deb-01", "bloco": "debian", "pergunta": "Como descubro qual pacote instalou um certo arquivo no Debian?", "fato": "dpkg (-S|--search)|apt-file" },
@@ -43,7 +43,7 @@
     { "id": "r-ctn-07", "bloco": "container", "pergunta": "Como passo as variáveis de ambiente de um arquivo para um container?", "fato": "--env-file|env_file" },
     { "id": "r-ctn-08", "bloco": "container", "pergunta": "Como faço dois containers se acharem pelo nome?", "fato": "docker network create|user-defined (bridge )?network" },
     { "id": "r-ctn-09", "bloco": "container", "pergunta": "Como mudo a pasta onde o Docker guarda as imagens e os volumes?", "fato": "data-root" },
-    { "id": "r-ctn-10", "bloco": "container", "pergunta": "Como vejo o endereço IP, os volumes e as variáveis de um container?", "fato": "docker (container )?inspect" },
+    { "id": "r-ctn-10", "bloco": "container", "pergunta": "Como troco o nome de um container Docker que já existe?", "fato": "docker (container )?rename" },
     { "id": "r-ctn-11", "bloco": "container", "pergunta": "No Compose, como faço o app só iniciar depois que o banco estiver pronto?", "fato": "depends_on|service_healthy|healthcheck" },
     { "id": "r-ctn-12", "bloco": "container", "pergunta": "Como acesso pelo navegador do Windows um serviço que roda dentro do WSL na porta 3000?", "fato": "localhost ?forwarding|portproxy|mirrored|localhost:" }
   ]
