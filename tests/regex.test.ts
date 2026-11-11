@@ -1,6 +1,7 @@
 /**
  * The C regex matcher (src/regex.c) against JavaScript's RegExp with "iu", on
- * every line of the frozen change list (plan, proposal 4a, revision 23):
+ * every line of the frozen change list (plan, proposal 4a, revision 23) and of the runtime's additions to it
+ * (kit/lista-mudanca-acrescimos.tsv, revision 33):
  * - the subset is closed: whatever the list does not use is refused;
  * - no input where JavaScript matches and C does not; the other way round only
  *   with the two non-ASCII code points "iu" folds into ASCII (long s, Kelvin sign);
@@ -14,7 +15,7 @@ import { BUILD, ROOT } from "./support/run";
 
 const EXE = process.platform === "win32" ? ".exe" : "";
 const REGEX = join(BUILD, `test-regex${EXE}`);
-const LISTA = join(ROOT, "tests", "evals", "manutencao", "lista-mudanca.tsv");
+const LISTAS = [join(ROOT, "tests", "evals", "manutencao", "lista-mudanca.tsv"), join(ROOT, "kit", "lista-mudanca-acrescimos.tsv")];
 
 /** Runs every (pattern, input) pair through test-regex: "1", "0" or "E <error>" per pair. In batches: Bun 1.2.15
  * on Windows crashes on a stdin of tens of MB. */
@@ -53,6 +54,9 @@ const SEMENTES = [
   "apt-get dist-upgrade", "pacman -Syu", "pacman -Su", "pacman -R pacote", "dnf upgrade", "brew upgrade",
   "npx prisma migrate deploy", "prisma db push", "python manage.py migrate", "rails db:migrate", "rake db:drop",
   "alembic upgrade head", "flyway migrate", "psql -c 'DROP TABLE t'", "mysql -e 'delete from t where 1'",
+  "vssadmin delete shadows /all /quiet", "vssadmin.exe Delete Shadows /For=C:", "wmic shadowcopy delete",
+  "timeshift --delete --snapshot X", "timeshift --delete-all", "sudo snapper -c root delete 42", "snapper rm 3",
+  "vssadmin list shadows", "timeshift --list", "snapper list",
   "ls -la", "Get-Service", "docker ps", "systemctl status nginx", "apt list --upgradable", "git status",
 ];
 
@@ -91,8 +95,8 @@ function mutar(s: string, r: () => number): string {
   return out.join("");
 }
 
-const lista = () => readFileSync(LISTA, "utf8").split(/\r?\n/).filter((l) => l.trim() !== "")
-  .map((l) => l.split("\t")[1]!);
+const lista = () => LISTAS.flatMap((f) => readFileSync(f, "utf8").split(/\r?\n/).filter((l) => l.trim() !== "")
+  .map((l) => l.split("\t")[1]!));
 
 describe.skipIf(!existsSync(REGEX))("the C matcher", () => {
   test("refuses everything outside the subset the list uses, and accepts every line of the list", () => {
