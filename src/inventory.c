@@ -466,9 +466,20 @@ static void not_regular(Ctx *c, const char *shown, mode_t mode) {
 
 #define ROOT_GROUPS 1024 /* supplementary groups of the scan saved around open_as; more fails closed */
 
+/* Linux declares setgroups(size_t, const gid_t *); macOS and the BSDs declare
+ * setgroups(int, const gid_t *). n is non-negative and at most ROOT_GROUPS. */
+static int restore_groups(int n, const gid_t *groups) {
+    if (n < 0) return 0;
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
+    return setgroups(n, groups);
+#else
+    return setgroups((size_t)n, groups);
+#endif
+}
+
 /* Back to the identity open_as started from; a scan that cannot get back stops. */
 static void back_to_root(uid_t uid, gid_t gid, const gid_t *groups, int n) {
-    if (seteuid(uid) || setegid(gid) || (n >= 0 && setgroups((size_t)n, groups))) {
+    if (seteuid(uid) || setegid(gid) || restore_groups(n, groups)) {
         fputs("smolmoe-inventario: não consegui voltar a root depois de ler como usuário\n", stderr);
         exit(2);
     }
