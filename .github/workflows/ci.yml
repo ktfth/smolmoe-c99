@@ -41,6 +41,14 @@ jobs:
           bun-version: 1.2.15
       - name: build
         run: make -j4 CC=${{ matrix.cc }} all scalar
+      # Parsers of third-party model files. Clang's libFuzzer, a few seconds each.
+      # The runner's clang does not always ship the fuzzer archive or libstdc++.
+      - name: fuzz
+        if: matrix.cc == 'clang'
+        run: |
+          ver=$(clang -dumpversion | cut -d. -f1)
+          sudo apt-get update -q && sudo apt-get install -y -q "libfuzzer-${ver}-dev" "libclang-rt-${ver}-dev" g++ libstdc++-14-dev
+          make fuzz FUZZ_TIME=10
       # The desktop window against the system's GLFW (Win32 and Cocoa builds are in the other jobs).
       - name: desktop window
         if: matrix.cc == 'gcc'

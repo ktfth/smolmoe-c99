@@ -1,4 +1,5 @@
 #include "kernels.h"
+#include "compat.h"
 #include "f16.h"
 #include "util.h"
 #include "vecmath.h"
@@ -84,7 +85,7 @@ void dot_q5_scalar_x4(const unsigned char *w, const float *xd, const int8_t *xq,
 }
 
 #if defined(SM_HAVE_AVX2)
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static float reduce_avx2(__m256 acc) {
     __m128 s = _mm_add_ps(_mm256_castps256_ps128(acc), _mm256_extractf128_ps(acc, 1));
     __m128 t = _mm_add_ps(s, _mm_movehl_ps(s, s));
@@ -100,7 +101,7 @@ static float reduce_avx2(__m256 acc) {
 /* Block body -> 32 int8 in natural element order, minus 16. Port-5 friendly:
  * the 128-bit broadcast is a pure load and the lane split is a blend; the
  * high bits use one shuffle/compare (byte j becomes 0xFF iff bit j is set). */
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static __m256i unpack_q5_avx2(const unsigned char *body) {
     const __m256i v = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)(const void *)(body + 4)));
     const __m256i low = _mm256_and_si256(_mm256_blend_epi32(v, _mm256_srli_epi16(v, 4), 0xF0), _mm256_set1_epi8(15));
@@ -118,7 +119,7 @@ static __m256i unpack_q5_avx2(const unsigned char *body) {
  * the scalar kernel (f16 -> f32 is exact). */
 #define Q5_CHUNK 64u
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static void q5_scales(const unsigned char *w, uint32_t n, float *out) {
     uint32_t j = 0, k;
     for (; j + 8 <= n; j += 8) {
@@ -132,7 +133,7 @@ static void q5_scales(const unsigned char *w, uint32_t n, float *out) {
     for (; j < n; ++j) out[j] = _cvtsh_ss(rd_u16(w + (size_t)j * Q5_BLOCK_BYTES));
 }
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static void scale_products(const float *ws, const float *xd, uint32_t n, float *out) {
     uint32_t j = 0;
     for (; j + 8 <= n; j += 8) _mm256_storeu_ps(out + j, _mm256_mul_ps(_mm256_loadu_ps(ws + j), _mm256_loadu_ps(xd + j)));
@@ -145,7 +146,7 @@ static void scale_products(const float *ws, const float *xd, uint32_t n, float *
 #define ACCUMULATE_AT(acc, scale_ptr, aw, wv, xv, ones) \
     (acc) = _mm256_add_ps((acc), _mm256_mul_ps(_mm256_broadcast_ss(scale_ptr), BLOCK_PRODUCT((aw), (wv), (xv), (ones))))
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 float dot_q8_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
     const __m256i ones = _mm256_set1_epi16(1);
     __m256 acc = _mm256_setzero_ps();
@@ -157,7 +158,7 @@ float dot_q8_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uin
     return reduce_avx2(acc);
 }
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 float dot_q5_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb) {
     const __m256i ones = _mm256_set1_epi16(1);
     __m256 acc = _mm256_setzero_ps();
@@ -191,7 +192,7 @@ float dot_q5_avx2(const unsigned char *w, const float *xd, const int8_t *xq, uin
     out[2] = reduce_avx2(a2);    \
     out[3] = reduce_avx2(a3)
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 void dot_q8_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                     uint32_t stride, float out[4]) {
     const __m256i ones = _mm256_set1_epi16(1);
@@ -205,7 +206,7 @@ void dot_q8_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, u
     X4_STORE();
 }
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 void dot_q5_avx2_x4(const unsigned char *w, const float *xd, const int8_t *xq, uint32_t nb,
                     uint32_t stride, float out[4]) {
     const __m256i ones = _mm256_set1_epi16(1);
@@ -476,7 +477,7 @@ const char *kernels_select(int force_scalar) {
     vecmath_select(0);
 #if defined(SM_HAVE_AVX2)
     /* F16C converts Q5 block scales exactly, matching f16_to_f32(). */
-    if (!force_scalar && __builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+    if (!force_scalar && sm_cpu_supports_avx2_f16c()) {
         dot_q8 = dot_q8_avx2;
         dot_q8_x4 = dot_q8_avx2_x4;
         dot_q5 = dot_q5_avx2;
@@ -539,7 +540,7 @@ int quantize_q8_scalar(const float *x, uint32_t n, float *d, int8_t *q) {
 }
 
 #if defined(SM_HAVE_AVX2)
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static float max_avx2(__m256 v) {
     __m128 m = _mm_max_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps(v, 1));
     m = _mm_max_ps(m, _mm_movehl_ps(m, m));
@@ -550,7 +551,7 @@ static float max_avx2(__m256 v) {
 #define FINITE(a, big) _mm256_cmp_ps((a), (big), _CMP_LE_OQ)        /* false for inf and NaN */
 
 /* quantize_q8_scalar() 32 values at a time; a partial last block goes to it. */
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 int quantize_q8_avx2(const float *x, uint32_t n, float *d, int8_t *q) {
     const __m256 sign = _mm256_set1_ps(-0.0f), big = _mm256_set1_ps(FLT_MAX);
     const __m256i order = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7); /* undoes the lane interleave of packs */

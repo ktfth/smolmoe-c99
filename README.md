@@ -1,6 +1,6 @@
 # smolmoe
 
-Runtime de inferência de LLMs em **CPU pura**, escrito em **C99** sem dependências externas. Empacota o motor e os pesos quantizados (`SMOEQ8` / `SMOEQ5`) em um **único executável autocontido** (estilo [llamafile](https://github.com/Mozilla-Ocho/llamafile)) que roda nativamente no Windows, Linux, macOS, Android (Termux) e no navegador via WebAssembly.
+Runtime de inferência de LLMs em **CPU pura**, escrito em **C99 com extensões do GCC e do Clang** (`__atomic_*`, `__builtin_cpu_supports` e `__attribute__((target))`, isoladas em `src/compat.h`). Não é C99 estrito. O cabeçalho já tem o ramo do MSVC (`Interlocked*`, `__cpuid`), mas o runtime ainda não compila com o MSVC. Empacota o motor e os pesos quantizados (`SMOEQ8` / `SMOEQ5`) em um **executável autocontido** (estilo [llamafile](https://github.com/Mozilla-Ocho/llamafile)) que roda nativamente no Windows, Linux, macOS, Android (Termux) e no navegador via WebAssembly. No Windows, um modelo que passaria de 4 GiB fica num `.smoe` ao lado do executável.
 
 <p align="center">
   <img src="docs/images/desktop-escuro.png" alt="Interface desktop do smolmoe no tema escuro" width="760">
@@ -8,7 +8,7 @@ Runtime de inferência de LLMs em **CPU pura**, escrito em **C99** sem dependên
 
 ## Destaques
 
-- **Zero dependências:** apenas `libc`, `libm` e threads nativas (`Win32` / `pthread`). Sem Python, sem CUDA, sem DLLs externas.
+- **Dependências do runtime:** `libc`, `libm` e threads nativas (`Win32` / `pthread`). Sem Python e sem CUDA. A janela no Linux e no macOS precisa da GLFW (no Windows usa o Direct3D 11 do sistema). O conversor, os testes de integração e os scripts usam [Bun](https://bun.sh); o WebAssembly pede `zig`.
 - **Três interfaces sob o mesmo motor (`engine.c`):** CLI interativa no terminal, janela nativa (Dear ImGui + Direct3D 11 / OpenGL 3) e WebAssembly (SIMD128 + Web Workers).
 - **Executável único (`smolmoe-bundle`):** junte runtime + pesos + tokenizer + config em um único binário pronto para rodar com duplo clique.
 - **Determinismo bit a bit:** numa mesma plataforma, os logits são idênticos bit a bit para qualquer `--threads`, `--batch` e kernel (`AVX2`, `NEON`, `SIMD128` ou escalar).
@@ -88,6 +88,8 @@ make phi-weights   # baixa e converte para models/phi-4-mini-instruct/
 make phi           # empacota dist/phi-4-mini[.exe]
 make phi-gui       # empacota dist/phi-4-mini-gui[.exe]
 ```
+
+No Windows o executável não pode chegar a 4 GiB. `make phi` e `make phi-gui` percebem isso e gravam o runtime sem o modelo dentro, mais um `<nome>.smoe` na mesma pasta. O programa carrega esse arquivo sozinho.
 
 Detalhes sobre manifesto, hashes SHA-256 e conversão estão em [docs/MODELS.md](docs/MODELS.md).
 
@@ -211,6 +213,7 @@ make release         # Binários otimizados e estáticos em build/release/
 make all-models      # Empacota todos os executáveis autocontidos em dist/
 make test            # Roda testes unitários em C + suíte de integração no Bun
 make sanitize        # Roda toda a suíte sob AddressSanitizer + UndefinedBehaviorSanitizer (Linux/macOS)
+make fuzz            # libFuzzer de `modelfile`, do tokenizador e da config, por alguns segundos (Clang)
 make bench           # Executa o benchmark padrão (scripts/bench.ts)
 make help            # Lista todos os atalhos em português
 ```
@@ -218,7 +221,7 @@ make help            # Lista todos os atalhos em português
 ### Estrutura do Repositório
 
 ```text
-src/          Runtime C99 (plataforma, kernels SIMD, modelo, tokenizers, ferramentas, engine e CLI)
+src/          Runtime em C99 com extensões GCC/Clang (plataforma, compat.h, kernels SIMD, modelo, tokenizers, ferramentas, engine e CLI)
 gui/          Interface gráfica em C++17 com Dear ImGui (Win32 + Direct3D 11 / GLFW + OpenGL 3)
 web/          Aplicação web em TypeScript sobre o build WebAssembly (WASI + SIMD128)
 scripts/      Conversor de modelos Hugging Face (convert.ts), download, benchmark e avaliação (Bun)
@@ -241,7 +244,7 @@ docs/         Documentação detalhada de arquitetura, formato binário, modelos
 1. **Pesos mapeados direto do disco (`mmap` / `MapViewOfFile`):** sem cópia em RAM e sem cache duplicado.
 2. **Produto escalar inteiro exato (Q8/Q5):** ativações quantizadas em blocos de 32 valores e acumulação float em ordem fixa de 8 lanes — reproduzida bit a bit nos kernels escalar, `AVX2`, `NEON` e `SIMD128`.
 3. **Prefill em lote e Threadpool estático:** processa múltiplos tokens por leitura de linha de peso e particiona o trabalho de forma determinística entre os núcleos físicos.
-4. **Validação estrita na carga:** shapes, alinhamentos, escalas e extents do arquivo `.smoe` são verificados na abertura; o laço de inferência roda sem checagens redundantes.
+4. **Validação na carga:** shapes, escalas e extents do `.smoe` são conferidos na abertura. O alinhamento do offset de cada tensor não é exigido: as leituras aceitam endereço sem alinhamento. Cada saída de produto matriz-vetor ainda passa por `isfinite`, para recusar um checkpoint fora da faixa numérica.
 
 ---
 
@@ -257,6 +260,8 @@ docs/         Documentação detalhada de arquitetura, formato binário, modelos
 - **[docs/FORMAT.md](docs/FORMAT.md)** — Especificação binária dos contêineres `SMOEQ8`/`SMOEQ5` (v1, v2, v3), tokenizers (`SMQBP1`, `SMSPB1`) e trailer `SMOEBDL1`.
 - **[docs/DECISIONS.md](docs/DECISIONS.md)** — Histórico de engenharia, benchmarks A/B e experimentos descartados.
 - **[docs/ROADMAP.md](docs/ROADMAP.md)** — Próximos passos de otimização, novos modelos e ferramentas.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — Como compilar, o estilo do C e o que os testes cobrem.
+- **[SECURITY.md](SECURITY.md)** — Como reportar uma falha ao abrir um arquivo de modelo.
 
 ## Licença
 

@@ -369,6 +369,23 @@ static void open_source(Options *o, Source *s, Memory *mem) {
         }
         unmap_file(&s->file);
     }
+    /* Windows cannot run an executable of 4 GiB or more. `make` then leaves
+     * the runtime unbundled and writes <stem>.smoe next to it. */
+    if (self) {
+        char sibling[4112];
+        if (bundle_sibling_path(self, sibling, sizeof(sibling)) && file_exists(sibling)) {
+            size_t n = strlen(sibling);
+            char *stored = (char *)mem_alloc(mem, n + 1, 1);
+            memcpy(stored, sibling, n + 1);
+            if (same_file(o->stats, stored) || same_file(o->trace, stored) || same_file(o->token_ids, stored))
+                die("output path aliases an input: %s", stored);
+            o->model = stored;
+            map_file(o->model, &s->file);
+            modelfile_parse(&s->mf, s->file.data, s->file.size, mem);
+            s->present = 1;
+            return;
+        }
+    }
     if (o->interactive && stdin_is_terminal() && file_exists("models/qwen2.5-0.5b-instruct/model.smoe")) {
         o->model = "models/qwen2.5-0.5b-instruct/model.smoe";
         map_file(o->model, &s->file);

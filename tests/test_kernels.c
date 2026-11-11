@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "compat.h"
 #include "f16.h"
 #include "kernels.h"
 #include "threadpool.h"
@@ -407,7 +408,7 @@ static void sum_task(void *ctx, uint32_t index, uint32_t count) {
     split_range(t->n, index, count, &begin, &end);
     for (i = begin; i < end; ++i) {
         t->partial[i] = t->values[i] * 2.0f;
-        __atomic_add_fetch(&t->hits[i], 1, __ATOMIC_RELAXED);
+        sm_add_fetch_u32(&t->hits[i], 1, SM_ATOMIC_RELAXED);
     }
 }
 

@@ -34,7 +34,7 @@ endif
 
 CC      ?= cc
 OPT     ?= -O3
-STD     := -std=c99 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wstrict-prototypes
+STD     := -std=c99 -Wall -Wextra -Wpedantic -Werror -Wshadow -Wstrict-prototypes -Wconversion
 # Determinism contract: never allow FMA contraction or reassociation.
 FPFLAGS := -ffp-contract=off -fno-fast-math
 CFLAGS  ?=
@@ -82,7 +82,7 @@ OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui \
 	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui stories all-models phi-weights \
-	chat run-gui run-web help inventario
+	chat run-gui run-web help inventario fuzz fuzz-run
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
 scalar: $(BIN_SCALAR)
@@ -199,10 +199,32 @@ REL_GUI     := $(RELEASE_DIR)/smolmoe-gui$(EXE)
 REL_BUNDLE  := $(RELEASE_DIR)/smolmoe-bundle$(EXE)
 MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui phi phi-gui stories
 
+# Windows will not launch a PE image of 4 GiB or more (the size does not fit in
+# 32 bits). The estimate adds the config, the tokenizer, alignment, the trailer
+# and 1 MiB, so it never undershoots: a model that would still fit is emitted as
+# two files, which the runtime runs the same way.
+WIN_EXE_LIMIT := 4294967296
+
 # $(call bundle,OUT,MODEL,MODEL_DIR,TOKENIZER,RUNTIME): DIST/OUT[.exe]
+# On Windows, a result that would reach WIN_EXE_LIMIT is the runtime plus
+# DIST/OUT.smoe beside it (the ".exe" suffix is not part of the stem).
 define bundle
 	@mkdir -p $(DIST)
-	$(REL_BUNDLE) --model $(2) --config $(3)/config.ini --tokenizer $(3)/$(4) --exe $(5) --out $(DIST)/$(1)$(EXE)
+	@set -e; \
+	model='$(2)'; config='$(3)/config.ini'; tok='$(3)/$(4)'; runtime='$(5)'; \
+	out='$(DIST)/$(1)$(EXE)'; side='$(DIST)/$(1).smoe'; \
+	ms=$$(wc -c < "$$model" | tr -d '[:space:]'); \
+	rs=$$(wc -c < "$$runtime" | tr -d '[:space:]'); \
+	cs=$$(wc -c < "$$config" | tr -d '[:space:]'); \
+	ts=$$(wc -c < "$$tok" | tr -d '[:space:]'); \
+	need=$$(awk -v m="$$ms" -v r="$$rs" -v c="$$cs" -v t="$$ts" 'BEGIN{printf "%.0f", m+r+c+t+65536+32+1048576}'); \
+	if [ '$(OS)' = Windows_NT ] && awk -v n="$$need" -v lim='$(WIN_EXE_LIMIT)' 'BEGIN{exit !(n+0 >= lim+0)}'; then \
+	  printf '%s\n' "smolmoe: $$out passaria de 4 GiB ($$need bytes estimados). O Windows não executa um programa desse tamanho; gravando $$side ao lado de uma cópia do runtime."; \
+	  cp "$$runtime" "$$out"; \
+	  $(REL_BUNDLE) --model "$$model" --config "$$config" --tokenizer "$$tok" --out "$$side"; \
+	else \
+	  $(REL_BUNDLE) --model "$$model" --config "$$config" --tokenizer "$$tok" --exe "$$runtime" --out "$$out"; \
+	fi
 endef
 
 MODEL ?= qwen
@@ -295,6 +317,7 @@ help:
 	$(info $(EMPTY)  make stories         $(DIST)/tinystories         historinhas em inglês, para testar)
 	$(info $(EMPTY)  make all-models      todos acima; Gemma e Phi só quando os pesos já estão em models/)
 	$(info )
+	$(info No Windows, um modelo que passaria de 4 GiB sai como o programa e um .smoe com o mesmo nome, lado a lado.)
 	$(info Os pesos do Qwen e do TinyStories são baixados e conferidos na primeira vez.)
 	@:
 
@@ -413,6 +436,43 @@ gui: $(GUI)
 
 bench: $(BIN)
 	bun scripts/bench.ts
+
+# libFuzzer (Clang). `make fuzz` rebuilds the runtime with ASan/UBSan and runs
+# each harness for FUZZ_TIME seconds. Not part of `make test`.
+FUZZ_TIME ?= 10
+FUZZ_CASES := modelfile tokenizer config
+
+# The harness is C. libFuzzer is C++, and the C driver does not search the
+# libstdc++ directory, so the link uses the C++ driver.
+$(BUILD)/fuzz-obj/%.o: fuzz/fuzz_%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(OPT) $(STD) $(FPFLAGS) $(PLATFORM) $(CFLAGS) -Isrc -Ifuzz -c $< -o $@
+
+$(BUILD)/fuzz-%: $(BUILD)/fuzz-obj/%.o $(OBJ_LIB)
+	$(CXX) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+fuzz-run: $(FUZZ_CASES:%=$(BUILD)/fuzz-%)
+	@set -e; for name in $(FUZZ_CASES); do \
+	  printf '%s\n' "libFuzzer: $$name ($(FUZZ_TIME)s)"; \
+	  log=$(BUILD)/fuzz-$$name.log; \
+	  work=$(BUILD)/corpus-$$name; \
+	  rm -rf "$$work"; mkdir -p "$$work"; \
+	  ASAN_OPTIONS=halt_on_error=1:log_path=$(BUILD)/asan-$$name \
+	  UBSAN_OPTIONS=halt_on_error=1:log_path=$(BUILD)/ubsan-$$name \
+	  $(BUILD)/fuzz-$$name -max_total_time=$(FUZZ_TIME) -timeout=5 -rss_limit_mb=1024 \
+	    "$$work" fuzz/corpus/$$name > "$$log" 2>&1 || { \
+	    printf '%s\n' "libFuzzer falhou: $$name"; \
+	    tail -n 80 "$$log"; \
+	    cat $(BUILD)/asan-$$name.* $(BUILD)/ubsan-$$name.* 2>/dev/null || true; \
+	    exit 1; \
+	  }; \
+	  tail -n 1 "$$log"; \
+	done
+
+fuzz:
+	$(MAKE) BUILD=build/fuzz CC=clang CXX=clang++ OPT="-O1 -g" \
+	  CFLAGS="-fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all" \
+	  LDFLAGS="-fsanitize=fuzzer,address,undefined" fuzz-run
 
 clean:
 	rm -rf build dist tools/q8pack tools/q8pack.exe

@@ -336,8 +336,14 @@ trailer, 32 bytes: "SMOEBDL1" | u64 container offset | u64 container length | "S
 ```
 
 Without `--model`, the runtime maps its own executable (`/proc/self/exe`, `_NSGetExecutablePath`,
-`GetModuleFileNameW`), validates the trailer (both magics, 64 KiB-aligned offset, offset + length + 32 = file size)
-and parses the container in place. A trailer with both magics but inconsistent fields is a hard error, not a
-fallback. Container offsets are relative to the container start, so the same container works as a file or appended.
-Windows refuses to run executables above 4 GiB, so larger models must stay in a separate `.smoe` file. Code signing
-must happen after bundling (Authenticode covers the whole file).
+`GetModuleFileNameW`) and looks for a model in this order:
+
+1. A valid trailer (both magics, 64 KiB-aligned offset, offset + length + 32 = file size). The container is parsed
+   in place. A trailer with both magics but inconsistent fields is a hard error, not a fallback.
+2. Otherwise `<stem>.smoe` in the same directory. A trailing `.exe` (any case) is removed from the stem, so
+   `phi-4-mini.exe` loads `phi-4-mini.smoe`. This is how Windows runs a model that does not fit in an executable:
+   the loader rejects a PE image of 4 GiB or more. `make phi` and `make phi-gui` detect that and write the runtime
+   unchanged plus that sibling file.
+
+Container offsets are relative to the container start, so the same container works as a file or appended.
+Code signing must happen after bundling (Authenticode covers the whole file).
