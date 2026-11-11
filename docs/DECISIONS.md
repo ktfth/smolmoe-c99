@@ -827,6 +827,34 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
     sentidos, concentrada nas respostas longas do Phi que misturam sistemas.
   - Para a v2, sem mexer na v1.3: `vssadmin delete shadows` na lista de destrutivos, opção de DISM conferida e o
     rótulo `bash` num item Linux com comando de Windows.
+- **Teste da fonte offline, congelado em 2026-11-10** (plano, revisões 28 a 35). Pergunta: com 3 trechos de uma fonte
+  offline antes da pergunta, o 1,5B fica tão bom quanto o Phi? O resultado não entra no runtime em C antes de sair.
+  - **Fontes**, escolhidas pelo tema das dúvidas, em `../fontes-offline` (`SMOLMOE_FONTES`):
+    - SupportArticles-docs `f35d5396` (support/windows-client), CC BY 4.0;
+    - windows-powershell-docs `b064f9a3` (docset/winserver2022-ps), CC BY 4.0;
+    - docker/docs `75a95460` (content/manuals e content/reference/cli), Apache 2.0;
+    - arch-wiki-docs 20261101, em inglês, sem as páginas de modelo de notebook, GFDL 1.3+;
+    - MicrosoftDocs/WSL `526e5775`, CC BY 4.0 (código MIT), e Debian Reference `ce774075`, GPL-2+ (revisão 34).
+    O `debian-handbook` saiu (2015, ensina o proibido `apt-key add`); o Ubuntu Server ficou fora por licença não confirmada.
+  - **Busca:** BM25 em trechos de ~80 palavras; consulta da variante G (termos da própria pergunta presentes em 5 ou mais
+    trechos, mais um glossário pt→en em que cada linha cita o item da regressão que a motiva). Trecho com código pesa 1,3.
+  - **Afinada só na regressão do dev** (44 perguntas, nenhuma igual às 90; o F-1 do adversário trocou 3 que miravam fato
+    das 90): 29/44 trechos com o fato (24 sem o peso de código). A **variante K** (o modelo escreve palavras-chave em
+    inglês) ficou de fora pela regra da revisão 34: G + palavras do Phi 25/44 (0 ganhos, 4 perdas), do 1,5B 27/44 (0 e 2).
+    O Phi escreveu as palavras em português.
+  - **Tratamento:** o texto de apresentação, com os 3 trechos e a pergunta, numa linha da mensagem do usuário; o prompt do
+    kit não muda. `--trechos` no eval.
+  - **Shas congelados** (`FONTE` no eval): apresentação `e29074206ad408b4ec4bd2b701d699077727e67a8d8eceedfe428418fcbbad31`,
+    glossário `b6de3c250909016f821f53f480a43da3832b361bb48521e77d3ed068de4ae52e`, regressão
+    `e73509cca472e9cc59be8231e1a709bfe4964997d02e9f7c0dff1644a692934e`, busca
+    `3fce635602dccdc3f861cb761df197563f2b70ce20152fd7a8442dc7d4d5856d` e trechos
+    `76cf6f8fd5e7a4f187b2e7e6887ca0bd03ca6618b894371c915a47e742c385ac` (a montagem é determinística).
+  - **Regra, fixada antes:** o 1,5B com trechos é tão bom quanto o Phi com trechos se o limite superior do IC 95% de
+    Phi − 1,5B (Newcombe, pareado, com a correlação ajustada) ficar abaixo de 10 pontos; ou ganha do Phi sozinho pelo
+    teste de sinal. Se o IC for largo demais, decide o dono. O resumo (`scripts/fonte/resumo-fonte.ts`) dá as 90 com e sem
+    win-012, win-037 e ctn-008; a taxa nas dúvidas cobertas e nas não cobertas (coberta = todas as obrigatórias nos 3
+    trechos, calculada só depois da passada); e, por braço, os "proibido", os "falta" com nome de tela em inglês e os
+    fora do português.
 - **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
   log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]

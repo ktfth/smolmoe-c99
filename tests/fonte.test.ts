@@ -3,11 +3,14 @@
  * kept apart from the 90 decision questions, the source readers and the query.
  */
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { consulta, contemRadical, Indice, lerGlossario, tokens } from "../scripts/fonte/busca";
 import { fatiar, secoesDocbook, secoesMarkdown } from "../scripts/fonte/fontes";
 import { glossario, regressao } from "../scripts/fonte/indice";
+import { diferencaPareada } from "../scripts/fonte/resumo-fonte";
+import { ARQUIVOS_DA_FONTE, mensagemComTrechos } from "../scripts/fonte/trechos";
 import { ROOT } from "./support/run";
 
 describe("glossary", () => {
@@ -67,6 +70,46 @@ describe("source readers", () => {
     const t = fatiar([{ titulo: "T", corpo }, { titulo: "U", corpo: "too short" }]);
     expect(t.length).toBe(3);
     expect(t.every((x) => x.startsWith("T\n"))).toBe(true);
+  });
+});
+
+describe("treatment", () => {
+  test("the passages and the question go in the presentation text, on one line, numbered", () => {
+    const m = mensagemComTrechos("Trechos: {trechos} Pergunta: {pergunta}\n", ["T\nrun `x`", "U\n  y $& z"], "Como?");
+    expect(m).toBe("Trechos: [1] T run `x` [2] U y $& z Pergunta: Como?");
+    expect(m).not.toMatch(/[\r\n]/);
+  });
+
+  test("the frozen presentation text asks for Brazilian Portuguese and Portuguese screen names, and has both slots", () => {
+    const t = readFileSync(ARQUIVOS_DA_FONTE.apresentacao, "utf8");
+    expect(t).toContain("{trechos}");
+    expect(t).toContain("{pergunta}");
+    expect(t).toMatch(/português do Brasil/);
+    expect(t).toMatch(/nomes de tela do Windows em português/);
+  });
+});
+
+describe("summary", () => {
+  const pares = (n11: number, n10: number, n01: number, n00: number) => {
+    const a = new Map<string, boolean>(), b = new Map<string, boolean>();
+    const por = (n: number, x: boolean, y: boolean) => { for (let i = 0; i < n; i++) { const id = `${x}${y}${i}`; a.set(id, x); b.set(id, y); } };
+    por(n11, true, true); por(n10, true, false); por(n01, false, true); por(n00, false, false);
+    return diferencaPareada(a, b);
+  };
+
+  test("Newcombe's paired interval matches R's ratesci (MOVER-Wilson, Newcombe's correlation): 1, 1, 7, 12", () => {
+    const r = pares(1, 1, 7, 12);
+    expect(r.d).toBeCloseTo(-6 / 21, 6);
+    expect(r.baixo).toBeCloseTo(-0.507, 3);
+    expect(r.alto).toBeCloseTo(-0.026, 3);
+  });
+
+  test("a positive correlation narrows the interval, and Newcombe's adjustment narrows it less", () => {
+    const largura = (r: { baixo: number; alto: number }) => r.alto - r.baixo;
+    const corr = pares(12, 5, 2, 21), indep = pares(4, 13, 10, 13);
+    expect(corr.d).toBeCloseTo(indep.d, 9);
+    expect(largura(corr)).toBeLessThan(largura(indep));
+    expect(corr.baixo).toBeCloseTo(-0.0594, 3); /* with the unadjusted phi it would be -0.0506 */
   });
 });
 

@@ -8,7 +8,10 @@
  * --prefix-cache.
  *
  * usage: bun scripts/eval-manutencao.ts --modelo models/qwen2.5-0.5b-instruct [--modelo DIR ...]
- *          [--saida resultados.jsonl] [--itens cmd-001,pap-*] [--piloto] [--resumo-so]
+ *          [--saida resultados.jsonl] [--itens cmd-001,pap-*] [--piloto] [--resumo-so] [--trechos]
+ *
+ * --trechos (the source test, plan, revisions 28 to 31) puts the 3 passages found in the offline source before each
+ * question, in the frozen presentation text (scripts/fonte/); it runs only under the source freeze (FONTE).
  *
  * Nothing runs unless the sets present, the Portuguese detector, the kit prompt
  * and the date line are the ones frozen in docs/DECISIONS.md (CONJUNTOS and
@@ -28,6 +31,7 @@ import { parseArgs } from "node:util";
 import type { ItemNota, Nota, Regras } from "../tests/evals/manutencao/nota";
 import { pareado, wilson } from "./eval/estatistica";
 import { emPortugues } from "./eval/portugues";
+import { congelamentoDaFonte, type CongeladoFonte, prepararFonte } from "./fonte/trechos";
 
 const ROOT = resolve(import.meta.dir, "..");
 const SET = join(ROOT, "tests", "evals", "manutencao");
@@ -82,6 +86,16 @@ export const FROZEN = {
   linhaData: "29782c739b156c66809b54220db37f3726acb3e25773b0466dfea1c882546386",
 } as const;
 
+/** The source test's freeze (scripts/fonte/trechos.ts), also in docs/DECISIONS.md; --trechos refuses to run until it
+ * is set, and with anything but these files. */
+export const FONTE: CongeladoFonte | null = {
+  apresentacao: "e29074206ad408b4ec4bd2b701d699077727e67a8d8eceedfe428418fcbbad31",
+  glossario: "b6de3c250909016f821f53f480a43da3832b361bb48521e77d3ed068de4ae52e",
+  regressao: "e73509cca472e9cc59be8231e1a709bfe4964997d02e9f7c0dff1644a692934e",
+  busca: "3fce635602dccdc3f861cb761df197563f2b70ce20152fd7a8442dc7d4d5856d",
+  trechos: "76cf6f8fd5e7a4f187b2e7e6887ca0bd03ca6618b894371c915a47e742c385ac",
+};
+
 export interface Item extends ItemNota {
   readonly bloco: string;
   readonly pergunta: string;
@@ -101,6 +115,8 @@ export interface Resultado {
   readonly modelo_sha?: string;            /* SHA-256 of the model.smoe that answered */
   readonly piloto?: boolean;
   readonly pergunta_sha?: string;          /* SHA-256 of the question asked, so a regrade can check it is the same */
+  readonly fonte?: CongeladoFonte;         /* asked with passages from the offline source (--trechos), under this freeze */
+  readonly trechos?: readonly number[];    /* the ids of those passages in trechos.jsonl */
 }
 
 const shaTexto = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -154,15 +170,18 @@ export async function shaDeArquivo(path: string): Promise<string> {
 
 /**
  * Resuming may only add to answers given under the same conditions: an existing line of the same model label
- * with another model.smoe, another freeze of the dev's files, another set freeze for its item, or another pilot
- * flag would mix two runs in one summary. Returns the model/item pairs already done.
+ * with another model.smoe, another freeze of the dev's files, another set freeze for its item, another pilot
+ * flag, or another source condition (with or without passages, or another freeze of them) would mix two runs in one
+ * summary. Returns the model/item pairs already done.
  */
 export function conferirRetomada(anteriores: readonly Resultado[], modelos: ReadonlyMap<string, string>,
-  manifestoDe: ReadonlyMap<string, string>, piloto: boolean): Set<string> {
+  manifestoDe: ReadonlyMap<string, string>, piloto: boolean, fonte: CongeladoFonte | null = null): Set<string> {
   const feitos = new Set<string>();
   for (const r of anteriores) {
     const motivo =
       !!r.piloto !== piloto ? (r.piloto ? "é de piloto" : "não é de piloto")
+      : JSON.stringify(r.fonte ?? null) !== JSON.stringify(fonte)
+        ? (r.fonte ? (fonte ? "tem outro congelamento da fonte" : "tem trechos da fonte") : "não tem trechos da fonte")
       : JSON.stringify(r.congelado) !== JSON.stringify(FROZEN) ? "tem outro congelamento do detector, do prompt ou da linha de data"
       : modelos.has(r.modelo) && r.modelo_sha !== modelos.get(r.modelo) ? `foi respondida por outro model.smoe de ${r.modelo}`
       : manifestoDe.has(r.id) && r.manifesto !== manifestoDe.get(r.id) ? `é de outro congelamento do conjunto (${r.id})`
@@ -178,7 +197,8 @@ export function conferirRetomada(anteriores: readonly Resultado[], modelos: Read
 export function conferirArquivo(resultados: readonly Resultado[], itens: readonly { id: string; manifesto: string }[]): void {
   const modelos = new Map<string, string>();
   for (const r of resultados) if (!modelos.has(r.modelo) && r.modelo_sha) modelos.set(r.modelo, r.modelo_sha);
-  conferirRetomada(resultados, modelos, new Map(itens.map((i) => [i.id, i.manifesto])), !!resultados[0]?.piloto);
+  conferirRetomada(resultados, modelos, new Map(itens.map((i) => [i.id, i.manifesto])), !!resultados[0]?.piloto,
+    resultados[0]?.fonte ?? null);
 }
 
 /** Checks every file a manifest lists; returns the manifest's own SHA-256 (the one in DECISIONS). */
@@ -280,16 +300,17 @@ export function linhaDeData(agora: string): string {
 }
 
 /* The kit has no tools (plan, revision 19: the pilot without them won on both Qwen models). */
-function perguntar(binario: string, dir: string, sistema: string, cache: string, item: Item): { resposta: string; segundos: number } {
+function perguntar(binario: string, dir: string, sistema: string, cache: string, item: Item,
+  mensagem = item.pergunta): { resposta: string; segundos: number } {
   /* Piped input sends one message per line: a question of more lines would become several. */
-  if (/[\r\n]/.test(item.pergunta)) throw new Error(`${item.id}: pergunta de mais de uma linha; o eval ainda não a envia inteira`);
+  if (/[\r\n]/.test(mensagem)) throw new Error(`${item.id}: pergunta de mais de uma linha; o eval ainda não a envia inteira`);
   const t0 = performance.now();
   const r = Bun.spawnSync([binario, "--model", join(dir, "model.smoe"), "--config", join(dir, "config.ini"),
     "--tokenizer", join(dir, "tokenizer.qbp"), "--system", sistema, "--no-tools", "--prefix-cache", cache,
     "--context", String(CONTEXT), "--tokens", String(item.tokens ?? TOKENS), "--temperature", "0",
     /* The default heap ceiling covers the KV cache of 2048 positions; the Phi's at 4096 needs more. It changes no answer. */
     "--memory-mib", String(MEMORY_MIB)],
-  { stdin: new TextEncoder().encode(`${item.pergunta}\n/sair\n`), stdout: "pipe", stderr: "pipe", timeout: TIMEOUT_MS });
+  { stdin: new TextEncoder().encode(`${mensagem}\n/sair\n`), stdout: "pipe", stderr: "pipe", timeout: TIMEOUT_MS });
   if (r.exitCode !== 0) throw new Error(`${item.id}: o chat saiu com ${r.exitCode}: ${r.stderr.toString().slice(-400)}`);
   return { resposta: r.stdout.toString().trim(), segundos: (performance.now() - t0) / 1000 };
 }
@@ -304,6 +325,7 @@ const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 export function resumo(resultados: readonly Resultado[], pulados = 0): string {
   const out: string[] = [];
   if (resultados.some((r) => r.piloto)) out.push("**Piloto:** não vale para a decisão.");
+  if (resultados.some((r) => r.fonte)) out.push("**Com trechos da fonte offline** (teste da fonte).");
   if (pulados) out.push(`Fora da taxa até a v2 do conjunto: ${pulados} item(ns) de família sem lista de comandos.`);
   const modelos = [...new Set(resultados.map((r) => r.modelo))];
   for (const m of modelos) {
@@ -356,7 +378,7 @@ function escolhidos<T extends Item>(itens: readonly T[], filtro: string | undefi
 async function main(argv: readonly string[]): Promise<void> {
   const { values } = parseArgs({ args: [...argv], strict: true, options: {
     modelo: { type: "string", multiple: true }, saida: { type: "string" }, itens: { type: "string" },
-    piloto: { type: "boolean" }, "resumo-so": { type: "boolean" }, renotar: { type: "string" } } });
+    piloto: { type: "boolean" }, "resumo-so": { type: "boolean" }, renotar: { type: "string" }, trechos: { type: "boolean" } } });
   const saida = resolve(values.saida ?? join(ROOT, "build", "eval-manutencao.jsonl"));
   if (values.renotar) {
     /* A new file, never over the old one: the old grades stay for comparison. */
@@ -391,19 +413,27 @@ async function main(argv: readonly string[]): Promise<void> {
     if (modelos.has(modelo) && modelos.get(modelo) !== shaModelo) throw new Error(`dois modelos diferentes chamados ${modelo}`);
     modelos.set(modelo, shaModelo);
   }
+  /* The source test: the passages are part of the treatment, frozen like the kit prompt (plan, revision 31). */
+  if (values.trechos && FONTE === null) throw new Error("--trechos: a fonte ainda não foi congelada em DECISIONS");
+  if (values.trechos && JSON.stringify(congelamentoDaFonte()) !== JSON.stringify(FONTE))
+    throw new Error(`--trechos: a fonte não confere com a congelada em DECISIONS: ${JSON.stringify(congelamentoDaFonte())}`);
+  const fonte = values.trechos ? await prepararFonte() : null;
   const feitos = conferirRetomada(lerResultados(saida), modelos, new Map(todos.map((i) => [i.id, i.manifesto])),
-    !!values.piloto);
+    !!values.piloto, values.trechos ? FONTE : null);
   for (const dirArg of values.modelo) {
     const dir = resolve(dirArg), modelo = basename(dir);
     for (const item of itens) {
       if (feitos.has(`${modelo}\t${item.id}`)) continue;
       const sistema = sistemaDoItem(item, kit, papeis, data);
       const variante = createHash("sha256").update(sistema).digest("hex").slice(0, 12);
-      const { resposta, segundos } = perguntar(binario, dir, sistema, join(caches, `${modelo}-${variante}.kv`), item);
+      const comTrechos = fonte?.mensagem(item.pergunta);
+      const { resposta, segundos } = perguntar(binario, dir, sistema, join(caches, `${modelo}-${variante}.kv`), item,
+        comTrechos?.texto);
       const nota = avaliadores.get(item.conjunto)!(item, resposta, regras);
       const r: Resultado = { modelo, id: item.id, bloco: item.bloco, certa: nota.certa, motivo: nota.motivo, segundos,
         resposta, manifesto: item.manifesto, congelado: FROZEN, modelo_sha: modelos.get(modelo)!,
-        pergunta_sha: shaTexto(item.pergunta), ...(values.piloto ? { piloto: true } : {}) };
+        pergunta_sha: shaTexto(item.pergunta), ...(values.piloto ? { piloto: true } : {}),
+        ...(comTrechos ? { fonte: FONTE!, trechos: comTrechos.ids } : {}) };
       appendFileSync(saida, `${JSON.stringify(r)}\n`);
       console.error(`${modelo} ${item.id}: ${nota.certa ? "certa" : `errada (${nota.motivo})`} em ${segundos.toFixed(1)} s`);
     }

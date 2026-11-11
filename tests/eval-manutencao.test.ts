@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { testeDeSinal, wilson } from "../scripts/eval/estatistica";
 import { emPortugues } from "../scripts/eval/portugues";
 import {
-  CONJUNTOS, DETECTOR, FROZEN, ITENS_DO_PILOTO, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
+  CONJUNTOS, DETECTOR, FONTE, FROZEN, ITENS_DO_PILOTO, KIT_DATE, KIT_PROMPT, NOW, type Resultado, carregarAvaliadores, carregarItens, carregarRegras,
   conferirArquivo, conferirCongelados, conferirManifesto, conferirRetomada, conjuntosPresentes, linhaDeData, promptDoKit, renotar, resumo,
   semLista, sha, sistemaDoItem, viradas,
 } from "../scripts/eval-manutencao";
@@ -27,7 +27,8 @@ describe("what was frozen", () => {
     expect(sha(DETECTOR)).toBe(FROZEN.detector);
     expect(sha(KIT_PROMPT)).toBe(FROZEN.sistema);
     expect(sha(KIT_DATE)).toBe(FROZEN.linhaData);
-    for (const v of [...Object.values(FROZEN), ...CONJUNTOS.map((c) => c.sha).filter((s) => s !== null)])
+    for (const v of [...Object.values(FROZEN), ...CONJUNTOS.map((c) => c.sha).filter((s) => s !== null),
+      ...Object.values(FONTE ?? {})])
       expect(decisions()).toContain(v);
     expect(() => conferirCongelados()).not.toThrow();
   });
@@ -67,6 +68,14 @@ describe("what was frozen", () => {
     expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002" })], itens)).not.toThrow();
     expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002", piloto: true })], itens)).toThrow(/piloto/);
     expect(() => conferirArquivo([linha({}), linha({ id: "cmd-002", modelo_sha: "bb" })], itens)).toThrow(/model\.smoe/);
+    /* The source test: an answer with passages never mixes with one without, nor with another freeze of them. */
+    const f = { apresentacao: "1", glossario: "2", regressao: "3", busca: "4", trechos: "5" };
+    expect(conferirRetomada([linha({ fonte: f })], modelos, manifestos, false, f)).toEqual(new Set(["m\tcmd-001"]));
+    expect(() => conferirRetomada([linha({ fonte: f })], modelos, manifestos, false)).toThrow(/tem trechos da fonte/);
+    expect(() => conferirRetomada([linha({})], modelos, manifestos, false, f)).toThrow(/não tem trechos da fonte/);
+    expect(() => conferirRetomada([linha({ fonte: { ...f, glossario: "9" } })], modelos, manifestos, false, f))
+      .toThrow(/outro congelamento da fonte/);
+    expect(() => conferirArquivo([linha({ fonte: f }), linha({ id: "cmd-002" })], itens)).toThrow(/não tem trechos/);
   });
 
   test("a regrade grades the stored answers again with today's sets, and refuses a changed question", async () => {
