@@ -1,10 +1,12 @@
 /* Unit tests for the byte-level BPE tokenizer (SMQBP1): Unicode class bits,
  * the Qwen2 and o200k pre-tokenizers, the v1/v2 loader and the ChatML and Phi
- * chat templates. Rejections (die) are covered by tests/tokenizer.test.ts. */
+ * chat templates, and BPE merge order on long inputs. Rejections (die) are
+ * covered by tests/tokenizer.test.ts. */
 #include <stdio.h>
 #include <string.h>
 
 #include "config.h"
+#include "platform.h"
 #include "tokenizer.h"
 #include "tokenizer_pretok.h"
 #include "tokenizer_qwen.h"
@@ -367,6 +369,166 @@ static void test_no_template(void) {
     mem_release(&mem);
 }
 
+/* Quadratic merge, the oracle for short inputs: lowest rank, leftmost on ties. */
+static uint32_t slow_rank(const uint32_t *m, uint32_t nmerge, uint32_t a, uint32_t b) {
+    uint32_t i;
+    for (i = 0; i < nmerge; ++i)
+        if (m[i * 3] == a && m[i * 3 + 1] == b) return i;
+    return UINT32_MAX;
+}
+
+static uint32_t slow_bpe(const uint32_t *m, uint32_t nmerge, const unsigned char *s, uint32_t len, uint32_t *out) {
+    uint32_t sym[256], n = len, i;
+    if (len > 256) return UINT32_MAX;
+    for (i = 0; i < len; ++i) sym[i] = s[i];
+    for (;;) {
+        uint32_t best = UINT32_MAX, pos = 0, k;
+        for (k = 0; k + 1 < n; ++k) {
+            uint32_t r = slow_rank(m, nmerge, sym[k], sym[k + 1]);
+            if (r < best) { best = r; pos = k; }
+        }
+        if (best == UINT32_MAX) break;
+        sym[pos] = m[best * 3 + 2];
+        memmove(sym + pos + 1, sym + pos + 2, (n - pos - 2) * sizeof(uint32_t));
+        --n;
+    }
+    for (i = 0; i < n; ++i) out[i] = sym[i];
+    return n;
+}
+
+/* v2, no NFC, Qwen2 pre-tokenizer, no chat template. `merges` is nmerge triples. */
+static uint32_t build_merges(Blob *b, const Piece *extra, uint32_t nextra, const uint32_t *merges, uint32_t nmerge) {
+    uint32_t i, total = 256, vocab = 256 + nextra;
+    const uint32_t h[3] = {0, 1, 0};
+    for (i = 0; i < nextra; ++i) total += (uint32_t)strlen(extra[i].text);
+    b->n = 0;
+    memcpy(b->data, "SMQBP1\0\2", 8);
+    b->n = 8;
+    put_u32(b, vocab);
+    put_u32(b, nmerge);
+    put_u32(b, total);
+    for (i = 0; i < 3; ++i) put_u32(b, h[i]);
+    for (i = 0; i < 256; ++i) {
+        put_u32(b, 1);
+        put_u32(b, 0);
+        b->data[b->n++] = (unsigned char)i;
+    }
+    for (i = 0; i < nextra; ++i) {
+        uint32_t len = (uint32_t)strlen(extra[i].text);
+        put_u32(b, len);
+        put_u32(b, extra[i].flag);
+        memcpy(b->data + b->n, extra[i].text, len);
+        b->n += len;
+    }
+    for (i = 0; i < nmerge * 3; ++i) put_u32(b, merges[i]);
+    return vocab;
+}
+
+static void expect_str(Tokenizer *t, const char *what, const char *s, const uint32_t *want, uint32_t m) {
+    uint32_t ids[64], n;
+    n = tokenizer_encode(t, (const unsigned char *)s, (uint32_t)strlen(s), ids, 0, "");
+    expect_ids(what, ids, n, want, m);
+}
+
+static void expect_oracle(Tokenizer *t, const uint32_t *merges, uint32_t nmerge, const unsigned char *s, uint32_t len,
+                          const char *what) {
+    uint32_t got[256], want[256], ng, nw;
+    nw = slow_bpe(merges, nmerge, s, len, want);
+    ng = tokenizer_encode(t, s, len, got, 0, "");
+    expect_ids(what, got, ng, want, nw);
+}
+
+/* Rank order and leftmost ties must match the old scan, including on a pre-token
+ * long enough that the quadratic merge took many seconds (120k copies of one byte). */
+static void test_bpe_merge(void) {
+    static Blob b;
+    static const Piece extra[] = {{"<|endoftext|>", 1}, {"<|end|>", 1}, {"aa", 0}, {"aaa", 0}, {"aaa", 0},
+                                  {"aaaa", 0}, {"xa", 0}, {"  ", 0}, {"!!", 0}};
+    /* 258 aa, 259 aa+a, 260 a+aa, 261 aaaa, 262 xa, 263 two spaces, 264 two '!'s. */
+    static const uint32_t merges[] = {
+        97, 97, 258, 258, 97, 259, 97, 258, 260, 258, 258, 261, 120, 97, 262, 32, 32, 263, 33, 33, 264,
+    };
+    enum { NMERGE = 7, LONG = 120000, ID_AA = 258, ID_AAA = 259, ID_AAAA = 261, ID_XA = 262, ID_SP = 263, ID_BANG = 264 };
+    Memory mem;
+    Tokenizer *t;
+    unsigned char *text;
+    uint32_t *ids, cap, n, i, bad, vocab;
+    double t0, spaces, bangs;
+    memset(&mem, 0, sizeof(mem));
+    mem.limit = (size_t)128 << 20;
+    vocab = build_merges(&b, extra, 9, merges, NMERGE);
+    t = tokenizer_parse(b.data, b.n, vocab, &mem);
+    cap = tokenizer_prepare(t, LONG, &mem);
+    {
+        const uint32_t one[] = {97}, aa[] = {ID_AA}, aaa[] = {ID_AAA}, aaaa[] = {ID_AAAA}, aaaaa[] = {ID_AA, ID_AAA};
+        const uint32_t xaa[] = {120, ID_AA}, xa[] = {ID_XA}, xaaa[] = {120, ID_AAA};
+        const uint32_t sp3[] = {ID_SP, 32}, sp4[] = {ID_SP, ID_SP}, bang3[] = {ID_BANG, 33};
+        const uint32_t split[] = {ID_AA, 32, 98, 98}, mid[] = {97, 98, 99, ID_AA}, two[] = {ID_AA, 98, ID_AA};
+        const uint32_t eee[] = {0xc3, 0xa9, 0xc3, 0xa9}, digits[] = {49, 50};
+        expect_str(t, "a", "a", one, 1);
+        expect_str(t, "aa", "aa", aa, 1);
+        expect_str(t, "aaa prefers the left pair", "aaa", aaa, 1);
+        expect_str(t, "aaaa", "aaaa", aaaa, 1);
+        expect_str(t, "aaaaa keeps the better rank to the right of aa", "aaaaa", aaaaa, 2);
+        expect_str(t, "xaa merges the lower rank, not the leftmost pair", "xaa", xaa, 2);
+        expect_str(t, "xa", "xa", xa, 1);
+        expect_str(t, "xaaa", "xaaa", xaaa, 2);
+        expect_str(t, "three spaces", "   ", sp3, 2);
+        expect_str(t, "four spaces", "    ", sp4, 2);
+        expect_str(t, "three bangs", "!!!", bang3, 2);
+        expect_str(t, "two pre-tokens", "aa bb", split, 4);
+        expect_str(t, "merge not at the start", "abcaa", mid, 4);
+        expect_str(t, "two disjoint merges", "aabaa", two, 3);
+        expect_str(t, "multibyte letters stay bytes", "\xc3\xa9\xc3\xa9", eee, 4);
+        expect_str(t, "digits are separate pre-tokens", "12", digits, 2);
+        {
+            const char *word = "don't";
+            uint32_t bytes[8];
+            for (i = 0; word[i]; ++i) bytes[i] = (unsigned char)word[i];
+            expect_str(t, "contraction splits but does not merge", word, bytes, i);
+        }
+    }
+    for (i = 1; i <= 80; ++i) {
+        unsigned char buf[160];
+        char label[64];
+        uint32_t k;
+        memset(buf, 'a', i);
+        snprintf(label, sizeof(label), "%u a's", i);
+        expect_oracle(t, merges, NMERGE, buf, i, label);
+        memset(buf, ' ', i);
+        snprintf(label, sizeof(label), "%u spaces", i);
+        expect_oracle(t, merges, NMERGE, buf, i, label);
+        memset(buf, '!', i);
+        snprintf(label, sizeof(label), "%u bangs", i);
+        expect_oracle(t, merges, NMERGE, buf, i, label);
+        for (k = 0; k < i; ++k) buf[k] = (unsigned char)(k % 2 ? 'x' : 'a');
+        snprintf(label, sizeof(label), "ax pattern %u", i);
+        expect_oracle(t, merges, NMERGE, buf, i, label);
+    }
+    text = (unsigned char *)mem_alloc(&mem, LONG, 1);
+    ids = (uint32_t *)mem_alloc(&mem, cap, sizeof(uint32_t));
+    memset(text, ' ', LONG);
+    t0 = now_seconds();
+    n = tokenizer_encode(t, text, LONG, ids, 0, "");
+    spaces = now_seconds() - t0;
+    bad = 0;
+    for (i = 0; i < n; ++i)
+        if (ids[i] != ID_SP) { bad = i + 1; break; }
+    CHECK(n == LONG / 2 && !bad, "120k spaces: %u tokens, first mismatch at %u (%.3fs)", n, bad, spaces);
+    CHECK(spaces < 1.0, "120k spaces took %.3fs, want < 1s", spaces);
+    memset(text, '!', LONG);
+    t0 = now_seconds();
+    n = tokenizer_encode(t, text, LONG, ids, 0, "");
+    bangs = now_seconds() - t0;
+    bad = 0;
+    for (i = 0; i < n; ++i)
+        if (ids[i] != ID_BANG) { bad = i + 1; break; }
+    CHECK(n == LONG / 2 && !bad, "120k bangs: %u tokens, first mismatch at %u (%.3fs)", n, bad, bangs);
+    CHECK(bangs < 1.0, "120k '!' took %.3fs, want < 1s", bangs);
+    printf("degenerate BPE: 120k spaces in %.3fs, 120k '!' in %.3fs\n", spaces, bangs);
+    mem_release(&mem);
+}
+
 int main(void) {
     test_classes();
     test_qwen2_split();
@@ -375,6 +537,7 @@ int main(void) {
     test_phi();
     test_gemma();
     test_no_template();
+    test_bpe_merge();
     if (failures) {
         fprintf(stderr, "%d tokenizer test(s) failed\n", failures);
         return 1;

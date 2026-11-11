@@ -14,6 +14,10 @@
 #define PHI_ROLES 3u
 
 typedef struct { uint32_t a, b, out; } QwenMerge;
+/* One live symbol of the pre-token being merged. Indexes increase along the list. */
+typedef struct { uint32_t prev, next, id; } QwenSym;
+/* A candidate pair. rank is the merge index (lower merges first). */
+typedef struct { uint32_t left, right, rank; } QwenBigram;
 
 /* A control token the operator's system text may spell out. rstrip: the
  * whitespace after it belongs to the marker (HF added-token rstrip). */
@@ -32,11 +36,14 @@ struct QwenTokenizer {
     uint32_t im_start;                /* ChatML */
     uint32_t role[PHI_ROLES];         /* Phi: <|system|>, <|user|>, <|assistant|> */
     uint32_t tool_open, tool_close;   /* ChatML tool calls, or UINT32_MAX */
+    uint32_t heap_cap;
     Marker trusted[MAX_TRUSTED];
     unsigned char **piece, *special, *normalized;
     uint8_t *cls;
-    uint32_t *length, *hash, *cp, *offset, *symbols;
+    uint32_t *length, *hash, *cp, *offset;
     QwenMerge *merge;
+    QwenSym *sym;
+    QwenBigram *heap;
 };
 
 static void read_exact(ByteReader *r, void *buf, size_t n, const char *what) {
@@ -210,7 +217,10 @@ uint32_t qwen_prepare(QwenTokenizer *q, uint32_t max_bytes, Memory *mem) {
     q->capacity = max_bytes * 4 + 512;
     q->cp = (uint32_t *)mem_alloc(mem, q->capacity, sizeof(uint32_t));
     q->offset = (uint32_t *)mem_alloc(mem, (size_t)q->capacity + 1, sizeof(uint32_t));
-    q->symbols = (uint32_t *)mem_alloc(mem, q->capacity, sizeof(uint32_t));
+    q->sym = (QwenSym *)mem_alloc(mem, q->capacity, sizeof(*q->sym));
+    /* Initial pairs plus at most two new pairs per merge: under 3n entries. */
+    q->heap_cap = q->capacity * 3;
+    q->heap = (QwenBigram *)mem_alloc(mem, q->heap_cap, sizeof(*q->heap));
     q->normalized = (unsigned char *)mem_alloc(mem, q->capacity, 4);
     q->cls = (uint8_t *)mem_alloc(mem, q->capacity, 1);
     return q->capacity;
@@ -231,23 +241,100 @@ static void push_id(uint32_t *ids, uint32_t *n, uint32_t cap, uint32_t id) {
     ids[(*n)++] = id;
 }
 
-/* Byte-level BPE of one pre-token: lowest-rank merge first, leftmost on ties. */
-static void merge_piece(QwenTokenizer *q, uint32_t start, uint32_t count, uint32_t *ids, uint32_t *n) {
-    uint32_t k;
-    if (count > q->capacity) die("byte workspace exceeded");
-    for (k = 0; k < count; ++k) q->symbols[k] = q->normalized[start + k];
-    for (;;) {
-        uint32_t best = UINT32_MAX, pos = 0;
-        for (k = 0; k + 1 < count; ++k) {
-            uint32_t r = merge_rank(q, q->symbols[k], q->symbols[k + 1]);
-            if (r < best) { best = r; pos = k; }
-        }
-        if (best == UINT32_MAX) break;
-        q->symbols[pos] = q->merge[best].out;
-        memmove(q->symbols + pos + 1, q->symbols + pos + 2, (count - pos - 2) * sizeof(uint32_t));
-        --count;
+/* Lower rank first; the same rank keeps the leftmost symbol (smaller original index). */
+static int bigram_less(const QwenBigram *a, const QwenBigram *b) {
+    return a->rank < b->rank || (a->rank == b->rank && a->left < b->left);
+}
+
+static void heap_sift_up(QwenBigram *h, uint32_t i) {
+    while (i) {
+        uint32_t p = (i - 1) / 2;
+        QwenBigram t;
+        if (!bigram_less(&h[i], &h[p])) break;
+        t = h[i];
+        h[i] = h[p];
+        h[p] = t;
+        i = p;
     }
-    for (k = 0; k < count; ++k) push_id(ids, n, q->capacity, q->symbols[k]);
+}
+
+static void heap_sift_down(QwenBigram *h, uint32_t n, uint32_t i) {
+    for (;;) {
+        uint32_t l = i * 2 + 1, m = i;
+        QwenBigram t;
+        if (l >= n) break;
+        if (bigram_less(&h[l], &h[m])) m = l;
+        if (l + 1 < n && bigram_less(&h[l + 1], &h[m])) m = l + 1;
+        if (m == i) break;
+        t = h[i];
+        h[i] = h[m];
+        h[m] = t;
+        i = m;
+    }
+}
+
+static void heap_push(QwenBigram *h, uint32_t *n, uint32_t cap, QwenBigram b) {
+    if (*n >= cap) die("BPE merge heap exceeded");
+    h[*n] = b;
+    heap_sift_up(h, *n);
+    *n += 1;
+}
+
+static QwenBigram heap_pop(QwenBigram *h, uint32_t *n) {
+    QwenBigram top = h[0];
+    *n -= 1;
+    if (*n) {
+        h[0] = h[*n];
+        heap_sift_down(h, *n, 0);
+    }
+    return top;
+}
+
+/* Queue the pair that starts at left, when those two symbols have a merge. */
+static void consider_pair(QwenTokenizer *q, uint32_t *heap_n, uint32_t left) {
+    uint32_t right, rank;
+    QwenBigram b;
+    if (left == UINT32_MAX) return;
+    right = q->sym[left].next;
+    if (right == UINT32_MAX) return;
+    rank = merge_rank(q, q->sym[left].id, q->sym[right].id);
+    if (rank == UINT32_MAX) return;
+    b.left = left;
+    b.right = right;
+    b.rank = rank;
+    heap_push(q->heap, heap_n, q->heap_cap, b);
+}
+
+/* Byte-level BPE of one pre-token: lowest-rank merge first, leftmost on ties.
+ * A binary heap holds candidate pairs and a linked list holds the symbols, so a
+ * merge only reconsiders the two pairs that touch it. Stale heap entries (the
+ * symbols were already merged, or a token changed) fail the link or rank check. */
+static void merge_piece(QwenTokenizer *q, uint32_t start, uint32_t count, uint32_t *ids, uint32_t *n) {
+    uint32_t k, heap_n = 0;
+    if (count > q->capacity) die("byte workspace exceeded");
+    if (!count) return;
+    for (k = 0; k < count; ++k) {
+        q->sym[k].id = q->normalized[start + k];
+        q->sym[k].prev = k ? k - 1 : UINT32_MAX;
+        q->sym[k].next = k + 1 < count ? k + 1 : UINT32_MAX;
+    }
+    for (k = 0; k + 1 < count; ++k) consider_pair(q, &heap_n, k);
+    while (heap_n) {
+        uint32_t right_next, prev;
+        QwenBigram b = heap_pop(q->heap, &heap_n);
+        if (q->sym[b.left].next != b.right || q->sym[b.right].prev != b.left) continue;
+        if (merge_rank(q, q->sym[b.left].id, q->sym[b.right].id) != b.rank) continue;
+        q->sym[b.left].id = q->merge[b.rank].out;
+        right_next = q->sym[b.right].next;
+        q->sym[b.left].next = right_next;
+        if (right_next != UINT32_MAX) q->sym[right_next].prev = b.left;
+        q->sym[b.right].prev = UINT32_MAX;
+        q->sym[b.right].next = UINT32_MAX;
+        prev = q->sym[b.left].prev;
+        if (prev != UINT32_MAX) consider_pair(q, &heap_n, prev);
+        consider_pair(q, &heap_n, b.left);
+    }
+    for (k = 0; k != UINT32_MAX; k = q->sym[k].next) push_id(ids, n, q->capacity, q->sym[k].id);
 }
 
 /* Normalize (NFC or not at all), classify, pre-tokenize, then merge each pre-token. */
