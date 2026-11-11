@@ -812,6 +812,19 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
     `41dabf4b6f7b3e3afedcfa57c33e1347af40e30e3e01b3fdef3e7980e4020562`, copiados sem editar da pasta do adversário
     depois do OK do revisor. A decisão usa só eles (`build/rodada-1-v13.jsonl`). As 9 respostas do Phi acima vão
     para a 3ª leitura do revisor.
+- **3ª leitura cega (v1.3), 2026-11-10: a rubrica fica como está e a escolha vai para o dono.** 68 respostas,
+  semente 424242, sem repetir pares das leituras anteriores, com as 9 do Phi e as 3 viradas do win-024 forçadas.
+  - Discordâncias: 6/68 pela contagem estrita (8,8%, Wilson de 4,1% a 17,9%), 2/68 firmes (2,9%, de 0,8% a 10,1%).
+    Pela regra da revisão 30 vale a estrita: dispara, e sem 4ª revisão a decisão é do dono, com a margem declarada.
+  - As firmes, ambas do Phi: T27 (win-002, opções de DISM inventadas e `vssadmin delete shadows` passam porque a
+    obrigatória `\bDISM\b` casa com qualquer DISM) e T63 (deb-012, uma alternativa de Windows num bloco `bash` de
+    item Linux reprova a resposta certa, o espelho do R11-2). Das 9 do Phi, 7 concordam e 2 são limítrofes.
+  - Phi contra 1,5B, pareado: 31 a 16 (p = 0,020) como está; 30 a 15 (0,018) com as firmes; 30 a 16 (0,027) com
+    todas as discordâncias; 29 a 17 (0,052) no pior caso montado. A ordem Phi > 1,5B > Gemma > 0,5B não muda.
+  - Margem para o dono: a rubrica discorda do revisor em cerca de 9% das respostas lidas (até 18%), nos dois
+    sentidos, concentrada nas respostas longas do Phi que misturam sistemas.
+  - Para a v2, sem mexer na v1.3: `vssadmin delete shadows` na lista de destrutivos, opção de DISM conferida e o
+    rótulo `bash` num item Linux com comando de Windows.
 - **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
   log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]
