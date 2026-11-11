@@ -474,8 +474,15 @@ static int read_u32(FILE *f, uint32_t *x) {
     return 1;
 }
 
-/* 0 when the cache is off or the directory cannot be created. */
+/* 0 when the cache is off or the directory cannot be created. WebAssembly has
+ * no environment in the browser host: calling getenv would pull WASI's
+ * environ init, which exits if environ_sizes_get is missing. */
 static int kv_directory(char *buf, size_t cap) {
+#if defined(__wasm__)
+    (void)buf;
+    (void)cap;
+    return 0;
+#else
     const char *env = getenv("SMOLMOE_KV_CACHE");
     size_t n;
     if (env && env[0] == '0' && !env[1]) return 0;
@@ -489,6 +496,7 @@ static int kv_directory(char *buf, size_t cap) {
     if (n + 9 >= cap) return 0;
     memcpy(buf + n, "/smolmoe", 9);
     return ensure_directory(buf);
+#endif
 }
 
 static int system_kv_key(const Engine *e, const uint32_t *ids, uint32_t n, unsigned char out[32]) {
