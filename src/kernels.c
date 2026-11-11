@@ -906,13 +906,7 @@ static void attend_f16_avx2(const float *q, const uint16_t *keys, const uint16_t
     for (p = start; p <= pos; ++p) saxpy_f16_avx2(out, scores[p] * inv, values + (size_t)p * stride, hd);
 }
 #elif defined(SM_HAVE_NEON)
-static float reduce_neon(float32x4_t lo, float32x4_t hi) {
-    float a[8];
-    vst1q_f32(a, lo);
-    vst1q_f32(a + 4, hi);
-    return reduce8(a);
-}
-
+/* reduce_neon() above is the same 8-lane order as reduce8. */
 static float dot_f32_neon(const float *a, const float *b, uint32_t n) {
     float32x4_t lo = vdupq_n_f32(0), hi = vdupq_n_f32(0);
     float sum;
@@ -986,13 +980,7 @@ static void attend_f16_neon(const float *q, const uint16_t *keys, const uint16_t
     for (p = start; p <= pos; ++p) saxpy_f16_neon(out, scores[p] * inv, values + (size_t)p * stride, hd);
 }
 #elif defined(SM_HAVE_WASM_SIMD)
-static float reduce_wasm_attn(v128_t lo, v128_t hi) {
-    float a[8];
-    wasm_v128_store(a, lo);
-    wasm_v128_store(a + 4, hi);
-    return reduce8(a);
-}
-
+/* reduce_wasm() above is the same 8-lane order as reduce8. */
 static float dot_f32_wasm(const float *a, const float *b, uint32_t n) {
     v128_t lo = wasm_f32x4_splat(0), hi = wasm_f32x4_splat(0);
     float sum;
@@ -1001,7 +989,7 @@ static float dot_f32_wasm(const float *a, const float *b, uint32_t n) {
         lo = wasm_f32x4_add(lo, wasm_f32x4_mul(wasm_v128_load(a + i), wasm_v128_load(b + i)));
         hi = wasm_f32x4_add(hi, wasm_f32x4_mul(wasm_v128_load(a + i + 4), wasm_v128_load(b + i + 4)));
     }
-    sum = reduce_wasm_attn(lo, hi);
+    sum = reduce_wasm(lo, hi);
     for (; i < n; ++i) sum += a[i] * b[i];
     return sum;
 }
