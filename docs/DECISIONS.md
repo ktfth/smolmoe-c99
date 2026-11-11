@@ -806,7 +806,7 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
     de macOS e de Linux sem lista continuam isentos como alternativa.
   - **Viradas da v1.2 para a v1.3** nas 600 respostas, todas no win-024: 0,5B −1, Gemma −1, 1,5B +1, Phi 0. Dúvidas:
     0,5B 9/90, 1,5B 35/90, Gemma 15/90, Phi 41/90 (35,7% a 55,8%). Phi contra 1,5B, pareado só nas dúvidas: 16 a 10,
-    p = 0,1635, sem diferença pela regra.
+    p = 0,1635, sem diferença pela regra (nos 150 itens, 31 a 16, p = 0,020, mas a regra olha as dúvidas).
   - **Nenhuma pergunta mudou.** Shas finais: `MANIFEST.sha256` (v1.3)
     `ae2d97983c27c3b10eaf5a60af23b3e93bd4a3f6c5e4b82250bb9fe7b98eece5` e `MANIFEST-duvidas.sha256`
     `41dabf4b6f7b3e3afedcfa57c33e1347af40e30e3e01b3fdef3e7980e4020562`, copiados sem editar da pasta do adversário
@@ -819,8 +819,10 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
   - As firmes, ambas do Phi: T27 (win-002, opções de DISM inventadas e `vssadmin delete shadows` passam porque a
     obrigatória `\bDISM\b` casa com qualquer DISM) e T63 (deb-012, uma alternativa de Windows num bloco `bash` de
     item Linux reprova a resposta certa, o espelho do R11-2). Das 9 do Phi, 7 concordam e 2 são limítrofes.
-  - Phi contra 1,5B, pareado: 31 a 16 (p = 0,020) como está; 30 a 15 (0,018) com as firmes; 30 a 16 (0,027) com
-    todas as discordâncias; 29 a 17 (0,052) no pior caso montado. A ordem Phi > 1,5B > Gemma > 0,5B não muda.
+  - A regra olha as 90 dúvidas. Phi contra 1,5B, pareado: 16 a 10 (p = 0,163) como está; 15 a 9 (0,154) com as
+    firmes; 15 a 10 (0,212) com todas as discordâncias: empate em todo cenário. Phi e 1,5B ganham do Gemma e do
+    0,5B (p < 0,001); Gemma contra 0,5B empata (10 a 4, p = 0,090). Nos 150 itens, que não decidem, o Phi passa o
+    1,5B (31 a 16, p = 0,020).
   - Margem para o dono: a rubrica discorda do revisor em cerca de 9% das respostas lidas (até 18%), nos dois
     sentidos, concentrada nas respostas longas do Phi que misturam sistemas.
   - Para a v2, sem mexer na v1.3: `vssadmin delete shadows` na lista de destrutivos, opção de DISM conferida e o
