@@ -555,6 +555,9 @@ int user_cache_dir(char *buf, size_t cap) {
 uint32_t process_id(void) {
 #if defined(_WIN32)
     return (uint32_t)GetCurrentProcessId();
+#elif defined(__wasm__)
+    /* WASI deprecates getpid(), and the system-prompt cache is off here. */
+    return 1;
 #else
     return (uint32_t)getpid();
 #endif
