@@ -758,6 +758,40 @@ O Git Bash e o CI (shell do MSYS2) seguem como antes.
 - **Em repouso:** sem nada acontecendo, a janela dorme até chegar um evento, ou por até meio segundo (o cursor do campo pisca). Durante uma
   resposta, redesenha a cada quadro.
 
+## Iteração 12: conferência dos comandos das respostas
+
+**Motivo:** o Dolphin 3.0 (Llama 3.2 1B) inventa cmdlets, parâmetros e opções, e o comando sai errado. Ele não tem
+`<tool_call>` no vocabulário, então não pode pedir uma busca: quem confere é o runtime.
+
+**Etapa 1, a conferência depois da resposta (entrou):** PowerShell (o próprio analisador e `Get-Command`, num processo
+que fica aberto: ~14 ms por resposta, ~90–190 ms com nome inventado) e bash/sh (separador em C, `command -v` e o
+manual da máquina, com um índice embutido do Ubuntu 24.04 para máquinas sem manual). Nada da resposta roda. O aviso
+nunca diz "certo": diz o que conferiu e que não sabe se o comando faz o que foi pedido.
+
+**Etapa 2, a documentação no prompt antes da resposta (medida, ainda sem código no runtime):** 40 perguntas de
+manutenção (20 PowerShell, 20 bash), congeladas em `b139e9c` antes da primeira rodada, Dolphin Q8 guloso, 220 tokens.
+Nota de cada resposta: "útil e sem nada inventado" (contém um comando que resolve e a conferência não acha nome,
+parâmetro, opção ou subcomando inventado). `scripts/cmdcheck/eval-docs.ts`.
+
+| Braço | O que vai no prompt | Útil e sem nada inventado | Inventado | Tokens de prompt | Segundos por resposta |
+|---|---|---|---|---|---|
+| A | só a pergunta | 26/40 (PS 10, bash 16) | 6 | 57 | 11,0 |
+| B (teto) | a sintaxe real dos comandos certos | **37/40** (PS 19, bash 18) | 1 | 334 | 22,3 |
+| C | A; se a conferência achou algo, de novo com as achadas e a sintaxe do que elas citam | 28/40 | 3 | 88 | 12,5 |
+
+- **B contra A:** 13 ganhos, 2 perdas, p = 0,0074 (sinal exato). Uma das perdas é erro da métrica congelada:
+  `systemctl is-active nginx` responde certo, e a expressão só aceitava `systemctl status`.
+- **C contra A:** 2 ganhos, 0 perdas, p = 0,50. Não mostrou ganho.
+- **Por quê:** a maior parte das falhas de A não é nome inventado, é **comando errado mas real** (`Get-NetAdapter` com
+  uma propriedade que não existe, `cron` para tempo ligado). A conferência não vê isso, então C quase nunca refaz, e
+  quando refaz documenta os comandos errados. O ganho de B vem de **saber qual comando usar**, e a documentação que
+  B leva nomeia esse comando.
+- **Custo:** a documentação de B dobra o tempo por resposta no Dolphin (+277 tokens de prompt, +11 s); a ajuda do bash
+  (40 linhas de `--help`) pesa mais que a sintaxe do PowerShell (480 contra 188 tokens).
+
+**Decisão:** C não entra. A etapa 2 só vale com uma **busca da pergunta para o comando** antes da resposta, medida
+contra A e contra o teto B, com documentação mais curta. Até lá, nada no runtime.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é
