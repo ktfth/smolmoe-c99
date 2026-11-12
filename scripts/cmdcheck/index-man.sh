@@ -24,7 +24,8 @@ nl od hexdump xxd iconv locale localectl chroot sync tree"
 
 norm() {
     sed -e 's/\\f[BIRPV]//g' -e 's/\\f([A-Za-z][A-Za-z]//g' -e 's/\\f\[[^]]*\]//g' -e 's/\\-/-/g' \
-        -e 's/\\(hy/-/g' -e 's/\\(en/-/g' -e 's/\\(em/-/g' -e 's/\\&//g' -e 's/\\[ ~]/ /g' -e 's/"/ /g'
+        -e 's/\\(hy/-/g' -e 's/\\(en/-/g' -e 's/\\(em/-/g' -e 's/\\&//g' -e 's/\\[ ~]/ /g' -e 's/"/ /g' \
+        -e 's/\([^A-Za-z]\)Fl /\1-/g' -e 's/^Fl /-/'
 }
 
 page_text() {
@@ -45,11 +46,33 @@ for name in $PROGRAMS; do
     [ -n "$page" ] && [ -r "$page" ] || continue
     text=$(page_text "$page")
     [ -n "$text" ] || continue
+    # apt's page sends its options to apt-get's.
+    if [ "$name" = apt ]; then
+        also=$(man -w apt-get 2>/dev/null | head -n 1)
+        [ -n "$also" ] && text="$text
+$(page_text "$also")"
+    fi
+    # Subcommands with their own pages (docker-ps, git-commit): their names and options count.
+    subpages=""
+    case $name in git|docker|podman)
+        for d in $(manpath 2>/dev/null | tr ':' ' ') /usr/share/man; do
+            for f in "$d"/man1/"$name"-*; do
+                [ -r "$f" ] || continue
+                sub=${f##*/}; sub=${sub#"$name"-}; sub=${sub%%.*}
+                case " $subpages " in *" $sub "*) continue ;; esac
+                subpages="$subpages $sub"
+                text="$text
+$(page_text "$f")"
+            done
+        done ;;
+    esac
     options=$(printf '%s\n' "$text" | grep -o -E -e '(^|[^A-Za-z0-9-])--?[A-Za-z0-9][A-Za-z0-9-]*' |
         sed -e 's/^[^-]*//' | sort -u | tr '\n' ' ')
     # Subcommands: a word opening a line (after a roff macro), and git's git-<command> pages.
     subs=$(printf '%s\n' "$text" | sed -n -e 's/^\.[A-Z][A-Z]* //' -e 's/^\([a-z][a-z0-9-]*\).*/\1/p' |
         sort -u | tr '\n' ' ')
+    # With their own pages, those names are the subcommands; the first words of all the pages are noise.
+    [ -n "$subpages" ] && subs=$subpages
     if [ "$name" = git ]; then
         subs="$subs $(printf '%s\n' "$text" | grep -o -E 'git-[a-z][a-z0-9-]*' | sed 's/^git-//' | sort -u |
             tr '\n' ' ')"

@@ -207,6 +207,34 @@
       "deve": [],
       "nao_deve": [],
       "arquivo_que_nao_pode_existir": "smolmoe-caso-sh-nao-devia-existir.txt"
+    },
+    {
+      "id": "sh-opcao-do-apt-no-manual-do-apt-get",
+      "shell": "posix",
+      "resposta": "```bash\nsudo apt --fix-broken install\napt list --upgradeable\n```",
+      "deve": [],
+      "nao_deve": ["não cita a opção --fix-broken", "não cita a opção --upgradeable"]
+    },
+    {
+      "id": "sh-manual-em-mdoc",
+      "shell": "posix",
+      "resposta": "```bash\nssh-keygen -t ed25519 -f ~/.ssh/id_ed25519\n```",
+      "deve": [],
+      "nao_deve": ["não cita a opção -t", "não cita a opção -f"]
+    },
+    {
+      "id": "sh-subcomando-com-manual-proprio",
+      "shell": "posix",
+      "resposta": "```bash\ndocker logs -f web\ngit commit -m 'x'\n```",
+      "deve": [],
+      "nao_deve": ["não cita o subcomando logs", "docker: [^\\n]*não cita a opção -f", "não cita o subcomando commit", "git: [^\\n]*não cita a opção -m"]
+    },
+    {
+      "id": "sh-builtin-do-bash",
+      "shell": "posix",
+      "resposta": "```bash\nhistory | tail -n 20\nsource ~/.bashrc\n```",
+      "deve": [],
+      "nao_deve": ["history: não está no PATH", "source: não está no PATH"]
     }
   ]
 }

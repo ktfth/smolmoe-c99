@@ -51,6 +51,11 @@ static const char *const KEYWORDS[] = {"if", "then", "else", "elif", "fi", "do",
                                        "}", "!", "[[", "]]", "function", NULL};
 /* Their following words are not a command: for x in a b; case $x in. */
 static const char *const LIST_KEYWORDS[] = {"for", "case", "select", "esac", "in", NULL};
+/* bash builtins that sh (dash) lacks: command -v there would call them missing. */
+static const char *const BASH_BUILTINS[] = {"history", "source", "shopt", "declare", "typeset", "local", "disown",
+                                            "pushd", "popd", "dirs", "suspend", "complete", "compgen", "compopt",
+                                            "bind", "help", "mapfile", "readarray", "caller", "let", "enable",
+                                            "logout", "builtin", NULL};
 
 /* Programs whose first word after the name is a subcommand worth checking.
  * Not ip or nmcli: they take abbreviations (ip a, nmcli d). */
@@ -306,7 +311,7 @@ static void process(Sink *s, const Cmd *c) {
             break;
         }
     }
-    if (k >= m || !valid_name(&copy[k])) return;
+    if (k >= m || !valid_name(&copy[k]) || in_set(copy[k].text, BASH_BUILTINS)) return;
     j = k + 1;
     if (in_set(copy[k].text, SUBCOMMANDS) && j < m && valid_subcommand(&copy[j])) sub = copy[j++].text;
     n = (size_t)snprintf(line, sizeof(line), "%s\t%s", copy[k].text, sub ? sub : ".");
@@ -506,7 +511,17 @@ static const char *const SH_SCRIPT[] = {
     "trap 'rm -f \"$tmp\"' EXIT",
     "norm() {",
     "  sed -e 's/\\\\f[BIRPV]//g' -e 's/\\\\f([A-Za-z][A-Za-z]//g' -e 's/\\\\f\\[[^]]*\\]//g' -e 's/\\\\-/-/g' \\",
-    "      -e 's/\\\\(hy/-/g' -e 's/\\\\(en/-/g' -e 's/\\\\(em/-/g' -e 's/\\\\&//g' -e 's/\\\\[ ~]/ /g' -e 's/\"/ /g'",
+    "      -e 's/\\\\(hy/-/g' -e 's/\\\\(en/-/g' -e 's/\\\\(em/-/g' -e 's/\\\\&//g' -e 's/\\\\[ ~]/ /g' -e 's/\"/ /g' \\",
+    "      -e 's/\\([^A-Za-z]\\)Fl /\\1-/g' -e 's/^Fl /-/'",
+    "}",
+    "unpack() {",
+    "  case $1 in",
+    "    *.gz) gzip -dc \"$1\" ;;",
+    "    *.bz2) bzip2 -dc \"$1\" ;;",
+    "    *.xz) xz -dc \"$1\" ;;",
+    "    *.zst) zstd -dc \"$1\" ;;",
+    "    *) cat \"$1\" ;;",
+    "  esac 2>/dev/null",
     "}",
     "cites() {",
     "  grep -q -E -e \"(^|[^A-Za-z0-9-])$1([^A-Za-z0-9-]|\\$)\" \"$tmp\"",
@@ -518,17 +533,19 @@ static const char *const SH_SCRIPT[] = {
     "  if ! command -v \"$name\" >/dev/null 2>&1; then printf 'N\\t%s\\t\\n' \"$name\"; continue; fi",
     "  case $(command -v \"$name\") in /*) ;; *) continue ;; esac",
     "  [ \"$sub\" = . ] && [ $# -eq 0 ] && continue",
-    "  page=$(man -w \"$name\" 2>/dev/null | head -n 1)",
+    /* A subcommand with its own page (docker-ps, git-commit) is checked there. */
+    "  subpage=",
+    "  [ \"$sub\" != . ] && subpage=$(man -w \"$name-$sub\" 2>/dev/null | head -n 1)",
+    "  page=${subpage:-$(man -w \"$name\" 2>/dev/null | head -n 1)}",
     "  if [ -z \"$page\" ] || [ ! -r \"$page\" ]; then printf 'M\\t%s\\n' \"$name\"; continue; fi",
-    "  case $page in",
-    "    *.gz) gzip -dc \"$page\" ;;",
-    "    *.bz2) bzip2 -dc \"$page\" ;;",
-    "    *.xz) xz -dc \"$page\" ;;",
-    "    *.zst) zstd -dc \"$page\" ;;",
-    "    *) cat \"$page\" ;;",
-    "  esac 2>/dev/null | norm > \"$tmp\"",
+    /* apt's page sends its options to apt-get's. */
+    "  also=",
+    "  [ \"$name\" = apt ] && also=$(man -w apt-get 2>/dev/null | head -n 1)",
+    "  { unpack \"$page\"; [ -n \"$also\" ] && unpack \"$also\"; } | norm > \"$tmp\"",
     "  if [ ! -s \"$tmp\" ]; then printf 'M\\t%s\\n' \"$name\"; continue; fi",
-    "  if [ \"$sub\" != . ] && ! grep -q -w -e \"$sub\" \"$tmp\"; then printf 'S\\t%s\\t%s\\n' \"$name\" \"$sub\"; fi",
+    "  if [ \"$sub\" != . ] && [ -z \"$subpage\" ] && ! grep -q -w -e \"$sub\" \"$tmp\"; then",
+    "    printf 'S\\t%s\\t%s\\n' \"$name\" \"$sub\"",
+    "  fi",
     "  for o in \"$@\"; do",
     "    cites \"$o\" && continue",
     "    case $o in",

@@ -125,6 +125,8 @@ static void test_sh_commands(void) {
     expect_sh("sed -i 's/a/b/' f; sed -n 1p f", "sed\t.\t-i\nsed\t.\t-n\n", "W\tsed\t-\n");
     expect_sh("service nginx restart", "service\t.\n", "W\tservice\t-\n");
     expect_sh("docker ps -a; docker rm -f web", "docker\tps\t-a\ndocker\trm\t-f\n", "W\tdocker\t-\n");
+    /* bash builtins that sh lacks are not programs to look up. */
+    expect_sh("history | tail -n 20; source ~/.bashrc", "tail\t.\t-n\n", "");
     /* Repeated commands once; each change once. */
     expect_sh("rm a\nrm a\nrm -r b", "rm\t.\nrm\t.\t-r\n", "W\trm\t-\n");
 }
@@ -231,6 +233,13 @@ static void test_format_posix(void) {
                         "Conferência no sh desta máquina:\n"
                         "  - systemctl muda o sistema: confira o alvo antes de rodar.\n"
                         "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
+    /* The same finding from several lines of the reply is said once. */
+    expect_format_posix("N\tufw\t\nO\tapt\t--x\nN\tufw\t\nO\tapt\t--x\n", "", 1, "",
+                        "Conferência no sh desta máquina:\n"
+                        "  - ufw: não está no PATH desta máquina (se o comando é para outra máquina, ignore "
+                        "este aviso).\n"
+                        "  - apt: o manual desta máquina não cita a opção --x.\n"
+                        "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
     /* A dashed program name is not read as a PowerShell Verb-Noun. */
     expect_format_posix("N\tapt-get\t\n", "", 1, "",
                         "Conferência no sh desta máquina:\n"
@@ -244,6 +253,9 @@ static void test_sh_script(void) {
     size_t n = cmdcheck_sh_script(script, sizeof(script));
     CHECK(n > 100 && strstr(script, "man -w") && strstr(script, "command -v"), "the sh script is there (%zu)", n);
     CHECK(!strstr(script, "--help"), "the sh script never runs a program from the reply");
+    CHECK(strstr(script, "Fl ") != NULL, "mdoc pages (.Fl t) are read too");
+    CHECK(strstr(script, "$name-$sub") != NULL, "a subcommand's own page (docker-ps) is read");
+    CHECK(strstr(script, "apt-get") != NULL, "apt's options are in apt-get's page");
     CHECK(cmdcheck_sh_script(script, 10) == 0, "a script that does not fit is refused");
 }
 

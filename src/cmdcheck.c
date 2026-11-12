@@ -301,13 +301,26 @@ static int format_item(Text *t, Text *notes, CmdCheckKind kind, const char *line
     return 1;
 }
 
+/* Whether the line s[start, start+len) already appeared before start. */
+static int line_seen(const char *s, size_t start, size_t len) {
+    size_t k = 0;
+    while (k < start) {
+        const char *nl = (const char *)memchr(s + k, '\n', start - k);
+        size_t e = nl ? (size_t)(nl - s) : start;
+        if (e - k == len && !memcmp(s + k, s + start, len)) return 1;
+        k = e + 1;
+    }
+    return 0;
+}
+
 static int format_lines(Text *list, Text *notes, CmdCheckKind kind, const char *s, size_t n) {
     size_t i = 0;
     int count = 0;
     while (i < n) {
         const char *nl = (const char *)memchr(s + i, '\n', n - i);
         size_t e = nl ? (size_t)(nl - s) : n;
-        count += format_item(list, notes, kind, s + i, e - i);
+        /* Each line of the reply is looked up apart: the same finding can come several times. */
+        if (!line_seen(s, i, e - i)) count += format_item(list, notes, kind, s + i, e - i);
         i = e + 1;
     }
     return count;
