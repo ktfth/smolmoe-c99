@@ -5,8 +5,12 @@
  *   A  the question alone;
  *   B  the question after the real syntax of the expected commands (the ceiling);
  *   C  A, and when the check found something invented, one more answer after
- *      the findings and the real syntax of the commands they name (no oracle).
+ *      the findings and the real syntax of the commands they name (no oracle);
+ *   D  the question after the command book's tasks it finds (scripts/cmdcheck/livro.ts, no oracle).
  * The command check itself scores every answer.
+ *
+ * --conjunto livro runs A and D on tests/evals/livro/perguntas.json instead:
+ * questions the book was frozen before, scored by their own rubric.
  *
  *   bun scripts/cmdcheck/eval-docs.ts capturar            # once: fills "docs" (PowerShell here, sh help in Linux)
  *   bun scripts/cmdcheck/eval-docs.ts gerar --braco A     # writes build/docs-A.jsonl (heavy: runs the model)
@@ -14,6 +18,7 @@
  *   bun scripts/cmdcheck/eval-docs.ts gerar --braco C     # needs build/docs-A.conferido.jsonl
  *   bun scripts/cmdcheck/eval-docs.ts conferir --braco A  # writes build/docs-A.conferido.jsonl
  *   bun scripts/cmdcheck/eval-docs.ts resumo
+ *   bun scripts/cmdcheck/eval-docs.ts gerar --conjunto livro --braco D   # build/livro-D.jsonl
  *
  * On Windows the POSIX answers are checked, and sh help captured, in a WSL
  * distro, so systemctl or apt are not "missing": set SMOLMOE_WSL_DISTRO,
@@ -25,23 +30,34 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import { buscar, carregar, prefixo } from "./livro";
+
 const ROOT = resolve(import.meta.dir, "..", "..");
 const EXE = process.platform === "win32" ? ".exe" : "";
 const WINDOWS = process.platform === "win32";
-const SET = join(ROOT, "tests", "evals", "docs-no-prompt", "perguntas.json");
+const SETS = {
+  docs: join(ROOT, "tests", "evals", "docs-no-prompt", "perguntas.json"),
+  livro: join(ROOT, "tests", "evals", "livro", "perguntas.json"),
+} as const;
 const DOC_MAX = 1800; /* characters of documentation per question: ~450 tokens, ~10 s of prefill on Dolphin */
 const HELP_LINES = 40;
 
 type Shell = "powershell" | "posix";
-type Braco = "A" | "B" | "C";
+type Braco = "A" | "B" | "C" | "D";
+type Conjunto = keyof typeof SETS;
 
 interface Pergunta {
   readonly id: string;
   readonly shell: Shell;
   readonly pergunta: string;
-  readonly esperado: readonly string[];
-  readonly alvos: readonly string[];
+  /* docs set: one of these in the answer makes it useful; 'alvos' are B's commands. */
+  readonly esperado?: readonly string[];
+  readonly alvos?: readonly string[];
   docs?: string;
+  /* livro set: all 'obrigatorios' and no 'proibidos', in the code blocks ('alvo: comando') or the whole answer. */
+  readonly alvo?: "comando" | "resposta";
+  readonly obrigatorios?: readonly string[];
+  readonly proibidos?: readonly string[];
 }
 
 interface Resposta {
@@ -52,6 +68,7 @@ interface Resposta {
   readonly prompt_tokens: number;
   readonly segundos: number;
   readonly refeita: boolean; /* C: answered again after the findings */
+  readonly livro?: readonly string[]; /* D: the book's tasks in the prompt */
 }
 
 interface Conferida extends Resposta {
@@ -69,9 +86,15 @@ const { positionals, values } = parseArgs({
     modelo: { type: "string", default: join(ROOT, "models", "dolphin3.0-llama3.2-1b") },
     tokens: { type: "string", default: "220" },
     saida: { type: "string", default: join(ROOT, "build") },
+    conjunto: { type: "string", default: "docs" },
     forcar: { type: "boolean", default: false },
   },
 });
+
+const conjunto = values.conjunto as Conjunto;
+if (!(conjunto in SETS)) throw new Error(`--conjunto ${Object.keys(SETS).join("|")}`);
+const SET = SETS[conjunto];
+const arquivo = (braco: Braco, sufixo = ""): string => join(values.saida!, `${conjunto}-${braco}${sufixo}.jsonl`);
 
 function loadSet(): { raw: { descricao: string; perguntas: Pergunta[] }; perguntas: Pergunta[] } {
   const raw = JSON.parse(readFileSync(SET, "utf8")) as { descricao: string; perguntas: Pergunta[] };
@@ -126,11 +149,12 @@ function shHelp(names: readonly string[]): string {
 }
 
 function capturar(): void {
+  if (conjunto !== "docs") throw new Error("capturar é só do conjunto docs");
   const { raw, perguntas } = loadSet();
   let filled = 0;
   for (const p of perguntas) {
     if (p.docs && !values.forcar) continue;
-    p.docs = p.shell === "powershell" ? psSyntax(p.alvos) : shHelp(p.alvos);
+    p.docs = p.shell === "powershell" ? psSyntax(p.alvos ?? []) : shHelp(p.alvos ?? []);
     if (!p.docs) throw new Error(`sem documentação para ${p.id}`);
     ++filled;
   }
@@ -172,14 +196,20 @@ function findings(aviso: string): string {
 
 function gerar(): void {
   const braco = values.braco as Braco;
+  if (conjunto !== "docs" && (braco === "B" || braco === "C")) throw new Error(`o braço ${braco} é só do conjunto docs`);
   const { perguntas } = loadSet();
-  const out = join(values.saida!, `docs-${braco}.jsonl`);
-  const conferidasA = braco === "C" ? readJsonl<Conferida>(join(values.saida!, "docs-A.conferido.jsonl")) : [];
+  const out = arquivo(braco);
+  const conferidasA = braco === "C" ? readJsonl<Conferida>(arquivo("A", ".conferido")) : [];
+  const livro = braco === "D" ? carregar() : null;
   mkdirSync(values.saida!, { recursive: true });
   const linhas: string[] = [];
   for (const p of perguntas) {
-    let prompt = p.pergunta, refeita = false;
-    if (braco === "B") {
+    let prompt = p.pergunta, refeita = false, tarefas: string[] | undefined;
+    if (braco === "D") {
+      const achados = buscar(livro!, p.pergunta, p.shell);
+      tarefas = achados.map((a) => a.tarefa.id);
+      prompt = prefixo(achados, p.shell) + p.pergunta;
+    } else if (braco === "B") {
       if (!p.docs) throw new Error(`rode 'capturar' antes: ${p.id} sem docs`);
       prompt = withDocs(p.docs, p.pergunta);
     } else if (braco === "C") {
@@ -196,8 +226,10 @@ function gerar(): void {
       refeita = true;
     }
     const r = ask(prompt);
-    linhas.push(JSON.stringify({ id: p.id, braco, prompt, refeita, ...r } satisfies Resposta));
-    console.log(`${braco} ${p.id}: ${r.prompt_tokens} tokens de prompt, ${r.segundos.toFixed(1)} s`);
+    linhas.push(JSON.stringify({ id: p.id, braco, prompt, refeita, ...(tarefas ? { livro: tarefas } : {}), ...r } satisfies
+      Resposta));
+    console.log(`${braco} ${p.id}: ${r.prompt_tokens} tokens de prompt, ${r.segundos.toFixed(1)} s` +
+      (tarefas ? ` [${tarefas.join(" ")}]` : ""));
   }
   writeFileSync(out, `${linhas.join("\n")}\n`);
 }
@@ -227,20 +259,32 @@ function check(r: Resposta, shell: Shell): string {
     `${env("SMOLMOE_TROCA_WSL")}/${name}`]);
 }
 
+/* The code blocks of an answer: what the livro set's rubric reads for 'alvo: comando'. */
+function blocos(resposta: string): string {
+  return [...resposta.matchAll(/```[^\n]*\n([\s\S]*?)(```|$)/g)].map((m) => m[1]).join("\n");
+}
+
+function util(p: Pergunta, resposta: string): boolean {
+  if (p.esperado) return p.esperado.some((e) => new RegExp(e, "i").test(resposta));
+  const alvo = p.alvo === "resposta" ? resposta : blocos(resposta);
+  if (!alvo.trim()) return false;
+  return (p.obrigatorios ?? []).every((e) => new RegExp(e, "iu").test(alvo)) &&
+    !(p.proibidos ?? []).some((e) => new RegExp(e, "iu").test(alvo));
+}
+
 function conferir(): void {
   const braco = values.braco as Braco;
   const { perguntas } = loadSet();
-  const respostas = readJsonl<Resposta>(join(values.saida!, `docs-${braco}.jsonl`));
+  const respostas = readJsonl<Resposta>(arquivo(braco));
   const linhas = respostas.map((r) => {
     const p = perguntas.find((q) => q.id === r.id)!;
     const aviso = check(r, p.shell);
     const inventado = /não tem o parâmetro|não cita (a opção|o subcomando)/.test(aviso) ||
       (p.shell === "powershell" && /não achei aqui/.test(aviso));
     const ausente = /não está no PATH/.test(aviso);
-    const util = p.esperado.some((e) => new RegExp(e, "i").test(r.resposta));
-    return JSON.stringify({ ...r, aviso, util, inventado, ausente } satisfies Conferida);
+    return JSON.stringify({ ...r, aviso, util: util(p, r.resposta), inventado, ausente } satisfies Conferida);
   });
-  writeFileSync(join(values.saida!, `docs-${braco}.conferido.jsonl`), `${linhas.join("\n")}\n`);
+  writeFileSync(arquivo(braco, ".conferido"), `${linhas.join("\n")}\n`);
   console.log(`${linhas.length} respostas conferidas (${braco})`);
 }
 
@@ -257,13 +301,14 @@ function signTest(wins: number, losses: number): number {
 }
 
 function resumo(): void {
-  const bracos = (["A", "B", "C"] as Braco[]).filter((b) => existsSync(join(values.saida!, `docs-${b}.conferido.jsonl`)));
-  const por = new Map(bracos.map((b) => [b, readJsonl<Conferida>(join(values.saida!, `docs-${b}.conferido.jsonl`))]));
+  const shell = new Map(loadSet().perguntas.map((p) => [p.id, p.shell]));
+  const bracos = (["A", "B", "C", "D"] as Braco[]).filter((b) => existsSync(arquivo(b, ".conferido")));
+  const por = new Map(bracos.map((b) => [b, readJsonl<Conferida>(arquivo(b, ".conferido"))]));
   const ok = (c: Conferida) => c.util && !c.inventado;
   console.log("| braço | shell | útil e sem nada inventado | inventado | programa ausente | útil | tokens de prompt (média) | segundos (média) |");
   console.log("|---|---|---|---|---|---|---|---|");
   for (const b of bracos) for (const s of ["powershell", "posix", "todas"] as const) {
-    const rs = por.get(b)!.filter((c) => s === "todas" || c.id.startsWith(s === "powershell" ? "ps-" : "sh-"));
+    const rs = por.get(b)!.filter((c) => s === "todas" || shell.get(c.id) === s);
     const mean = (f: (c: Conferida) => number) => (rs.reduce((t, c) => t + f(c), 0) / rs.length).toFixed(1);
     console.log(`| ${b} | ${s} | ${rs.filter(ok).length}/${rs.length} | ${rs.filter((c) => c.inventado).length} | ` +
       `${rs.filter((c) => c.ausente).length} | ${rs.filter((c) => c.util).length} | ${mean((c) => c.prompt_tokens)} | ` +

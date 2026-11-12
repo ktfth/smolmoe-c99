@@ -792,6 +792,43 @@ parâmetro, opção ou subcomando inventado). `scripts/cmdcheck/eval-docs.ts`.
 **Decisão:** C não entra. A etapa 2 só vale com uma **busca da pergunta para o comando** antes da resposta, medida
 contra A e contra o teto B, com documentação mais curta. Até lá, nada no runtime.
 
+**Etapa 2, o livro de comandos (medido, não entrou):** 62 tarefas de manutenção em português, cada uma ligada a
+comandos reais de PowerShell e bash com um comentário curto (`scripts/cmdcheck/livro.json`). Uma busca por palavras
+em comum (pesadas pela raridade, com um radical tosco, tudo fácil em C) põe no prompt até duas tarefas, cerca de 80
+tokens (braço D). O livro foi congelado em `c42b497` **antes** de ler o conjunto de teste: os 42 pedidos de comando
+(20 PowerShell, 22 apt) do conjunto do adversário de 2026-11-10, copiados sem editar (`tests/evals/livro`), cada um
+com a sua rubrica (obrigatórios e proibidos nos blocos de código).
+
+| Conjunto | A (só a pergunta) | D (com o livro) | D contra A | Tokens de prompt | Segundos por resposta |
+|---|---|---|---|---|---|
+| teste (42, nunca visto) | 8/42 (PS 2, apt 6) | 13/42 (PS 6, apt 7) | 7 ganhos, 2 perdas, p = 0,18 | 76 → 158 | 8,6 → 9,9 |
+| antigo (40, a busca foi ajustada nele) | 26/40 | 31/40 | 7 ganhos, 2 perdas, p = 0,18 | 57 → 139 | 11,0 → 10,4 |
+
+- **A direção é boa, mas não há prova:** nem no conjunto em que a busca foi ajustada o ganho é significativo.
+  - Quatro vitórias são de conteúdo: `Restart-Service`, `-Recurse -Descending`, `LastBootUpTime` e `Checkpoint-Computer`
+    no lugar de um cmdlet inventado.
+  - Uma vitória é cópia do exemplo do livro: `docker logs`.
+  - As outras duas vitórias e as duas derrotas são de formato: o comando certo veio entre crases, fora de bloco, e a
+    rubrica exige bloco.
+  - Aceitando também código entre crases (leitura feita depois de ver os dados, só como sensibilidade), fica A 13,
+    D 15, com 5 ganhos e 3 perdas.
+- **O limite é o modelo, não a busca.** A busca achou alguma tarefa em 41 das 42 perguntas, e só os exemplos do livro já
+  cumpririam a rubrica de 21. Mesmo assim, o Dolphin acerta 13. Ele raramente adapta o exemplo à pergunta (o pacote
+  `htop`, `-First 10`, `--tail 100`) e às vezes troca o bloco por prosa.
+- **Custo:** +82 tokens e +1,3 s por resposta no conjunto de teste, cerca de um nono do tempo extra da documentação de B (+11 s).
+- **Achados de passagem (entraram):** conferir os exemplos do livro revelou falsos positivos na conferência do bash, que
+  as respostas do modelo também sofreriam (`5724cab`):
+  - as opções do `apt` ficam no manual do `apt-get`;
+  - os manuais em mdoc (`ssh-keygen -t`);
+  - os manuais próprios de subcomando (`docker-ps`);
+  - os builtins do bash (`history`);
+  - o mesmo aviso repetido por linha.
+  Também revelou um erro meu no livro: `icacls` com parênteses sem aspas no PowerShell.
+
+**Decisão:** o livro não entra no runtime por enquanto: a regra era entrar só com ganho medido. Para decidir com
+poder estatístico, o próximo passo é um conjunto de teste maior (cerca de 120 pedidos, escrito por quem não viu o
+livro), e não mais ajuste da busca.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é
