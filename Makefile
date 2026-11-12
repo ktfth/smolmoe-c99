@@ -41,7 +41,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell engine chat main
+SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell cmdcheck engine chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -68,6 +68,7 @@ TEST_TOOLS := $(BUILD)/test-tools$(EXE)
 TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 TEST_CALC  := $(BUILD)/test-calc$(EXE)
 TEST_SHELL := $(BUILD)/test-shell$(EXE)
+TEST_CMDCHECK := $(BUILD)/test-cmdcheck$(EXE)
 TEST_DESKTOP := $(BUILD)/test-desktop$(EXE)
 TEST_INV   := $(BUILD)/test-inventory$(EXE)
 INVENTARIO := $(BUILD)/smolmoe-inventario$(EXE)
@@ -138,6 +139,9 @@ $(TEST_CALC): $(BUILD)/tests/test_calc.o $(OBJ_LIB)
 $(TEST_SHELL): $(BUILD)/tests/test_shell.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_CMDCHECK): $(BUILD)/tests/test_cmdcheck.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 $(TEST_DESKTOP): $(BUILD)/tests/test_desktop.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
@@ -150,12 +154,13 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_DESKTOP)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_CMDCHECK) $(TEST_DESKTOP)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
 	$(TEST_SHELL)
+	$(TEST_CMDCHECK)
 	$(TEST_DESKTOP)
 
 # Per-test limit; bun ignores a timeout set in bunfig.toml. SLOW_TEST_MS covers the real-model tests.

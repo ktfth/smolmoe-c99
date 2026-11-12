@@ -1,10 +1,12 @@
 #include "chat.h"
+#include "cmdcheck.h"
 #include "config.h"
 #include "platform.h"
 #include "process.h"
 #include "util.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PASTE_MS 100u        /* lines closer than this were pasted together: nobody types that fast */
@@ -112,13 +114,56 @@ static int command_line(const ChatContext *c, int truncated, int pasted) {
 
 /* ---- engine output: replies to stdout, notices to stderr ---------------- */
 
+#define REPLY_KEPT 32768u /* reply bytes kept for the command check; a 512-token reply is far less */
+
+/* The reply as it is written, kept for the command check at its end. */
+typedef struct Reply {
+    Output *out;
+    CmdChecker *checker; /* NULL: no check */
+    char *text;
+    size_t len;
+    int full; /* a piece did not fit: the rest is dropped too, so the kept text has no gaps */
+} Reply;
+
 static void reply_text(void *ctx, const unsigned char *bytes, uint32_t n) {
-    Output *out = (Output *)ctx;
-    output_bytes(out, bytes, n);
-    if (fflush(out->f)) die("output flush failed");
+    Reply *r = (Reply *)ctx;
+    output_bytes(r->out, bytes, n);
+    if (fflush(r->out->f)) die("output flush failed");
+    if (!r->checker || r->full) return;
+    if (n > REPLY_KEPT - r->len) {
+        r->full = 1;
+        return;
+    }
+    memcpy(r->text + r->len, bytes, n);
+    r->len += n;
 }
 
-static void reply_end(void *ctx) { output_finish((Output *)ctx); }
+static void reply_end(void *ctx) {
+    Reply *r = (Reply *)ctx;
+    char notice[CMDCHECK_NOTICE_MAX];
+    output_finish(r->out);
+    if (r->checker && r->len && cmdcheck_reply(r->checker, r->text, r->len, notice, sizeof(notice)))
+        fprintf(stderr, "\n%s", notice);
+    r->len = 0;
+    r->full = 0;
+}
+
+/* Starts the check's PowerShell after the system prompt, so it warms up while
+ * the user types instead of competing with the prefill, and before the banner:
+ * starting it takes a moment, and a line typed after the banner but before the
+ * prompt would be read as typed ahead (a paste). Returns 0 with a reason in err. */
+static int start_check(const ChatContext *c, Reply *r, char *err, size_t cap) {
+    if (!c->check_shell) return 1;
+    r->text = (char *)malloc(REPLY_KEPT);
+    if (!r->text) {
+        snprintf(err, cap, "sem memória");
+        return 0;
+    }
+    if ((r->checker = cmdcheck_start(c->check_shell, 1, err, cap)) != NULL) return 1;
+    free(r->text);
+    r->text = NULL;
+    return 0;
+}
 
 static void notice(void *ctx, const char *line) {
     (void)ctx;
@@ -127,11 +172,17 @@ static void notice(void *ctx, const char *line) {
 
 void chat_run(const ChatContext *c) {
     Engine *e = c->engine;
-    e->sink.ctx = c->out;
+    Reply reply;
+    char check_err[256];
+    int checking;
+    memset(&reply, 0, sizeof(reply));
+    reply.out = c->out;
+    e->sink.ctx = &reply;
     e->sink.text = reply_text;
     e->sink.reply_end = reply_end;
     e->sink.notice = notice;
     engine_start(e);
+    checking = start_check(c, &reply, check_err, sizeof(check_err));
     if (c->terminal) {
         terminal_input_unbuffered();
         bracketed_paste_start();
@@ -139,6 +190,11 @@ void chat_run(const ChatContext *c) {
     fprintf(stderr, "smolmoe " SMOLMOE_VERSION " - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.\n");
     if (e->tools) fputs("Ferramentas: data_atual, dias_ate, calcular, converter, contar.\n", stderr);
     if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s.\n", c->shell->name);
+    if (reply.checker)
+        fprintf(stderr, "Conferência: os comandos das respostas são procurados no %s desta máquina (nada roda).\n",
+                c->check_shell->name);
+    else if (!checking)
+        fprintf(stderr, "(conferência dos comandos desligada: %s)\n", check_err);
     for (;;) {
         int len, truncated, pasted;
         fputs("\n> ", stderr);
@@ -156,4 +212,6 @@ void chat_run(const ChatContext *c) {
         if (command_line(c, truncated, pasted)) continue;
         engine_send(e, c->line, (uint32_t)len);
     }
+    cmdcheck_stop(reply.checker);
+    free(reply.text);
 }

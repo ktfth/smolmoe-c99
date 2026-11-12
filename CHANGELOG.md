@@ -3,6 +3,13 @@
 ## Não lançado
 
 ### Adicionado
+- **Conferência dos comandos das respostas:** depois de cada resposta do chat, os comandos dela (blocos de código,
+  código entre crases e `Verbo-Nome` no texto) são procurados no PowerShell da máquina, que só os analisa, sem
+  executar. O aviso aponta cmdlets e parâmetros que não existem aqui, com nomes parecidos, e cmdlets reais que mudam o
+  sistema (os que aceitam `-WhatIf`), e sempre diz que não confere se o comando faz o que foi pedido. Blocos de bash,
+  sh e cmd são citados como não conferidos. Um PowerShell fica aberto em segundo plano: ~14 ms por resposta, ~90–190
+  ms com nome inventado (i7-10610U). Liga no terminal; `--command-check`, `--no-command-check` e
+  `--check-commands ARQUIVO` (sem modelo).
 - **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
   3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
   O runtime ganhou o escalonamento de RoPE `llama3` (quatro chaves opcionais `rope_llama3_*` na `config.ini`), o

@@ -8,6 +8,7 @@
 
 #include "bundle.h"
 #include "chat.h"
+#include "cmdcheck.h"
 #include "config.h"
 #include "kernels.h"
 #include "model.h"
@@ -33,11 +34,13 @@ typedef struct Options {
     const char *model, *config, *tokenizer, *prompt, *prompt_file, *system;
     const char *stats, *trace, *token_ids;
     const char *shell; /* --shell */
+    const char *check_commands; /* --check-commands: check a reply file and exit */
     uint32_t tokens, context, memory_mib, seed, threads, batch, top_k;
     float temperature, top_p;
     int scalar, fast, chat, hash_logits, tokenize_only, perplexity, interactive, tokens_given, no_tools, fixed_clock,
         profile;
     int shell_escape; /* "!comando": 0 on in a terminal, 1 also on piped input, -1 off */
+    int command_check; /* looking up the reply's commands: 0 on in a terminal, 1 also on piped input, -1 off */
     int memory_given; /* --memory-mib: otherwise the KV cache is added to the default budget */
     ToolClock clock; /* --now */
 } Options;
@@ -77,6 +80,8 @@ static void usage(FILE *out) {
           "                       (default: the shell that started smolmoe, else the system's)\n"
           "  --no-shell-escape    \"!command\" lines are plain messages\n"
           "  --shell-escape       also run them when input is piped (off there by default)\n"
+          "  --no-command-check   do not look up the reply's commands in this machine's PowerShell\n"
+          "  --command-check      also look them up when input is piped (off there by default)\n"
           "generation\n"
           "  --tokens N           max new tokens (default 64; 512 per reply in chat)\n"
           "  --temperature X      0 = greedy (default), positive = sample\n"
@@ -98,6 +103,8 @@ static void usage(FILE *out) {
           "  --token-ids FILE     prompt and generated token IDs, one per line\n"
           "  --perplexity         score the prompt (teacher-forced NLL, perplexity); no generation\n"
           "  --tokenize-only      encode and render the prompt; no weights needed\n"
+          "  --check-commands FILE  look up the commands in FILE (a reply) in this machine's PowerShell,\n"
+          "                       as the chat does after each reply; no weights needed\n"
           "  --version, --help\n", out);
 }
 
@@ -112,6 +119,7 @@ static void parse_value(Options *o, const char *opt, const char *value) {
     else if (!strcmp(opt, "--trace")) o->trace = value;
     else if (!strcmp(opt, "--token-ids")) o->token_ids = value;
     else if (!strcmp(opt, "--shell")) o->shell = value;
+    else if (!strcmp(opt, "--check-commands")) o->check_commands = value;
     else if (!strcmp(opt, "--now")) {
         if (!tool_clock_parse(value, &o->clock)) die("--now must be a local date and time as YYYY-MM-DDTHH:MM");
         o->fixed_clock = 1;
@@ -165,11 +173,14 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--no-tools")) { o->no_tools = 1; continue; }
         if (!strcmp(opt, "--shell-escape")) { o->shell_escape = 1; continue; }
         if (!strcmp(opt, "--no-shell-escape")) { o->shell_escape = -1; continue; }
+        if (!strcmp(opt, "--command-check")) { o->command_check = 1; continue; }
+        if (!strcmp(opt, "--no-command-check")) { o->command_check = -1; continue; }
         if (!strcmp(opt, "--profile")) { o->profile = 1; continue; }
         if (opt[0] != '-' && !o->model) { o->model = opt; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
         parse_value(o, opt, argv[++a]);
     }
+    if (o->check_commands) return;
     if (o->prompt && o->prompt_file) { usage(stderr); exit(1); }
     if (!o->prompt && !o->prompt_file) {
         if (o->tokenize_only || o->perplexity) die("--tokenize-only and --perplexity need --prompt or --prompt-file");
@@ -505,11 +516,52 @@ static const Shell *chat_shell(const Options *o, int terminal, Shell *shell) {
     return on ? shell : NULL;
 }
 
+/* The PowerShell that looks up each reply's commands: on in a terminal, on
+ * piped input only with --command-check. The chat's own shell when it is a
+ * PowerShell, else pwsh or powershell from PATH (--shell picks the "!" shell,
+ * which may be cmd or bash). Without one the check is off, with a notice when
+ * it was asked for. */
+static const Shell *chat_check_shell(const Options *o, int terminal, const Shell *chat, Shell *ps) {
+    char err[SHELL_PATH_MAX + 128];
+    int on = o->command_check > 0 || (!o->command_check && terminal);
+    if (!on) return NULL;
+    if (cmdcheck_shell(NULL, chat, ps, err, sizeof(err))) return ps;
+    if (o->command_check > 0) fprintf(stderr, "(conferência dos comandos desligada: %s)\n", err);
+    return NULL;
+}
+
+#define CHECK_FILE_MAX (256u * 1024u)
+
+/* --check-commands: prints what the chat would print after a reply holding
+ * FILE's text. Needs no model; PowerShell starts only when there is a command
+ * to look up. */
+static int check_commands_file(const Options *o) {
+    char err[SHELL_PATH_MAX + 128], notice[CMDCHECK_NOTICE_MAX], *text = (char *)malloc(CHECK_FILE_MAX);
+    Shell ps;
+    CmdChecker *checker;
+    FILE *f;
+    size_t n;
+    if (!text) die("out of memory");
+    f = open_file(o->check_commands, "rb");
+    if (!f) die("--check-commands: cannot open %s", o->check_commands);
+    n = fread(text, 1, CHECK_FILE_MAX, f);
+    if (ferror(f)) die("--check-commands: read error in %s", o->check_commands);
+    fclose(f);
+    if (!cmdcheck_shell(o->shell, NULL, &ps, err, sizeof(err))) die("--check-commands: %s", err);
+    checker = cmdcheck_start(&ps, 0, err, sizeof(err));
+    if (!checker) die("--check-commands: %s", err);
+    cmdcheck_reply(checker, text, n, notice, sizeof(notice));
+    cmdcheck_stop(checker);
+    fputs(notice, stdout);
+    free(text);
+    return 0;
+}
+
 static void run_chat(const Run *r) {
     Engine engine;
     ChatContext cc;
     const ChatStats *cs = &engine.stats;
-    Shell shell;
+    Shell shell, check_shell;
     Stats *st = r->st;
     memset(&engine, 0, sizeof(engine));
     engine.model = r->model;
@@ -530,6 +582,7 @@ static void run_chat(const Run *r) {
     cc.line_cap = r->prompt_cap;
     cc.terminal = stdin_is_terminal();
     cc.shell = chat_shell(r->o, cc.terminal, &shell);
+    cc.check_shell = chat_check_shell(r->o, cc.terminal, cc.shell, &check_shell);
     st->loaded = now_seconds();
     chat_run(&cc);
     /* Stats count time spent computing, not time spent waiting for the user. */
@@ -577,6 +630,7 @@ int main(int argc, char **argv) {
     st.logits_hash = UINT64_C(14695981039346656037);
     platform_init(&argc, &argv);
     parse_args(argc, argv, &o);
+    if (o.check_commands) return check_commands_file(&o);
     check_output_paths(&o);
     if (sizeof(float) != 4 || FLT_RADIX != 2 || FLT_MANT_DIG != 24) die("requires IEEE binary32 floats");
 

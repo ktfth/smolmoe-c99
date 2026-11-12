@@ -1,0 +1,146 @@
+/* Unit tests for the command check (cmdcheck.h): finding the commands in a
+ * reply and turning the checker's findings into notices. Portable: nothing
+ * here starts PowerShell (tests/cmdcheck.test.ts does). */
+#include <stdio.h>
+#include <string.h>
+
+#include "cmdcheck.h"
+
+static int failures;
+
+#define CHECK(cond, ...)                                       \
+    do {                                                       \
+        if (!(cond)) {                                         \
+            fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
+            fprintf(stderr, __VA_ARGS__);                      \
+            fputc('\n', stderr);                               \
+            ++failures;                                        \
+        }                                                      \
+    } while (0)
+
+#define RS "\036"
+
+static void expect_extract(const char *reply, const char *want, const char *want_foreign) {
+    char got[2048];
+    CmdExtract x;
+    size_t n = cmdcheck_extract(reply, strlen(reply), got, sizeof(got), &x);
+    CHECK(n == strlen(want) && !memcmp(got, want, n), "extract(%s)\n  got  [%.*s]\n  want [%s]", reply, (int)n, got,
+          want);
+    CHECK(!strcmp(x.foreign, want_foreign), "foreign of (%s): got [%s] want [%s]", reply, x.foreign, want_foreign);
+}
+
+static void test_fences(void) {
+    /* An untagged or PowerShell block is checked whole. */
+    expect_extract("Use:\n```powershell\nGet-ChildItem -Recursive\nls -la\n```\nPronto.",
+                   "BGet-ChildItem -Recursive\nls -la\n", "");
+    expect_extract("```\nipconfig /all\n```", "Bipconfig /all\n", "");
+    expect_extract("```PS1\nGet-Item x\n```", "BGet-Item x\n", "");
+    expect_extract("```pwsh\nGet-Item x\n```\n```shell\nGet-Date\n```", "BGet-Item x\n" RS "BGet-Date\n", "");
+    /* A block for another shell is named, never checked here. */
+    expect_extract("```bash\nsudo apt update\n```", "", "bash");
+    expect_extract("```sh\nls\n```\n```cmd\ndir /s\n```", "", "sh, cmd");
+    expect_extract("```bash\nls\n```\n```bash\nls\n```", "", "bash");
+    /* Other languages are neither checked nor named. */
+    expect_extract("```json\n{\"a\": 1}\n```\n```python\nprint(1)\n```", "", "");
+    /* An unclosed block runs to the end of the reply. */
+    expect_extract("```powershell\nGet-Service -Nme x", "BGet-Service -Nme x", "");
+    /* Indented fences (inside a list) count. */
+    expect_extract("1. Rode:\n   ```powershell\n   Get-Item x\n   ```\n", "B   Get-Item x\n", "");
+}
+
+static void test_inline_and_prose(void) {
+    /* Inline code: only when it starts with Verb-Noun. */
+    expect_extract("Rode `Get-Process -Nme x` e veja.", "IGet-Process -Nme x", "");
+    expect_extract("Abra `config.ini` e `C:\\Temp`.", "", "");
+    expect_extract("Use `Check-Disk C:` agora.", "ICheck-Disk C:", "");
+    /* Prose: an approved verb, a dash and a capitalized noun, up to the end of
+     * the sentence or the next command. */
+    expect_extract("Use Get-NetAdapterInfo -Name Wi-Fi para ver.", "IGet-NetAdapterInfo -Name Wi-Fi para ver.", "");
+    expect_extract("Rode Get-Process, depois Stop-Process -Id 4. Fim.",
+                   "IGet-Process" RS "IStop-Process -Id 4", "");
+    expect_extract("Rode Get-Process e depois Stop-Process -Id 4\nok", "IGet-Process e depois " RS "IStop-Process -Id 4",
+                   "");
+    /* Words with dashes that are not commands. */
+    expect_extract("O Wi-Fi e o e-mail; Plug-and-Play; Set-up; Check-Disk sem crase.", "", "");
+    expect_extract("Mais Get-", "", "");
+    /* Prose inside a fence is not read twice. */
+    expect_extract("```\nGet-Item x\n```", "BGet-Item x\n", "");
+}
+
+static void test_limits(void) {
+    char small[16];
+    CmdExtract x;
+    size_t n = cmdcheck_extract("```\nGet-ChildItem -Recurse C:\\Windows\n```", 41, small, sizeof(small), &x);
+    CHECK(n == 0, "a snippet that does not fit is dropped whole, got %zu", n);
+    n = cmdcheck_extract("", 0, small, sizeof(small), &x);
+    CHECK(n == 0 && !x.foreign[0], "empty reply");
+}
+
+static void expect_format(const char *findings, int checked, const char *foreign, const char *want) {
+    char got[2048];
+    CmdExtract x;
+    memset(&x, 0, sizeof(x));
+    x.checked = checked;
+    snprintf(x.foreign, sizeof(x.foreign), "%s", foreign);
+    cmdcheck_format(findings, strlen(findings), &x, "PowerShell 7", got, sizeof(got));
+    CHECK(!strcmp(got, want), "format(%s)\n  got  [%s]\n  want [%s]", findings, got, want);
+}
+
+static void test_format(void) {
+    expect_format("", 1, "",
+                  "(conferido no PowerShell 7 desta máquina: os nomes e parâmetros existem. Isso não diz se o comando "
+                  "faz o que você pediu.)\n");
+    expect_format("", 0, "", "");
+    expect_format("", 0, "bash",
+                  "(bloco bash não conferido: é para outro shell, e só o PowerShell 7 desta máquina é conferido.)\n");
+    expect_format("N\tGet-NetAdapterInfo\tGet-NetAdapter, Set-NetAdapter\n"
+                  "P\tGet-ChildItem\tRecursive\t-Recurse\n"
+                  "P\tGet-Process\tNme\t\n"
+                  "W\tRemove-Item\tMedium\n"
+                  "W\tFormat-Volume\tHigh\n"
+                  "N\tapt\t\n",
+                  1, "sh",
+                  "Conferência no PowerShell 7 desta máquina:\n"
+                  "  - Get-NetAdapterInfo: não achei aqui (pode ser de um módulo que esta máquina não tem). "
+                  "Parecidos: Get-NetAdapter, Set-NetAdapter.\n"
+                  "  - Get-ChildItem não tem o parâmetro -Recursive. Parecidos: -Recurse.\n"
+                  "  - Get-Process não tem o parâmetro -Nme.\n"
+                  "  - Remove-Item muda o sistema: confira o alvo e teste antes com -WhatIf.\n"
+                  "  - Format-Volume muda o sistema e o impacto é alto: confira o alvo e teste antes com -WhatIf.\n"
+                  "  - apt: não achei aqui (se o comando é para outra máquina, ignore este aviso).\n"
+                  "  - bloco sh não conferido: é para outro shell.\n"
+                  "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
+    /* Control bytes from the model never reach the terminal. */
+    expect_format("N\tGet-\033[31mX\t\n", 1, "",
+                  "Conferência no PowerShell 7 desta máquina:\n"
+                  "  - Get-?[31mX: não achei aqui (pode ser de um módulo que esta máquina não tem).\n"
+                  "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
+    /* Lines the checker should never write are skipped. */
+    expect_format("Z\twhat\nP\tonly-two\n", 1, "",
+                  "(conferido no PowerShell 7 desta máquina: os nomes e parâmetros existem. Isso não diz se o comando "
+                  "faz o que você pediu.)\n");
+}
+
+static void test_base64(void) {
+    char out[64];
+    CHECK(cmdcheck_base64("", 0, out, sizeof(out)) == 0 && !out[0], "empty");
+    CHECK(cmdcheck_base64("f", 1, out, sizeof(out)) == 4 && !strcmp(out, "Zg=="), "f -> %s", out);
+    CHECK(cmdcheck_base64("fo", 2, out, sizeof(out)) == 4 && !strcmp(out, "Zm8="), "fo -> %s", out);
+    CHECK(cmdcheck_base64("foobar", 6, out, sizeof(out)) == 8 && !strcmp(out, "Zm9vYmFy"), "foobar -> %s", out);
+    CHECK(cmdcheck_base64("\xc3\xa9\x1e", 3, out, sizeof(out)) == 4 && !strcmp(out, "w6ke"), "bytes -> %s", out);
+    CHECK(cmdcheck_base64("foobar", 6, out, 8) == 0, "does not fit");
+}
+
+int main(void) {
+    test_fences();
+    test_inline_and_prose();
+    test_limits();
+    test_format();
+    test_base64();
+    if (failures) {
+        fprintf(stderr, "%d failure(s)\n", failures);
+        return 1;
+    }
+    puts("cmdcheck: ok");
+    return 0;
+}

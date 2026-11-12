@@ -44,4 +44,20 @@ int change_directory(const char *path, char *err, size_t errlen);
 int run_program(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
                 int null_stdin, int *status, char *err, size_t errlen);
 
+/* A program kept running in the background, talked to through pipes: its
+ * stdin and stdout are ours to write and read, its stderr goes to the null
+ * device, and it has no console window and gets no Ctrl+C (the command check's
+ * PowerShell, cmdcheck.h). Same argv/command_line convention as run_program.
+ * Returns NULL with a reason in err. */
+typedef struct Child Child;
+Child *child_start(const char *const *argv, const char *command_line, char *err, size_t errlen);
+/* Writes all n bytes; 0 when the child is gone. */
+int child_write(Child *c, const char *data, size_t n);
+/* Reads lines until one equal to `end` arrives; the lines before it go to out
+ * (NUL-terminated, the rest dropped past cap). 1 when `end` came; 0 at EOF, on
+ * error, or after timeout_ms, and then the child should be stopped. */
+int child_read_until(Child *c, const char *end, unsigned timeout_ms, char *out, size_t cap);
+/* Closes its stdin, gives it a moment to leave, then ends it. NULL is fine. */
+void child_stop(Child *c);
+
 #endif

@@ -16,12 +16,15 @@ typedef struct ChatContext {
     char *line;
     uint32_t line_cap;
     const Shell *shell;     /* where a typed "!comando" line runs; NULL: "!" is plain text */
+    const Shell *check_shell; /* the PowerShell that looks up each reply's commands (cmdcheck.h); NULL: off */
     int terminal;           /* stdin is a terminal: lines pasted together form one message */
 } ChatContext;
 
 /* Runs until EOF or "/sair". "/limpar" restarts the conversation, keeping the
  * already-processed system prompt. A line typed on its own as "!comando" runs
- * in c->shell and never reaches the model. Statistics end up in c->engine. */
+ * in c->shell and never reaches the model. After each reply, its commands are
+ * looked up in c->check_shell and a notice goes to stderr. Statistics end up
+ * in c->engine. */
 void chat_run(const ChatContext *c);
 
 #endif

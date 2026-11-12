@@ -173,6 +173,32 @@ Qualquer linha digitada começando com `!` roda diretamente no shell do sistema 
 > [!NOTE]
 > **Proteção contra colagem maliciosa (pastejacking):** blocos de texto colados no terminal são enviados inteiros como mensagem ao modelo — linhas com `!` coladas nunca são executadas como comandos.
 
+### Conferência dos comandos das respostas
+
+Modelos pequenos inventam cmdlets e parâmetros. Depois de cada resposta, o chat procura os comandos dela no PowerShell da própria máquina. O PowerShell só analisa o texto; nada da resposta é executado:
+
+```text
+> Como listo os arquivos com o tamanho?
+...
+Get-ChildItem -Path C:\Temp | ForEach-Object { (Get-ItemProperty -Path $_.FullName -Property Length).Count }
+...
+Conferência no PowerShell 7 desta máquina:
+  - Get-ItemProperty não tem o parâmetro -Property.
+Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.
+```
+
+O aviso aponta:
+- um cmdlet que não existe aqui, com nomes parecidos que existem (`Get-NetAdapterInfo` → `Get-NetAdapter`);
+- um parâmetro que o cmdlet não tem, com os parecidos (`-Recursive` → `-Recurse`);
+- um cmdlet real que **muda o sistema** (os que aceitam `-WhatIf`, como `Remove-Item` e `Stop-Process`), mesmo escrito certo.
+
+> [!IMPORTANT]
+> **Nenhum aviso não quer dizer "comando certo".** A conferência não pega um comando real que faz a coisa errada (parar um serviço quando você pediu para reiniciar, apagar a pasta errada). Ela vale só para esta máquina: um cmdlet que falta aqui pode existir na máquina que você vai consertar, e o contrário. Blocos marcados como `bash`, `sh` ou `cmd` são citados como "não conferidos", nunca como inexistentes.
+
+- Liga sozinha no terminal quando há um PowerShell (`pwsh` ou `powershell`); com entrada por pipe, só com `--command-check`. `--no-command-check` desliga.
+- O PowerShell abre em segundo plano depois do prompt de sistema e se aquece enquanto você digita. Medido no i7-10610U: ~14 ms por resposta com comandos que existem, ~90–190 ms quando há um nome inventado.
+- `smolmoe --check-commands ARQUIVO` confere um texto qualquer (uma resposta, um script) sem carregar modelo.
+
 ---
 
 ## Principais Opções da CLI (`smolmoe`)
@@ -189,6 +215,8 @@ Qualquer linha digitada começando com `!` roda diretamente no shell do sistema 
 | `--no-tools` | ferramentas ligadas | Desativa `data_atual`, `dias_ate`, `calcular`, `converter` e `contar` no chat |
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa data/hora para as ferramentas |
 | `--shell NOME\|CAMINHO` | shell pai | Define o shell usado por `!comando` (`pwsh`, `bash`, `cmd`...) |
+| `--no-command-check` / `--command-check` | ligado no terminal | Desliga a conferência dos comandos das respostas / liga também com entrada por pipe |
+| `--check-commands ARQUIVO` | — | Confere os comandos de um texto no PowerShell desta máquina, sem modelo |
 | `--tokens N` | `64` (`512` no chat) | Máximo de novos tokens gerados |
 | `--context N` | `min(modelo, 2048)` | Tamanho do cache KV em tokens |
 | `--threads N` | núcleos físicos | Número de threads de trabalho |
