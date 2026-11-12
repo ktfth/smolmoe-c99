@@ -15,7 +15,9 @@
   programa no PATH e cada opção e subcomando no manual da máquina, sem rodar nada da resposta. Aponta também os
   comandos que mudam o sistema (`rm`, `dd`, `systemctl restart`, `apt install`, `sed -i`, `find -delete`...). Sem
   manual (containers, instalações mínimas), vale um índice embutido com as opções e subcomandos de 178 programas,
-  tirado dos manuais do Ubuntu 24.04 (`scripts/cmdcheck/`). O chat avisa quando não há shell para conferir.
+  tirado dos manuais do Ubuntu 24.04 (`scripts/cmdcheck/`). Lê também as opções do `apt` no manual do `apt-get`,
+  os manuais em mdoc (`ssh-keygen`), os manuais próprios de subcomando (`docker-ps`, `git-commit`) e reconhece os
+  builtins do bash (`history`, `source`); cada aviso sai uma vez só. O chat avisa quando não há shell para conferir.
   Respostas sintéticas das duas conferências em `tests/goldens/cmdcheck-casos.json`.
 - **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
   3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
