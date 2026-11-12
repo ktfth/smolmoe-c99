@@ -18,6 +18,12 @@ typedef struct Config {
     uint32_t sliding_window; /* local attention window for non-global layers (default: 0 = full) */
     float eps, theta, local_theta;
     double rope_factor;      /* rope_attention_factor: scales RoPE cos/sin (default 1) */
+    /* Llama 3 RoPE scaling (rope_type "llama3"), all four keys or none: low frequencies
+     * (wavelength > original_context / low_freq) are divided by factor, high ones
+     * (wavelength < original_context / high_freq) kept, and the band between blended. */
+    uint32_t llama3_rope;           /* 1 when the four llama3 keys are present */
+    uint32_t llama3_original;       /* rope_llama3_original_context */
+    double llama3_factor, llama3_low, llama3_high; /* rope_llama3_factor, _low_freq_factor, _high_freq_factor */
 } Config;
 
 #include <stddef.h>

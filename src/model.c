@@ -76,6 +76,19 @@ static void load_layer(Layer *l, const ModelFile *f, const Config *c, uint32_t i
     for (e = 0; e < c->shared; ++e) l->shared[e] = expert_weights(f, c, i, "s", e);
 }
 
+/* Llama 3 RoPE scaling (transformers _compute_llama3_parameters): frequencies whose
+ * wavelength exceeds original/low are divided by factor, those under original/high
+ * are kept, and the band between interpolates linearly in original / wavelength. */
+static double llama3_scale(const Config *c, double freq) {
+    double wavelen, smooth;
+    if (!c->llama3_rope) return freq;
+    wavelen = 2.0 * 3.14159265358979323846 / freq;
+    if (wavelen < (double)c->llama3_original / c->llama3_high) return freq;
+    if (wavelen > (double)c->llama3_original / c->llama3_low) return freq / c->llama3_factor;
+    smooth = ((double)c->llama3_original / wavelen - c->llama3_low) / (c->llama3_high - c->llama3_low);
+    return (1.0 - smooth) * freq / c->llama3_factor + smooth * freq;
+}
+
 static void *buffer(Memory *mem, size_t rows, size_t cols, size_t size) {
     return mem_alloc(mem, mul_size(rows, cols), size);
 }
@@ -133,7 +146,7 @@ void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context,
     m->inv_freq = (double *)mem_alloc(mem, half, sizeof(double));
     m->inv_freq_local = (double *)mem_alloc(mem, half, sizeof(double));
     for (i = 0; i < half; ++i) {
-        m->inv_freq[i] = pow((double)c->theta, -(double)(2 * i) / (double)c->rotary_dim);
+        m->inv_freq[i] = llama3_scale(c, pow((double)c->theta, -(double)(2 * i) / (double)c->rotary_dim));
         m->inv_freq_local[i] = pow((double)c->local_theta, -(double)(2 * i) / (double)c->rotary_dim);
     }
     m->rope_cos = (float *)buffer(mem, batch, half, sizeof(float));

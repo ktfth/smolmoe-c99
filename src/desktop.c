@@ -83,6 +83,9 @@ static const char *resolve_desktop_path(Desktop *d, const char *arg) {
         return "models/gemma-3-270m-it/model.smoe";
     if (!strcmp(arg, "phi") || !strcmp(arg, "phi-4") || !strcmp(arg, "phi-4-mini"))
         return "models/phi-4-mini-instruct/model.smoe";
+    if (!strcmp(arg, "dolphin") || !strcmp(arg, "dolphin-1b") || !strcmp(arg, "llama"))
+        return "models/dolphin3.0-llama3.2-1b/model.smoe";
+    if (!strcmp(arg, "dolphin-q5") || !strcmp(arg, "llama-q5")) return "models/dolphin3.0-llama3.2-1b/model-q5.smoe";
     if (!strcmp(arg, "stories") || !strcmp(arg, "tinystories")) return "models/tinystories-15m/model.smoe";
     len = strlen(arg);
     if (len < 5 || strcmp(arg + len - 5, ".smoe") != 0) {

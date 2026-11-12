@@ -81,7 +81,7 @@ OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui \
-	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui stories all-models phi-weights \
+	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui dolphin dolphin-gui dolphin-q5 dolphin-weights stories all-models phi-weights \
 	chat run-gui run-web help inventario
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
@@ -193,11 +193,12 @@ DIST        := dist
 QWEN        := models/qwen2.5-0.5b-instruct
 GEMMA       := models/gemma-3-1b-it
 PHI         := models/phi-4-mini-instruct
+DOLPHIN     := models/dolphin3.0-llama3.2-1b
 STORIES     := models/tinystories-15m
 REL_CLI     := $(RELEASE_DIR)/smolmoe$(EXE)
 REL_GUI     := $(RELEASE_DIR)/smolmoe-gui$(EXE)
 REL_BUNDLE  := $(RELEASE_DIR)/smolmoe-bundle$(EXE)
-MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui phi phi-gui stories
+MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui phi phi-gui dolphin dolphin-gui dolphin-q5 stories
 
 # $(call bundle,OUT,MODEL,MODEL_DIR,TOKENIZER,RUNTIME): DIST/OUT[.exe]
 define bundle
@@ -231,15 +232,22 @@ phi: release $(PHI)/model.smoe
 	$(call bundle,phi-4-mini,$(PHI)/model.smoe,$(PHI),tokenizer.qbp,$(REL_CLI))
 phi-gui: release-gui $(PHI)/model.smoe
 	$(call bundle,phi-4-mini-gui,$(PHI)/model.smoe,$(PHI),tokenizer.qbp,$(REL_GUI))
+dolphin: release $(DOLPHIN)/model.smoe
+	$(call bundle,dolphin3-llama3.2-1b,$(DOLPHIN)/model.smoe,$(DOLPHIN),tokenizer.qbp,$(REL_CLI))
+dolphin-gui: release-gui $(DOLPHIN)/model.smoe
+	$(call bundle,dolphin3-llama3.2-1b-gui,$(DOLPHIN)/model.smoe,$(DOLPHIN),tokenizer.qbp,$(REL_GUI))
+dolphin-q5: release $(DOLPHIN)/model-q5.smoe
+	$(call bundle,dolphin3-llama3.2-1b-q5,$(DOLPHIN)/model-q5.smoe,$(DOLPHIN),tokenizer.qbp,$(REL_CLI))
 stories: release $(STORIES)/model.smoe $(STORIES)/tokenizer.spb
 	$(call bundle,tinystories,$(STORIES)/model.smoe,$(STORIES),tokenizer.spb,$(REL_CLI))
 endif
 
 # Every alias whose weights can be had without a long conversion; Phi-4-mini and Gemma too
 # once they are in models/.
-all-models: qwen qwen-gui qwen-q5 qwen-q5-gui stories $(if $(wildcard $(GEMMA)/model.smoe),gemma gemma-gui) $(if $(wildcard $(PHI)/model.smoe),phi phi-gui)
+all-models: qwen qwen-gui qwen-q5 qwen-q5-gui stories $(if $(wildcard $(GEMMA)/model.smoe),gemma gemma-gui) $(if $(wildcard $(PHI)/model.smoe),phi phi-gui) $(if $(wildcard $(DOLPHIN)/model.smoe),dolphin dolphin-gui)
 	$(if $(wildcard $(GEMMA)/model.smoe),,$(info Gemma-3-1B ficou de fora: os pesos não estão em $(GEMMA) (make gemma-weights).))
 	$(if $(wildcard $(PHI)/model.smoe),,$(info Phi-4-mini ficou de fora: os pesos não estão em $(PHI) (make phi-weights).))
+	$(if $(wildcard $(DOLPHIN)/model.smoe),,$(info Dolphin 3.0 Llama 3.2 1B ficou de fora: os pesos não estão em $(DOLPHIN) (make dolphin-weights).))
 	@ls -l $(DIST)
 
 # One download per model, also under make -j: the tokenizer waits for the model's fetch.
@@ -268,6 +276,15 @@ $(PHI)/model.smoe:
 phi-weights:
 	bun scripts/convert.ts fetch-phi3 downloads/phi-4-mini-instruct
 	bun scripts/convert.ts phi3 downloads/phi-4-mini-instruct $(PHI)
+# Dolphin 3.0 Llama 3.2 1B: 2,5 GB de download, 1,4 GB em Q8 (850 MB em Q5).
+$(DOLPHIN)/model.smoe:
+	$(info Os pesos do Dolphin 3.0 Llama 3.2 1B não estão em $(DOLPHIN); baixando e convertendo automaticamente...)
+	$(MAKE) dolphin-weights
+dolphin-weights:
+	bun scripts/convert.ts fetch-llama downloads/dolphin3.0-llama3.2-1b
+	bun scripts/convert.ts llama downloads/dolphin3.0-llama3.2-1b $(DOLPHIN)
+$(DOLPHIN)/model-q5.smoe: $(DOLPHIN)/model.smoe | release
+	$(RELEASE_DIR)/smolmoe-quantize$(EXE) --in $< --out $@
 
 EMPTY :=
 # What can be built, in Portuguese; printed by make itself, which keeps the
@@ -277,8 +294,8 @@ help:
 	$(info )
 	$(info $(EMPTY)  make                 programa de terminal: build/smolmoe, smolmoe-bundle, smolmoe-quantize)
 	$(info $(EMPTY)  make gui             janela: build/smolmoe-gui)
-	$(info $(EMPTY)  make chat            abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi))
-	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|gemma|phi))
+	$(info $(EMPTY)  make chat            abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi|dolphin))
+	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|gemma|phi|dolphin))
 	$(info $(EMPTY)  make run-web         abre a interface web em http://localhost:8080)
 	$(info $(EMPTY)  make test            testes (em C e com o bun))
 	$(info $(EMPTY)  make inventario      inventário defensivo só leitura (coleta no Linux) e os testes dele)
@@ -292,16 +309,19 @@ help:
 	$(info $(EMPTY)  make gemma-gui       $(DIST)/gemma-3-1b-gui      janela, Gemma 3 1B)
 	$(info $(EMPTY)  make phi             $(DIST)/phi-4-mini          terminal, Phi-4-mini 3,8B (pesos: make phi-weights))
 	$(info $(EMPTY)  make phi-gui         $(DIST)/phi-4-mini-gui      janela, Phi-4-mini)
+	$(info $(EMPTY)  make dolphin         $(DIST)/dolphin3-llama3.2-1b terminal, Dolphin 3.0 Llama 3.2 1B (pesos: make dolphin-weights))
+	$(info $(EMPTY)  make dolphin-gui     $(DIST)/dolphin3-llama3.2-1b-gui janela, Dolphin 3.0 Llama 3.2 1B)
+	$(info $(EMPTY)  make dolphin-q5      $(DIST)/dolphin3-llama3.2-1b-q5 terminal, Dolphin em Q5 (850 MB))
 	$(info $(EMPTY)  make stories         $(DIST)/tinystories         historinhas em inglês, para testar)
-	$(info $(EMPTY)  make all-models      todos acima; Gemma e Phi só quando os pesos já estão em models/)
+	$(info $(EMPTY)  make all-models      todos acima; Gemma, Phi e Dolphin só quando os pesos já estão em models/)
 	$(info )
 	$(info Os pesos do Qwen e do TinyStories são baixados e conferidos na primeira vez.)
 	@:
 
-chat: $(BIN) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe)
+chat: $(BIN) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe) $(if $(filter dolphin dolphin-1b llama,$(MODEL)),$(DOLPHIN)/model.smoe) $(if $(filter dolphin-q5 llama-q5,$(MODEL)),$(DOLPHIN)/model-q5.smoe)
 	$(BIN) $(MODEL)
 
-run-gui: $(GUI) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe)
+run-gui: $(GUI) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe) $(if $(filter dolphin dolphin-1b llama,$(MODEL)),$(DOLPHIN)/model.smoe) $(if $(filter dolphin-q5 llama-q5,$(MODEL)),$(DOLPHIN)/model-q5.smoe)
 	$(GUI) $(MODEL)
 
 run-web: web $(QWEN)/model.smoe $(BUNDLE)

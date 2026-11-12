@@ -61,7 +61,7 @@ typedef struct Source {
 
 static void usage(FILE *out) {
     fputs("smolmoe " SMOLMOE_VERSION " - CPU inference for SMOEQ8 checkpoints\n\n"
-          "usage: smolmoe [--model] <FILE|DIR|qwen|qwen-q5|gemma|phi|stories> [--prompt TEXT] [options]\n"
+          "usage: smolmoe [--model] <FILE|DIR|qwen|qwen-q5|gemma|phi|dolphin|stories> [--prompt TEXT] [options]\n"
           "       qwen-pt.exe [--prompt TEXT] [options]     (self-contained bundle: no files needed)\n"
           "  Without a prompt, a chat model starts an interactive conversation.\n"
           "  --config/--tokenizer default to config.ini and tokenizer.qbp/.spb beside the model,\n"
@@ -335,6 +335,9 @@ static const char *resolve_model_target(const char *arg, Memory *mem) {
         return "models/gemma-3-270m-it/model.smoe";
     if (!strcmp(arg, "phi") || !strcmp(arg, "phi-4") || !strcmp(arg, "phi-4-mini"))
         return "models/phi-4-mini-instruct/model.smoe";
+    if (!strcmp(arg, "dolphin") || !strcmp(arg, "dolphin-1b") || !strcmp(arg, "llama"))
+        return "models/dolphin3.0-llama3.2-1b/model.smoe";
+    if (!strcmp(arg, "dolphin-q5") || !strcmp(arg, "llama-q5")) return "models/dolphin3.0-llama3.2-1b/model-q5.smoe";
     if (!strcmp(arg, "stories") || !strcmp(arg, "tinystories")) return "models/tinystories-15m/model.smoe";
     len = strlen(arg);
     if (len < 5 || strcmp(arg + len - 5, ".smoe") != 0) {

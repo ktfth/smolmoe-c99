@@ -4,7 +4,8 @@ This specification describes the implemented model architectures, not Kimi K3.
 `smolmoe_qwen2` extends the base architecture with F32 bias vectors
 `l.N.q_bias` (1 × QD), `l.N.k_bias` and `l.N.v_bias` (1 × KD), added before RoPE
 and KV storage. The importer permutes split-half Q/K rows and biases into this
-runtime's adjacent-pair RoPE order. `smolmoe_gemma3` adds the Gemma 3 norms,
+runtime's adjacent-pair RoPE order. Llama 3.x uses the base `smolmoe_v1`
+layout (no biases) plus the optional llama3 RoPE keys. `smolmoe_gemma3` adds the Gemma 3 norms,
 head dimensions, attention windows and activation described below. All matrix
 shapes are `(output rows, input columns)` and row-major. Let D = dim, H =
 hidden_dim, V = vocab_size, E = experts, S = shared_experts, A = heads, K =
@@ -190,6 +191,15 @@ Optional keys are `rotary_dim` (even, 2 to `head_dim`; default `head_dim`),
 (default `rope_theta`). Gemma 3 sets `head_dim`, `sliding_window` and
 `rope_local_theta` explicitly. Omitting an optional key gives the stated default.
 
+Llama 3 RoPE scaling (Hugging Face `rope_type: llama3`) takes four optional keys
+that must appear together: `rope_llama3_factor` (in [1, 1000]),
+`rope_llama3_low_freq_factor` (> 0), `rope_llama3_high_freq_factor` (greater than
+the low factor) and `rope_llama3_original_context` (positive). With them, each
+global inverse frequency f = theta^(-2i/rotary_dim), of wavelength w = 2π/f, becomes
+f when w < original/high, f/factor when w > original/low, and otherwise
+(1 − s)·f/factor + s·f with s = (original/w − low)/(high − low). The local
+frequencies (`rope_local_theta`) are not scaled. Without the keys nothing changes.
+
 ## Tokenizer
 
 `SMBPE1` newline, then exactly `V - 258` merge lines `left_id right_id`.
@@ -235,18 +245,18 @@ MXFP4 are unsupported by it. Hugging Face conversion is handled separately by
 
 ### Byte-level BPE format (SMQBP1)
 
-Used by Qwen2.5 (version 1) and Phi-4-mini and Gemma 3 (version 2). All integers are
+Used by Qwen2.5 (version 1) and Phi-4-mini, Gemma 3 and Llama 3 (version 2). All integers are
 little-endian uint32.
 
 | Offset | Version 1 (24-byte header) | Version 2 (32-byte header) |
 |---|---|---|
 | 0 | `SMQBP1`, NUL, byte `01` | `SMQBP1`, NUL, byte `02` |
 | 8 | vocabulary size (must equal the config's) | same |
-| 12 | merge count (at most 262,144) | same |
+| 12 | merge count (at most 1,048,576) | same |
 | 16 | total piece bytes (at most 64 MiB) | same |
 | 20 | runtime `<\|im_start\|>` ID | normalizer: 0 none, 1 NFC |
-| 24 | (records start) | pre-tokenizer: 1 Qwen2, 2 o200k, 3 Gemma |
-| 28 | | chat template: 0 none, 1 ChatML, 2 Phi, 3 Gemma |
+| 24 | (records start) | pre-tokenizer: 1 Qwen2, 2 o200k, 3 Gemma, 4 Llama 3 |
+| 28 | | chat template: 0 none, 1 ChatML, 2 Phi, 3 Gemma, 4 ChatML-BOS |
 
 Version 1 means NFC, the Qwen2 pre-tokenizer and ChatML, so the published
 Qwen2.5 `tokenizer.qbp` loads unchanged. Version 1 files are now also held to
@@ -274,16 +284,28 @@ Gemma 3 uses normalizer 0, pre-tokenizer 3 and chat template 3; its converter
 puts byte tokens at 0..255, `<bos>` at 256 and `<end_of_turn>` at 257. It requires
 `<start_of_turn>` and reuses available `<unused:...>` special-token slots for
 `<tool_call>` / `</tool_call>` when they are absent from the source tokenizer.
+Llama 3 uses normalizer 0 and pre-tokenizer 4; its converter puts the byte tokens
+at 0..255, `<|begin_of_text|>` at 256 and the end-of-turn token at 257, every other
+ID following in ascending source order (Dolphin 3.0 Llama 3.2 1B: source IDs
+256..127,999 move by +2 minus the bytes they displace). With `<|im_start|>` and
+`<|im_end|>` (Dolphin 3.0) the template is 4 and ID 257 is `<|im_end|>`; without
+them (Meta's base and Instruct releases) the template is 0 and ID 257 is
+`<|eot_id|>`, or `<|end_of_text|>` when that is absent too. No base piece is
+flagged: with `ignore_merges` a piece no merge produces is still reachable.
 
 **Encoding.** Text is normalized (NFC, Unicode 15.0.0 tables) only when the
 header says so; Phi-4-mini is not normalized. It is split into pre-tokens and each
 pre-token's UTF-8 bytes are merged by increasing pair rank, leftmost first. The
-Qwen2 and o200k pre-tokenizers are hand-written matchers equal to the published
+Qwen2, Llama 3 and o200k pre-tokenizers are hand-written matchers equal to the published
 regexes run by Oniguruma (the engine of Hugging Face tokenizers), with no runtime
 regex or Unicode library. Gemma implements SentencePiece's
 `Split(' ', MergedWithNext)` behavior in a separate boundary matcher.
 
 - Qwen2: `(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+`
+- Llama 3: the Qwen2 regex with `\p{N}{1,3}` in place of `\p{N}` (runs of up to three digits).
+  Pre-tokenizer 4 also means `ignore_merges`: a pre-token whose bytes are exactly an
+  unflagged piece is that token, and only other pre-tokens go through the merges, as
+  in tiktoken and the Llama 3 `tokenizer.json`.
 - o200k (GPT-4o, Phi-4-mini): `[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+`
 
 `\s` is Oniguruma's: U+0009..000D, 0020, 0085, 00A0, 1680, 2000..200A, 2028,
@@ -319,6 +341,10 @@ by the user are never conversation control (Hugging Face would match them).
   `<end_of_turn>`. In system text, `<tool_call>` and `</tool_call>` become their
   tokens and enable the chat's tools. Required: flagged `<start_of_turn>`, ID
   256 = `<bos>` and ID 257 = `<end_of_turn>`.
+- ChatML-BOS (Dolphin 3.0 on Llama 3): ChatML as above, with BOS (256) before
+  the system message that opens a conversation; plain prompts also start with
+  BOS, as the Llama 3 tokenizer's post-processor adds it. The Llama 3 vocabulary
+  has no `<tool_call>` token, so the chat runs without tools.
 - None: plain text only; `--chat` is refused.
 
 Generation stops at EOS (257). An empty plain prompt encodes as BOS.

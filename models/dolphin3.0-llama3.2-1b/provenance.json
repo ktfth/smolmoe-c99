@@ -1,0 +1,26 @@
+{
+  "model": "dphn/Dolphin3.0-Llama3.2-1B",
+  "revision": "e753b6ebd7adf87036eb6a3e6de68acca5850e2f",
+  "converter": "smolmoe scripts/convert.ts 1.0.0",
+  "source_sha256": {
+    "model.safetensors": "fa82d5c8c1cf12762a318daa6a6fd90ba0322c989b66cd54e565b685ab3294b0"
+  },
+  "config_sha256": "e6d344056272bcbaa2779b6430429492e6d7805f946f02f2293e0bd300fdc7af",
+  "tokenizer_sha256": "e40b93124a3e29f62d5f4ff41be56cb2af34ecacf9239acd9da53a98860380b5",
+  "index_sha256": null,
+  "quantization": "lossy Q8 block32",
+  "qk_permutation": "split-half rotary to adjacent-pair per head; V and O unchanged",
+  "rope": {
+    "theta": 500000,
+    "scaling": "llama3",
+    "factor": 32,
+    "low_freq_factor": 1,
+    "high_freq_factor": 4,
+    "original_max_position_embeddings": 8192
+  },
+  "tokenizer": "byte-level BPE, Llama 3 pre-tokenizer with ignore_merges, template ChatML opened with BOS",
+  "token_remapping": "runtime ids: bytes 0..255, <|begin_of_text|> -> 256, <|im_end|> -> 257, all other ids ascending; embedding rows follow",
+  "tied_lm_head": true,
+  "dense_mapping": "one expert with a zero router",
+  "full_kimi_compatible": false
+}

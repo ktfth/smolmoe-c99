@@ -126,8 +126,8 @@ describe("SMQBP1 load-time rejections", () => {
   test("unknown normalizer, pre-tokenizer or chat template", () => {
     rejects(files(header({ normalizer: 2 }), PHI), /unsupported SMQBP1 normalizer 2/);
     rejects(files(header({ pretokenizer: 0 }), PHI), /unsupported SMQBP1 pre-tokenizer 0/);
-    rejects(files(header({ pretokenizer: 4 }), PHI), /unsupported SMQBP1 pre-tokenizer 4/);
-    rejects(files(header({ template: 4 }), PHI), /unsupported SMQBP1 chat template 4/);
+    rejects(files(header({ pretokenizer: 5 }), PHI), /unsupported SMQBP1 pre-tokenizer 5/);
+    rejects(files(header({ template: 5 }), PHI), /unsupported SMQBP1 chat template 5/);
   });
   test("a Phi template without its role markers", () => {
     const noUser = PHI.map((p) => (new TextDecoder().decode(p.bytes) === "<|user|>" ? textPiece("<|usr|>", 1) : p));

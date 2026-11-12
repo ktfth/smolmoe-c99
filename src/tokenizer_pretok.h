@@ -4,6 +4,7 @@
  *
  * qwen2: (?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|
  *        \s*[\r\n]+|\s+(?!\S)|\s+
+ * llama3: qwen2 with \p{N}{1,3} in place of \p{N} (Llama 3.x, tiktoken cl100k-style digits).
  * o200k: [^\r\n\p{L}\p{N}]?[UPPER]*[LOWER]+C?|[^\r\n\p{L}\p{N}]?[UPPER]+[LOWER]*C?|\p{N}{1,3}|
  *        ?[^\s\p{L}\p{N}]+[\r\n/]*|\s*[\r\n]+|\s+(?!\S)|\s+
  *        with C = (?i:'s|'t|'re|'ve|'m|'ll|'d), UPPER = [\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}] and
@@ -70,7 +71,9 @@ static inline uint32_t pretok_whitespace(const uint32_t *c, uint32_t n, uint32_t
     return j - 1;
 }
 
-static inline uint32_t qwen2_boundary(const uint32_t *c, const uint8_t *k, uint32_t n, uint32_t i) {
+/* qwen2 (max_digits 1) and llama3 (max_digits 3) differ only in the digit run. */
+static inline uint32_t qwen2_like_boundary(const uint32_t *c, const uint8_t *k, uint32_t n, uint32_t i,
+                                           uint32_t max_digits) {
     uint32_t j = pretok_contraction(c, n, i);
     if (j > i) return j;
     if (pretok_prefix(c, k, j) && j + 1 < n && (k[j + 1] & UC_L)) ++j;
@@ -78,9 +81,20 @@ static inline uint32_t qwen2_boundary(const uint32_t *c, const uint8_t *k, uint3
         do { ++j; } while (j < n && (k[j] & UC_L));
         return j;
     }
-    if (k[i] & UC_N) return i + 1;
+    if (k[i] & UC_N) {
+        for (j = i + 1; j < n && j < i + max_digits && (k[j] & UC_N); ++j) {}
+        return j;
+    }
     j = pretok_punct_run(c, k, n, i, 0);
     return j != PRETOK_NO_MATCH ? j : pretok_whitespace(c, n, i);
+}
+
+static inline uint32_t qwen2_boundary(const uint32_t *c, const uint8_t *k, uint32_t n, uint32_t i) {
+    return qwen2_like_boundary(c, k, n, i, 1);
+}
+
+static inline uint32_t llama3_boundary(const uint32_t *c, const uint8_t *k, uint32_t n, uint32_t i) {
+    return qwen2_like_boundary(c, k, n, i, 3);
 }
 
 static inline uint32_t pretok_run(const uint8_t *k, uint32_t n, uint32_t j, unsigned bit) {

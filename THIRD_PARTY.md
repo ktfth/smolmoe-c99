@@ -50,6 +50,18 @@ representation, token ID ordering and rotary row order (provenance JSON). The
 validation reference in `scripts/ref/` is an independent reimplementation; no
 upstream inference code is included.
 
+## Dolphin 3.0 Llama 3.2 1B model
+
+`models/dolphin3.0-llama3.2-1b/` is produced locally by `scripts/convert.ts llama`
+(it is not distributed with this repository): a lossy Q8 conversion of
+dphn/Dolphin3.0-Llama3.2-1B, revision e753b6ebd7adf87036eb6a3e6de68acca5850e2f,
+BF16 SHA-256 `fa82d5c8c1cf12762a318daa6a6fd90ba0322c989b66cd54e565b685ab3294b0`.
+The model is a fine-tune of Meta Llama 3.2 1B under the Llama 3.2 Community
+License (https://www.llama.com/llama3_2/license/); redistributing the weights or
+a bundled executable requires following that license. Conversion changes the
+weight representation, token ID ordering and rotary row order (provenance JSON).
+No upstream inference code is included.
+
 ## Dear ImGui (desktop window)
 
 `third_party/imgui/` holds Dear ImGui v1.91.9b by Omar Cornut and contributors,

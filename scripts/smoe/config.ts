@@ -31,19 +31,30 @@ export interface ModelConfig {
   readonly head_dim?: number;
   readonly sliding_window?: number;
   readonly rope_local_theta?: number;
+  /** Llama 3 RoPE scaling (rope_type "llama3"): all four or none. */
+  readonly rope_llama3_factor?: number;
+  readonly rope_llama3_low_freq_factor?: number;
+  readonly rope_llama3_high_freq_factor?: number;
+  readonly rope_llama3_original_context?: number;
 }
 
 type IntKey = "dim" | "hidden_dim" | "layers" | "heads" | "kv_heads" | "experts" | "top_k" | "vocab_size"
-  | "max_context" | "shared_experts" | "bos_id" | "eos_id" | "rotary_dim" | "head_dim" | "sliding_window";
-type RealKey = "rms_eps" | "rope_theta" | "rope_attention_factor" | "rope_local_theta";
+  | "max_context" | "shared_experts" | "bos_id" | "eos_id" | "rotary_dim" | "head_dim" | "sliding_window"
+  | "rope_llama3_original_context";
+type RealKey = "rms_eps" | "rope_theta" | "rope_attention_factor" | "rope_local_theta" | "rope_llama3_factor"
+  | "rope_llama3_low_freq_factor" | "rope_llama3_high_freq_factor";
 
 /** Required keys, in the order Python's checkpoint.BASE_CONFIG writes them. */
 export const REQUIRED_KEYS = ["architecture", "dim", "hidden_dim", "layers", "heads", "kv_heads", "experts", "top_k",
   "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id", "rms_eps", "rope_theta"] as const;
-export const OPTIONAL_KEYS = ["rotary_dim", "rope_attention_factor", "head_dim", "sliding_window", "rope_local_theta"] as const;
+export const OPTIONAL_KEYS = ["rotary_dim", "rope_attention_factor", "head_dim", "sliding_window", "rope_local_theta",
+  "rope_llama3_factor", "rope_llama3_low_freq_factor", "rope_llama3_high_freq_factor", "rope_llama3_original_context"] as const;
+const LLAMA3_KEYS = ["rope_llama3_factor", "rope_llama3_low_freq_factor", "rope_llama3_high_freq_factor",
+  "rope_llama3_original_context"] as const;
 const REQUIRED_INT_KEYS: readonly Exclude<IntKey, "rotary_dim" | "head_dim" | "sliding_window">[] = ["dim", "hidden_dim", "layers", "heads",
   "kv_heads", "experts", "top_k", "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id"];
-const REAL_KEYS: ReadonlySet<string> = new Set<RealKey>(["rms_eps", "rope_theta", "rope_attention_factor", "rope_local_theta"]);
+const REAL_KEYS: ReadonlySet<string> = new Set<RealKey>(["rms_eps", "rope_theta", "rope_attention_factor", "rope_local_theta",
+  "rope_llama3_factor", "rope_llama3_low_freq_factor", "rope_llama3_high_freq_factor"]);
 
 export const MAX_CONTEXT = 1_048_576;
 const MAX_DIM = 65536;
@@ -105,6 +116,16 @@ export function validateConfig(c: ModelConfig): ModelConfig {
     const localTheta = Math.fround(c.rope_local_theta);
     if (!(localTheta > 1) || !Number.isFinite(localTheta))
       throw new Error(`invalid rope_local_theta: ${c.rope_local_theta}`);
+  }
+  const llama3 = LLAMA3_KEYS.filter((k) => c[k] !== undefined).length;
+  if (llama3 && llama3 !== LLAMA3_KEYS.length)
+    throw new Error(`llama3 RoPE scaling needs all of ${LLAMA3_KEYS.join(", ")}`);
+  if (llama3) {
+    const f = c.rope_llama3_factor!, lo = c.rope_llama3_low_freq_factor!, hi = c.rope_llama3_high_freq_factor!;
+    const orig = c.rope_llama3_original_context!;
+    if (!(f >= 1 && f <= MAX_ROPE_FACTOR) || !(lo > 0) || !(hi > lo) || !Number.isFinite(hi) || !isU32(orig, MAX_CONTEXT) || !orig)
+      throw new Error("invalid llama3 RoPE scaling: needs factor in [1, 1000], 0 < low_freq_factor < high_freq_factor " +
+        "and original_context > 0");
   }
   return c;
 }

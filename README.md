@@ -37,7 +37,7 @@ make qwen-gui
 
 ### 2. Usando o runtime `smolmoe` direto com a pasta `models/` (ou apelidos)
 
-Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `gemma`, `gemma-270m`, `phi`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
+Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `gemma`, `gemma-270m`, `phi`, `dolphin`, `dolphin-q5`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
 
 ```sh
 # Atalhos diretos via make:
@@ -71,11 +71,12 @@ bun scripts/serve-web.ts 3000  # ou escolha a porta diretamente (ex.: http://loc
 | **Gemma-3-1B-Instruct** | 1,0B | Q8_0 | ~1,0 GB | ~1,2 GB | ~12 tok/s | `gemma` / `make gemma` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **Gemma-3-270M-Instruct** | 0,27B | Q8_0 | ~290 MB | não medido | não medido | CLI: `gemma-270m` | Conversão e uso com esses pesos ainda não validados ponta a ponta |
 | **Phi-4-mini-instruct** | 3,8B | Q8_0 | 4,3 GB | ~4,4 GB | ~4 tok/s | `phi` / `make phi` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Dolphin 3.0 Llama 3.2 1B** | 1,2B | Q8_0 / Q5_0 | 1,4 GB / 850 MB | ~1,5 GB | não medido no i7 (14–16 tok/s com AVX-512 VNNI, 4 threads) | `dolphin` / `make dolphin` | Sem ferramentas (o vocabulário do Llama 3 não tem `<tool_call>`); chat ChatML |
 | **TinyStories-15M** | 15M | Q8_0 | 27 MB | < 0,1 GB | > 200 tok/s | `stories` / `make stories` | Apenas continuação de texto em inglês (sem template de chat) |
 
 *\*Medido em um Intel Core i7-10610U (4 núcleos físicos, AVX2). Em Apple Silicon M2 Pro (NEON, 5 threads), o Qwen2.5-0.5B Q8 atinge **64 tok/s** no decode e **148 tok/s** no prefill.*
 
-Para converter o **Gemma 3** ou o **Phi-4-mini** a partir dos pesos originais do Hugging Face:
+Para converter o **Gemma 3**, o **Phi-4-mini** ou o **Dolphin 3.0 (Llama 3.2 1B)** a partir dos pesos originais do Hugging Face:
 
 ```sh
 # Gemma 3 1B Instruct (requer HF_TOKEN com licença do Gemma aceita no Hugging Face)
@@ -87,6 +88,11 @@ make gemma-gui     # empacota dist/gemma-3-1b-gui[.exe]
 make phi-weights   # baixa e converte para models/phi-4-mini-instruct/
 make phi           # empacota dist/phi-4-mini[.exe]
 make phi-gui       # empacota dist/phi-4-mini-gui[.exe]
+
+# Dolphin 3.0 Llama 3.2 1B (2,5 GB; qualquer Llama 3.x: bun scripts/convert.ts llama DIR SAIDA)
+make dolphin-weights # baixa e converte para models/dolphin3.0-llama3.2-1b/
+make dolphin         # empacota dist/dolphin3-llama3.2-1b[.exe]
+make dolphin-q5      # empacota a variante Q5 (850 MB)
 ```
 
 Detalhes sobre manifesto, hashes SHA-256 e conversão estão em [docs/MODELS.md](docs/MODELS.md).

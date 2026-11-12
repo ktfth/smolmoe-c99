@@ -3,6 +3,14 @@
 ## Não lançado
 
 ### Adicionado
+- **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
+  3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
+  O runtime ganhou o escalonamento de RoPE `llama3` (quatro chaves opcionais `rope_llama3_*` na `config.ini`), o
+  pré-tokenizer do Llama 3 (dígitos em grupos de até 3, com `ignore_merges`) e o template ChatML-BOS (ChatML com
+  `<|begin_of_text|>` no início), que o Dolphin 3.0 usa. Atalhos `dolphin`, `dolphin-q5`, `make dolphin`,
+  `make dolphin-gui`, `make dolphin-q5` e `make dolphin-weights` (download fixado por SHA-256 do Dolphin 3.0 Llama
+  3.2 1B). Logits validados contra uma referência float32 independente (KL médio 0,0045 em Q8) e tokenizer contra o
+  Hugging Face; detalhes em `docs/MODELS.md`.
 - **`smolmoe-inventario`:** inventário defensivo só leitura de máquinas Linux (portas em escuta com processo,
   usuários com login, grupos administrativos, binários SUID/SGID com hash, caminhos graváveis por todos, pontos de
   persistência, chaves SSH autorizadas, configurações de segurança e alertas) e `--comparar` entre dois relatórios,
