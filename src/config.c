@@ -6,13 +6,18 @@
 #include <string.h>
 
 #define REQUIRED_KEYS 15u
-#define KEY_COUNT 20u /* the required ones, then optional RoPE, head_dim, and sliding_window keys */
+#define KEY_COUNT 24u /* the required ones, then optional RoPE, head_dim, sliding_window, and llama3 RoPE keys */
 #define ALL_REQUIRED ((1u << REQUIRED_KEYS) - 1u)
 #define KEY_ROTARY_DIM 15u
 #define KEY_ROPE_FACTOR 16u
 #define KEY_HEAD_DIM 17u
 #define KEY_SLIDING_WINDOW 18u
 #define KEY_LOCAL_THETA 19u
+#define KEY_LLAMA3_FACTOR 20u
+#define KEY_LLAMA3_LOW 21u
+#define KEY_LLAMA3_HIGH 22u
+#define KEY_LLAMA3_ORIGINAL 23u
+#define LLAMA3_KEYS (0xfu << KEY_LLAMA3_FACTOR)
 #define MAX_ROPE_FACTOR 1000.0
 #define LINE_CAPACITY 512u
 
@@ -30,13 +35,24 @@ static void rope_defaults(Config *c, unsigned seen) {
         die("invalid sliding_window %u: must be in 1..%u", c->sliding_window, c->max_context);
     if (!(c->local_theta > 1) || !isfinite(c->local_theta))
         die("invalid rope_local_theta: must be finite and > 1");
+    if ((seen & LLAMA3_KEYS) && (seen & LLAMA3_KEYS) != LLAMA3_KEYS)
+        die("llama3 RoPE scaling needs all of rope_llama3_factor, rope_llama3_low_freq_factor, "
+            "rope_llama3_high_freq_factor and rope_llama3_original_context");
+    c->llama3_rope = (seen & LLAMA3_KEYS) != 0;
+    if (c->llama3_rope &&
+        (!(c->llama3_factor >= 1 && c->llama3_factor <= MAX_ROPE_FACTOR) || !(c->llama3_low > 0) ||
+         !(c->llama3_high > c->llama3_low) || !isfinite(c->llama3_high) || !c->llama3_original))
+        die("invalid llama3 RoPE scaling: needs factor in [1, %g], 0 < low_freq_factor < high_freq_factor "
+            "and original_context > 0", MAX_ROPE_FACTOR);
 }
 
 Config config_parse(const unsigned char *text, size_t size) {
     static const char *keys[KEY_COUNT] = {
         "architecture", "dim", "hidden_dim", "layers", "heads", "kv_heads", "experts", "top_k",
         "vocab_size", "max_context", "shared_experts", "bos_id", "eos_id", "rms_eps", "rope_theta",
-        "rotary_dim", "rope_attention_factor", "head_dim", "sliding_window", "rope_local_theta"};
+        "rotary_dim", "rope_attention_factor", "head_dim", "sliding_window", "rope_local_theta",
+        "rope_llama3_factor", "rope_llama3_low_freq_factor", "rope_llama3_high_freq_factor",
+        "rope_llama3_original_context"};
     Config c;
     uint32_t *fields[12];
     char line[LINE_CAPACITY];
@@ -80,8 +96,16 @@ Config config_parse(const unsigned char *text, size_t size) {
             c.head_dim = parse_u32(value, MAX_DIM, s);
         } else if (k == KEY_SLIDING_WINDOW) {
             c.sliding_window = parse_u32(value, MAX_CONTEXT, s);
-        } else {
+        } else if (k == KEY_LOCAL_THETA) {
             c.local_theta = (float)parse_real(value, s);
+        } else if (k == KEY_LLAMA3_FACTOR) {
+            c.llama3_factor = parse_real(value, s);
+        } else if (k == KEY_LLAMA3_LOW) {
+            c.llama3_low = parse_real(value, s);
+        } else if (k == KEY_LLAMA3_HIGH) {
+            c.llama3_high = parse_real(value, s);
+        } else {
+            c.llama3_original = parse_u32(value, MAX_CONTEXT, s);
         }
     }
     if ((seen & ALL_REQUIRED) != ALL_REQUIRED) die("config is missing required fields");

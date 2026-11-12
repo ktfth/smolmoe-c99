@@ -11,8 +11,12 @@
 
 /* v2 header enums; any other value is rejected at load. */
 enum { QBP_NORM_NONE = 0, QBP_NORM_NFC = 1 };
-enum { QBP_PRETOK_QWEN2 = 1, QBP_PRETOK_O200K = 2, QBP_PRETOK_GEMMA = 3 };
-enum { QBP_CHAT_NONE = 0, QBP_CHAT_CHATML = 1, QBP_CHAT_PHI = 2, QBP_CHAT_GEMMA = 3 };
+/* QBP_PRETOK_LLAMA3 also implies ignore_merges: a pre-token that is a whole
+ * vocabulary piece is that token, without running the merges (tiktoken, HF). */
+enum { QBP_PRETOK_QWEN2 = 1, QBP_PRETOK_O200K = 2, QBP_PRETOK_GEMMA = 3, QBP_PRETOK_LLAMA3 = 4 };
+/* QBP_CHAT_CHATML_BOS: ChatML whose sequence starts with BOS (256), as Llama 3
+ * fine-tunes such as Dolphin 3.0 expect; plain text also starts with BOS. */
+enum { QBP_CHAT_NONE = 0, QBP_CHAT_CHATML = 1, QBP_CHAT_PHI = 2, QBP_CHAT_GEMMA = 3, QBP_CHAT_CHATML_BOS = 4 };
 
 typedef struct QwenTokenizer QwenTokenizer;
 

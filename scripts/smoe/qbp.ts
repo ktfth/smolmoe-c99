@@ -12,8 +12,10 @@
  * parseQbp ports qwen_load (src/tokenizer_qwen.c) and adds the v2 rules.
  */
 export const NORMALIZER = { none: 0, nfc: 1 } as const;
-export const PRETOKENIZER = { qwen2: 1, o200k: 2, gemma: 3 } as const;
-export const TEMPLATE = { none: 0, chatml: 1, phi: 2, gemma: 3 } as const;
+/** llama3 = the qwen2 regex with \p{N}{1,3}, plus ignore_merges (a pre-token that is a whole piece is that token). */
+export const PRETOKENIZER = { qwen2: 1, o200k: 2, gemma: 3, llama3: 4 } as const;
+/** chatmlBos = ChatML whose sequence (and plain text) starts with BOS (256). */
+export const TEMPLATE = { none: 0, chatml: 1, phi: 2, gemma: 3, chatmlBos: 4 } as const;
 export type Normalizer = (typeof NORMALIZER)[keyof typeof NORMALIZER];
 export type PreTokenizer = (typeof PRETOKENIZER)[keyof typeof PRETOKENIZER];
 export type ChatTemplate = (typeof TEMPLATE)[keyof typeof TEMPLATE];
@@ -90,8 +92,8 @@ function parseHeader(view: DataView, vocab: number): { header: QbpHeader; size: 
   if (view.byteLength < 32) fail("truncated Qwen tokenizer: header");
   const normalizer = view.getUint32(20, true), pretokenizer = view.getUint32(24, true), template = view.getUint32(28, true);
   if (normalizer > 1) fail(`unknown normalizer ${normalizer}`);
-  if (pretokenizer < 1 || pretokenizer > 3) fail(`unknown pre-tokenizer ${pretokenizer}`);
-  if (template > 3) fail(`unknown chat template ${template}`);
+  if (pretokenizer < 1 || pretokenizer > 4) fail(`unknown pre-tokenizer ${pretokenizer}`);
+  if (template > 4) fail(`unknown chat template ${template}`);
   return {
     header: { version: 2, normalizer: normalizer as Normalizer, pretokenizer: pretokenizer as PreTokenizer,
       template: template as ChatTemplate },
@@ -113,7 +115,7 @@ function checkTemplate(t: QbpTokenizer): void {
   if (t.header.version !== 2) return;
   if (t.special[256] !== 1 || t.special[257] !== 1) fail("tokens 256 and 257 must be flagged special");
   const hasSpecial = (text: string) => t.pieces.some((p, i) => i >= 256 && t.special[i] && same(p, text));
-  if (t.header.template === TEMPLATE.chatml) {
+  if (t.header.template === TEMPLATE.chatml || t.header.template === TEMPLATE.chatmlBos) {
     if (!hasSpecial("<|im_start|>") || !same(t.pieces[257]!, "<|im_end|>")) fail("chatml template needs <|im_start|> and EOS <|im_end|>");
   } else if (t.header.template === TEMPLATE.phi) {
     for (const m of PHI_MARKERS) if (!hasSpecial(m)) fail(`phi template needs the special token ${m}`);

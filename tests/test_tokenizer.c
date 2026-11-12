@@ -56,6 +56,7 @@ static void test_classes(void) {
 /* ---- pre-tokenizers ----------------------------------------------------- */
 
 /* Splits UTF-8 text and joins the pieces with '|' (absent from the inputs). */
+/* Pre-tokenizer under test: 0 qwen2, 1 o200k, 2 llama3. */
 static const char *split(int o200k, const char *text) {
     static char out[2048];
     uint32_t cp[256], n = 0, pos = 0, i = 0, w = 0, len = (uint32_t)strlen(text);
@@ -63,7 +64,8 @@ static const char *split(int o200k, const char *text) {
     while (pos < len) cp[n++] = read_utf8((const unsigned char *)text, len, &pos);
     for (i = 0; i < n; ++i) k[i] = unicode_class_bits(cp[i]);
     for (i = 0; i < n;) {
-        uint32_t j = o200k ? o200k_boundary(cp, k, n, i) : qwen2_boundary(cp, k, n, i);
+        uint32_t j = o200k == 2 ? llama3_boundary(cp, k, n, i)
+                   : o200k ? o200k_boundary(cp, k, n, i) : qwen2_boundary(cp, k, n, i);
         if (j <= i || j > n) return "(no progress)";
         if (i) out[w++] = '|';
         for (; i < j; ++i) w += write_utf8(cp[i], (unsigned char *)out + w);
@@ -74,7 +76,8 @@ static const char *split(int o200k, const char *text) {
 
 static void expect_split(int o200k, const char *text, const char *pieces) {
     const char *got = split(o200k, text);
-    CHECK(!strcmp(got, pieces), "%s split of \"%s\":\n  got      %s\n  expected %s", o200k ? "o200k" : "qwen2",
+    CHECK(!strcmp(got, pieces), "%s split of \"%s\":\n  got      %s\n  expected %s",
+          o200k == 2 ? "llama3" : o200k ? "o200k" : "qwen2",
           text, got, pieces);
 }
 
@@ -87,6 +90,18 @@ static void test_qwen2_split(void) {
     expect_split(0, "नमस्ते", "नमस|्त|े");      /* marks are not letters in Qwen2 */
     expect_split(0, "x'ſa", "x|'ſ|a");                /* (?i) folds U+017F to s */
     expect_split(0, "  hi\n\n  there", " | hi|\n\n| | there");
+}
+
+/* Llama 3: Qwen2's regex with \p{N}{1,3}; everything else splits as Qwen2. */
+static void test_llama3_split(void) {
+    expect_split(2, "1234567 + 89 = ?", "123|456|7| +| |89| =| ?");
+    expect_split(2, " 123x", " |123|x");
+    expect_split(2, "Ⅻ²٣4", "Ⅻ²٣|4");
+    expect_split(2, "don't DON'T", "don|'t| DON|'T");
+    expect_split(2, "HelloWorld iPhone", "HelloWorld| iPhone");
+    expect_split(2, "नमस्ते", "नमस|्त|े");
+    expect_split(2, "  hi\n\n  there", " | hi|\n\n| | there");
+    expect_split(2, "a/b//\n/c", "a|/b|//\n|/c");
 }
 
 static void test_o200k_split(void) {
@@ -533,6 +548,7 @@ int main(void) {
     test_classes();
     test_qwen2_split();
     test_o200k_split();
+    test_llama3_split();
     test_chatml();
     test_phi();
     test_gemma();

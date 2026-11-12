@@ -153,3 +153,28 @@ describe("tensor set", () => {
     expect(tensorSpecs(moe).find((t) => t.name === "l.0.router")).toMatchObject({ rows: 4, cols: 896 });
   });
 });
+
+describe("llama3 RoPE keys", () => {
+  const LLAMA: ModelConfig = {
+    architecture: "smolmoe_v1", dim: 2048, hidden_dim: 8192, layers: 16, heads: 32, kv_heads: 8, experts: 1,
+    top_k: 1, vocab_size: 128258, max_context: 131072, shared_experts: 0, bos_id: 256, eos_id: 257, rms_eps: 1e-5,
+    rope_theta: 500000, rope_llama3_factor: 32, rope_llama3_low_freq_factor: 1, rope_llama3_high_freq_factor: 4,
+    rope_llama3_original_context: 8192,
+  };
+
+  test("are written after the other optional keys and read back", () => {
+    const text = formatConfig(LLAMA);
+    expect(text.split("\n").slice(-5)).toEqual(["rope_llama3_factor=32.0", "rope_llama3_low_freq_factor=1.0",
+      "rope_llama3_high_freq_factor=4.0", "rope_llama3_original_context=8192", ""]);
+    expect(parseConfig(text)).toEqual(LLAMA);
+  });
+
+  test.each([
+    ["a partial set", { rope_llama3_high_freq_factor: undefined }, /needs all of/],
+    ["a factor below 1", { rope_llama3_factor: 0.5 }, /invalid llama3 RoPE scaling/],
+    ["high_freq_factor not above low_freq_factor", { rope_llama3_high_freq_factor: 1 }, /invalid llama3 RoPE scaling/],
+    ["a zero original context", { rope_llama3_original_context: 0 }, /invalid llama3 RoPE scaling/],
+  ])("reject %s", (_what, patch, message) => {
+    expect(() => validateConfig({ ...LLAMA, ...patch })).toThrow(message);
+  });
+});

@@ -1,6 +1,6 @@
 /**
  * Tiny synthetic Hugging Face checkpoints (random weights, NOT a trained
- * model) shaped like Qwen2 and Phi-3, for end-to-end converter tests:
+ * model) shaped like Qwen2, Phi-3 and Llama 3, for end-to-end converter tests:
  * config.json, a byte-level BPE tokenizer.json and safetensors (sharded for
  * Phi-3). Weights are seeded and reproducible.
  */
@@ -8,6 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { byteAlphabet } from "./bpe-tokenizer";
+import { LLAMA3_REGEX } from "./llama";
 import { O200K_REGEX } from "./phi3-tokenizer";
 import type { SourceDtype } from "./safetensors";
 import { f32ToF16 } from "../smoe/quant";
@@ -72,6 +73,9 @@ export interface SyntheticShape {
 
 export const QWEN_SHAPE: SyntheticShape = { dim: 64, heads: 4, kvHeads: 2, layers: 2, hidden: 96, vocab: 300 };
 export const PHI_SHAPE: SyntheticShape = { dim: 64, heads: 4, kvHeads: 2, layers: 2, hidden: 48, vocab: 300 };
+export const LLAMA_SHAPE: SyntheticShape = { dim: 64, heads: 4, kvHeads: 2, layers: 2, hidden: 80, vocab: 300 };
+/** Base entries of the Llama synthetic tokenizer that no merge produces: reachable only through ignore_merges. */
+export const LLAMA_WHOLE_PIECES = ["Ġzq", "123"] as const;
 
 /** A Qwen2-shaped directory: config.json, tokenizer.json, model.safetensors (BF16). */
 export function writeQwen2Synthetic(dir: string, seed = 1, patch: (config: Record<string, unknown>) => void = () => {}): void {
@@ -156,4 +160,52 @@ export function writePhi3Synthetic(dir: string, seed = 2, patch: (config: Record
     for (const x of tensors) weightMap[x.name] = file;
   });
   writeFileSync(join(dir, "model.safetensors.index.json"), JSON.stringify({ metadata: {}, weight_map: weightMap }));
+}
+
+/**
+ * A Llama-3-shaped directory: no biases, llama3 rope_scaling, untied head unless
+ * `tied`, and a tokenizer with the Llama 3 regex, ignore_merges and the Dolphin
+ * ChatML tokens.
+ */
+export function writeLlamaSynthetic(dir: string, seed = 3, tied = false,
+  patch: (config: Record<string, unknown>) => void = () => {}): void {
+  const s = LLAMA_SHAPE, rnd = seeded(seed), kd = s.kvHeads * (s.dim / s.heads);
+  mkdirSync(dir, { recursive: true });
+  const config: Record<string, unknown> = {
+    model_type: "llama", architectures: ["LlamaForCausalLM"], hidden_act: "silu", hidden_size: s.dim,
+    intermediate_size: s.hidden, num_hidden_layers: s.layers, num_attention_heads: s.heads, num_key_value_heads: s.kvHeads,
+    head_dim: s.dim / s.heads, vocab_size: s.vocab, max_position_embeddings: 256, rms_norm_eps: 1e-5, rope_theta: 500000.0,
+    attention_bias: false, mlp_bias: false, pretraining_tp: 1, tie_word_embeddings: tied,
+    rope_scaling: { factor: 8.0, high_freq_factor: 4.0, low_freq_factor: 1.0, original_max_position_embeddings: 64,
+      rope_type: "llama3" },
+  };
+  patch(config);
+  writeFileSync(join(dir, "config.json"), JSON.stringify(config));
+  const model = bpeModel([...LLAMA_WHOLE_PIECES]);
+  const base = Object.keys(model.vocab).length;
+  writeFileSync(join(dir, "tokenizer.json"), JSON.stringify({
+    normalizer: null, decoder: { type: "ByteLevel", add_prefix_space: true, trim_offsets: true, use_regex: true },
+    pre_tokenizer: { type: "Sequence", pretokenizers: [
+      { type: "Split", pattern: { Regex: LLAMA3_REGEX }, behavior: "Isolated", invert: false },
+      { type: "ByteLevel", add_prefix_space: false, trim_offsets: true, use_regex: false }] },
+    model: { type: "BPE", dropout: null, unk_token: null, continuing_subword_prefix: null, end_of_word_suffix: null,
+      fuse_unk: false, byte_fallback: false, ignore_merges: true, vocab: model.vocab, merges: model.merges.map((m) => m.join(" ")) },
+    added_tokens: ["<|begin_of_text|>", "<|end_of_text|>", "<|eot_id|>", "<|im_end|>", "<|im_start|>"]
+      .map((content, i) => ({ id: base + i, content, special: true })),
+  }));
+  const t = (name: string, shape: number[], scale = 0.2): SyntheticTensor =>
+    ({ name, dtype: "BF16", shape, values: Float32Array.from({ length: shape.reduce((a, b) => a * b, 1) }, () => rnd(scale)) });
+  const norm = (name: string, n: number): SyntheticTensor =>
+    ({ name, dtype: "BF16", shape: [n], values: Float32Array.from({ length: n }, () => 1 + rnd(0.2)) });
+  const tensors = [t("model.embed_tokens.weight", [s.vocab, s.dim], 2), norm("model.norm.weight", s.dim)];
+  if (!tied) tensors.push(t("lm_head.weight", [s.vocab, s.dim], 2));
+  for (let l = 0; l < s.layers; l++) {
+    const p = `model.layers.${l}.`;
+    tensors.push(norm(`${p}input_layernorm.weight`, s.dim), norm(`${p}post_attention_layernorm.weight`, s.dim),
+      t(`${p}self_attn.q_proj.weight`, [s.dim, s.dim]), t(`${p}self_attn.k_proj.weight`, [kd, s.dim]),
+      t(`${p}self_attn.v_proj.weight`, [kd, s.dim]), t(`${p}self_attn.o_proj.weight`, [s.dim, s.dim]),
+      t(`${p}mlp.gate_proj.weight`, [s.hidden, s.dim]), t(`${p}mlp.up_proj.weight`, [s.hidden, s.dim]),
+      t(`${p}mlp.down_proj.weight`, [s.dim, s.hidden]));
+  }
+  writeSafetensors(join(dir, "model.safetensors"), tensors);
 }

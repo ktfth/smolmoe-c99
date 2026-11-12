@@ -138,7 +138,7 @@ describe(".qbp encode / parse", () => {
 
   test("v2 rejects unknown enum values and missing template markers", () => {
     const base = Buffer.from(encodeQbp(qbpOf(2)));
-    for (const [at, value] of [[20, 2], [24, 0], [24, 4], [28, 4]] as const) {
+    for (const [at, value] of [[20, 2], [24, 0], [24, 5], [28, 5]] as const) {
       const b = Buffer.from(base);
       b.writeUInt32LE(value, at);
       expect(() => parseQbp(b, 265)).toThrow(/header|normalizer|pre-tokenizer|template/);
