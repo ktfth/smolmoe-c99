@@ -408,17 +408,24 @@ int run_program(const char *const *argv, const char *command_line, const char *e
 
 /* No console (CREATE_NO_WINDOW): no window flashes, the chat's console modes
  * stay untouched, and Ctrl+C in the chat never reaches it. */
-Child *child_start(const char *const *argv, const char *command_line, char *err, size_t errlen) {
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen) {
     SECURITY_ATTRIBUTES sa;
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     HANDLE in_r = NULL, in_w = NULL, out_r = NULL, out_w = NULL, null_err;
-    wchar_t *cmd = to_wide(command_line);
+    wchar_t *cmd = to_wide(command_line), *saved_wslenv = NULL;
     Child *c = (Child *)calloc(1, sizeof(*c));
     BOOL ok;
     (void)argv;
     if (!cmd || !c) {
         snprintf(err, errlen, cmd ? "sem memória" : "o comando não é UTF-8 válido");
+        free(cmd);
+        free(c);
+        return NULL;
+    }
+    if (env_name && !set_child_env(env_name, env_value, &saved_wslenv)) {
+        last_error("não consegui preparar o ambiente do programa", err, errlen);
         free(cmd);
         free(c);
         return NULL;
@@ -439,6 +446,7 @@ Child *child_start(const char *const *argv, const char *command_line, char *err,
         ok = CreateProcessW(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
     }
     if (!ok) last_error("não consegui iniciar o programa", err, errlen);
+    if (env_name) clear_child_env(env_name, saved_wslenv);
     if (in_r) CloseHandle(in_r);
     if (out_w) CloseHandle(out_w);
     if (null_err != INVALID_HANDLE_VALUE) CloseHandle(null_err);
@@ -544,8 +552,11 @@ int run_program(const char *const *argv, const char *command_line, const char *e
     return 0;
 }
 
-Child *child_start(const char *const *argv, const char *command_line, char *err, size_t errlen) {
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen) {
     (void)command_line;
+    (void)env_name;
+    (void)env_value;
     snprintf(err, errlen, "não consegui iniciar %s: o WebAssembly não cria processos", argv[0]);
     return NULL;
 }
@@ -742,13 +753,16 @@ static void close_fd(int *fd) {
 
 /* In a process group of its own, so Ctrl+C in the chat never reaches it. Our
  * pipe ends are close-on-exec: a "!comando" started later does not hold them. */
-Child *child_start(const char *const *argv, const char *command_line, char *err, size_t errlen) {
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen) {
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attr;
     int in[2] = {-1, -1}, out[2] = {-1, -1}, rc;
     Child *c = (Child *)calloc(1, sizeof(*c));
     pid_t pid;
     (void)command_line;
+    (void)env_name;
+    (void)env_value;
     if (!c || pipe(in) || pipe(out)) {
         snprintf(err, errlen, c ? "não consegui criar os pipes: %s" : "sem memória", strerror(errno));
         close_fd(&in[0]), close_fd(&in[1]), close_fd(&out[0]), close_fd(&out[1]);

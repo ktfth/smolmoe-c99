@@ -46,11 +46,13 @@ int run_program(const char *const *argv, const char *command_line, const char *e
 
 /* A program kept running in the background, talked to through pipes: its
  * stdin and stdout are ours to write and read, its stderr goes to the null
- * device, and it has no console window and gets no Ctrl+C (the command check's
- * PowerShell, cmdcheck.h). Same argv/command_line convention as run_program.
- * Returns NULL with a reason in err. */
+ * device, and it has no console window and gets no Ctrl+C (the command check,
+ * cmdcheck.h). Same argv/command_line/env convention as run_program: on
+ * Windows `env_name`=`env_value` is set for the child (NULL: none); elsewhere
+ * argv carries everything. Returns NULL with a reason in err. */
 typedef struct Child Child;
-Child *child_start(const char *const *argv, const char *command_line, char *err, size_t errlen);
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen);
 /* Writes all n bytes; 0 when the child is gone. */
 int child_write(Child *c, const char *data, size_t n);
 /* Reads lines until one equal to `end` arrives; the lines before it go to out

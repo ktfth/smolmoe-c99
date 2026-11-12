@@ -10,6 +10,13 @@
   sh e cmd são citados como não conferidos. Um PowerShell fica aberto em segundo plano: ~14 ms por resposta, ~90–190
   ms com nome inventado (i7-10610U). Liga no terminal; `--command-check`, `--no-command-check` e
   `--check-commands ARQUIVO` (sem modelo).
+- **Conferência dos comandos de bash/sh:** no Linux, no macOS e no Git Bash, os comandos das respostas são separados
+  em C (pipes, `&&`, `sudo`, `VAR=valor`, redirecionamentos, here-documents, prompt `$ `) e o `sh` procura cada
+  programa no PATH e cada opção e subcomando no manual da máquina, sem rodar nada da resposta. Aponta também os
+  comandos que mudam o sistema (`rm`, `dd`, `systemctl restart`, `apt install`, `sed -i`, `find -delete`...). Sem
+  manual (containers, instalações mínimas), vale um índice embutido com as opções e subcomandos de 178 programas,
+  tirado dos manuais do Ubuntu 24.04 (`scripts/cmdcheck/`). O chat avisa quando não há shell para conferir.
+  Respostas sintéticas das duas conferências em `tests/goldens/cmdcheck-casos.json`.
 - **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
   3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
   O runtime ganhou o escalonamento de RoPE `llama3` (quatro chaves opcionais `rope_llama3_*` na `config.ini`), o

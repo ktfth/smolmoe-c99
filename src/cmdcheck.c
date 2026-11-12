@@ -30,10 +30,13 @@ static const char *const VERBS[] = {
     "Stop", "Submit", "Suspend", "Switch", "Sync", "Test", "Trace", "Unblock", "Undo", "Uninstall", "Unlock",
     "Unprotect", "Unpublish", "Unregister", "Update", "Use", "Wait", "Watch", "Write"};
 
-/* Fence tags checked here, and those for another shell (named, not checked). */
-static const char *const POWERSHELL_TAGS[] = {"", "powershell", "posh", "ps", "ps1", "psm1", "pwsh",
-                                              "shell", "console", "terminal"};
-static const char *const FOREIGN_TAGS[] = {"bash", "sh", "zsh", "fish", "ksh", "dash", "cmd", "bat", "batch"};
+/* Fence tags: checked by either kind, by one kind (the other names them as
+ * not checked), or by neither (named). Other languages are skipped. */
+static const char *const BOTH_TAGS[] = {"", "shell", "console", "terminal"};
+static const char *const POWERSHELL_TAGS[] = {"powershell", "posh", "ps", "ps1", "psm1", "pwsh"};
+static const char *const POSIX_TAGS[] = {"bash", "sh", "zsh", "ksh", "dash", "ash"};
+static const char *const OTHER_SHELL_TAGS[] = {"fish", "cmd", "bat", "batch"};
+#define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 static int is_alpha(char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
 static int is_upper(char c) { return c >= 'A' && c <= 'Z'; }
@@ -76,6 +79,10 @@ typedef struct Request {
 
 static void add_snippet(Request *r, char kind, const char *text, size_t n) {
     size_t i, need = (r->len ? 1 : 0) + 1 + n;
+    if (r->x->kind == CMDCHECK_POSIX) {
+        r->x->checked += cmdcheck_sh_commands(text, n, r->out, r->cap, &r->len, r->x->changes, sizeof(r->x->changes));
+        return;
+    }
     for (i = 0; i < n && (is_blank(text[i]) || text[i] == '\n' || text[i] == '\r'); ++i) {}
     if (i == n || r->len + need >= r->cap) return;
     if (r->len) r->out[r->len++] = RS;
@@ -96,11 +103,25 @@ static void add_foreign(CmdExtract *x, const char *tag) {
     strcat(x->foreign, tag);
 }
 
-/* `inline code` and prose on one line s[b..e) outside any block. */
+/* POSIX inline code worth reading as a command: a lowercase name, then more
+ * words (`sudo systemctl restart x`), never a lone word (`config.ini`). */
+static int posix_inline(const char *s, size_t n) {
+    size_t i = 0;
+    if (!n || s[0] < 'a' || s[0] > 'z') return 0;
+    while (i < n && !is_blank(s[i])) {
+        if (!is_alpha(s[i]) && !is_digit(s[i]) && !strchr("._+-", s[i])) return 0;
+        ++i;
+    }
+    while (i < n && is_blank(s[i])) ++i;
+    return i < n;
+}
+
+/* `inline code` and, for PowerShell, prose on one line s[b..e) outside any block. */
 static void scan_line(Request *r, const char *s, size_t b, size_t e) {
     size_t i = b;
+    int posix = r->x->kind == CMDCHECK_POSIX;
     while (i < e) {
-        size_t len, k;
+        size_t len = 0, k;
         if (s[i] == '`') {
             const char *close = (const char *)memchr(s + i + 1, '`', e - i - 1);
             if (!close) {
@@ -108,11 +129,12 @@ static void scan_line(Request *r, const char *s, size_t b, size_t e) {
                 continue;
             }
             k = (size_t)(close - s);
-            if (verb_noun(s, i + 1, k, 0)) add_snippet(r, 'I', s + i + 1, k - i - 1);
+            if (posix ? posix_inline(s + i + 1, k - i - 1) : verb_noun(s, i + 1, k, 0) != 0)
+                add_snippet(r, 'I', s + i + 1, k - i - 1);
             i = k + 1;
             continue;
         }
-        if (!word_start(s, b, i) || !(len = verb_noun(s, i, e, 1))) {
+        if (posix || !word_start(s, b, i) || !(len = verb_noun(s, i, e, 1))) {
             ++i;
             continue;
         }
@@ -149,10 +171,25 @@ static void fence_tag(const char *s, size_t i, size_t e, char tag[TAG_MAX]) {
     tag[n] = 0;
 }
 
-size_t cmdcheck_extract(const char *reply, size_t n, char *out, size_t cap, CmdExtract *x) {
+static int tag_checked(const char *tag, CmdCheckKind kind) {
+    size_t n = strlen(tag);
+    return in_list(tag, n, BOTH_TAGS, COUNT(BOTH_TAGS)) ||
+           (kind == CMDCHECK_POWERSHELL ? in_list(tag, n, POWERSHELL_TAGS, COUNT(POWERSHELL_TAGS))
+                                        : in_list(tag, n, POSIX_TAGS, COUNT(POSIX_TAGS)));
+}
+
+static int tag_foreign(const char *tag, CmdCheckKind kind) {
+    size_t n = strlen(tag);
+    return in_list(tag, n, OTHER_SHELL_TAGS, COUNT(OTHER_SHELL_TAGS)) ||
+           (kind == CMDCHECK_POWERSHELL ? in_list(tag, n, POSIX_TAGS, COUNT(POSIX_TAGS))
+                                        : in_list(tag, n, POWERSHELL_TAGS, COUNT(POWERSHELL_TAGS)));
+}
+
+size_t cmdcheck_extract(const char *reply, size_t n, CmdCheckKind kind, char *out, size_t cap, CmdExtract *x) {
     Request r;
     size_t i = 0;
     memset(x, 0, sizeof(*x));
+    x->kind = kind;
     r.out = out, r.cap = cap, r.len = 0, r.x = x;
     if (cap) out[0] = 0;
     while (i < n) {
@@ -169,10 +206,8 @@ size_t cmdcheck_extract(const char *reply, size_t n, char *out, size_t cap, CmdE
             size_t le = line_end(reply, j, n);
             j = le < n ? le + 1 : n;
         }
-        if (in_list(tag, strlen(tag), POWERSHELL_TAGS, sizeof(POWERSHELL_TAGS) / sizeof(POWERSHELL_TAGS[0])))
-            add_snippet(&r, 'B', reply + body, j - body);
-        else if (in_list(tag, strlen(tag), FOREIGN_TAGS, sizeof(FOREIGN_TAGS) / sizeof(FOREIGN_TAGS[0])))
-            add_foreign(x, tag);
+        if (tag_checked(tag, kind)) add_snippet(&r, 'B', reply + body, j - body);
+        else if (tag_foreign(tag, kind)) add_foreign(x, tag);
         if (j < n) j = line_end(reply, j, n), j = j < n ? j + 1 : n; /* past the closing fence */
         i = j;
     }
@@ -223,11 +258,22 @@ static int starts_verb(const char *name) {
     return i && name[i] == '-';
 }
 
-static int format_item(Text *t, const char *line, size_t n) {
-    char f[4][FIELD_MAX];
+/* Where an option or subcommand was looked for: "lista" is the index in the binary. */
+static const char *source_of(int count, char f[][FIELD_MAX], char *buf, size_t cap) {
+    if (count > 3 && !strcmp(f[3], "lista")) snprintf(buf, cap, "a lista embutida (%s)", cmdcheck_index_source());
+    else snprintf(buf, cap, "o manual desta máquina");
+    return buf;
+}
+
+/* One finding: 1 for an item, 0 for a malformed line; an "L" line (programs
+ * checked by the index) goes to `notes` instead. */
+static int format_item(Text *t, Text *notes, CmdCheckKind kind, const char *line, size_t n) {
+    char f[4][FIELD_MAX], source[96];
     int count = split_fields(line, n, f, 4);
     if (count < 2 || !f[1][0]) return 0;
-    if (!strcmp(f[0], "N")) {
+    if (!strcmp(f[0], "N") && kind == CMDCHECK_POSIX) {
+        put(t, "  - %s: não está no PATH desta máquina (se o comando é para outra máquina, ignore este aviso).", f[1]);
+    } else if (!strcmp(f[0], "N")) {
         put(t, "  - %s: não achei aqui (%s).", f[1],
             starts_verb(f[1]) ? "pode ser de um módulo que esta máquina não tem"
                               : "se o comando é para outra máquina, ignore este aviso");
@@ -235,6 +281,16 @@ static int format_item(Text *t, const char *line, size_t n) {
     } else if (!strcmp(f[0], "P") && count >= 3 && f[2][0]) {
         put(t, "  - %s não tem o parâmetro -%s.", f[1], f[2]);
         if (count > 3 && f[3][0]) put(t, " Parecidos: %s.", f[3]);
+    } else if ((!strcmp(f[0], "O") || !strcmp(f[0], "S")) && count >= 3 && f[2][0]) {
+        put(t, "  - %s: %s não cita %s %s.", f[1], source_of(count, f, source, sizeof(source)),
+            f[0][0] == 'O' ? "a opção" : "o subcomando", f[2]);
+    } else if (!strcmp(f[0], "M")) {
+        put(t, "  - %s: sem manual nesta máquina; as opções não foram conferidas.", f[1]);
+    } else if (!strcmp(f[0], "L")) {
+        put(notes, "%s%s", notes->len ? ", " : "", f[1]);
+        return 0;
+    } else if (!strcmp(f[0], "W") && count > 2 && !strcmp(f[2], "-")) {
+        put(t, "  - %s muda o sistema: confira o alvo antes de rodar.", f[1]);
     } else if (!strcmp(f[0], "W")) {
         put(t, "  - %s muda o sistema%s: confira o alvo e teste antes com -WhatIf.", f[1],
             count > 2 && !strcmp(f[2], "High") ? " e o impacto é alto" : "");
@@ -245,24 +301,35 @@ static int format_item(Text *t, const char *line, size_t n) {
     return 1;
 }
 
-void cmdcheck_format(const char *findings, size_t n, const CmdExtract *x, const char *shell_name, char *out,
-                     size_t cap) {
-    char items[CMDCHECK_NOTICE_MAX];
-    Text t, list;
+static int format_lines(Text *list, Text *notes, CmdCheckKind kind, const char *s, size_t n) {
     size_t i = 0;
-    int count = 0, plural = strchr(x->foreign, ',') != NULL;
-    t.p = out, t.cap = cap, t.len = 0;
-    list.p = items, list.cap = sizeof(items), list.len = 0;
-    if (cap) out[0] = 0;
-    items[0] = 0;
+    int count = 0;
     while (i < n) {
-        const char *nl = (const char *)memchr(findings + i, '\n', n - i);
-        size_t e = nl ? (size_t)(nl - findings) : n;
-        count += format_item(&list, findings + i, e - i);
+        const char *nl = (const char *)memchr(s + i, '\n', n - i);
+        size_t e = nl ? (size_t)(nl - s) : n;
+        count += format_item(list, notes, kind, s + i, e - i);
         i = e + 1;
     }
+    return count;
+}
+
+void cmdcheck_format(const char *findings, size_t n, const CmdExtract *x, const char *shell_name, char *out,
+                     size_t cap) {
+    char items[CMDCHECK_NOTICE_MAX], noted[512];
+    Text t, list, notes;
+    int count, plural = strchr(x->foreign, ',') != NULL, posix = x->kind == CMDCHECK_POSIX;
+    t.p = out, t.cap = cap, t.len = 0;
+    list.p = items, list.cap = sizeof(items), list.len = 0;
+    notes.p = noted, notes.cap = sizeof(noted), notes.len = 0;
+    if (cap) out[0] = 0;
+    items[0] = noted[0] = 0;
+    count = format_lines(&list, &notes, x->kind, findings, n);
+    count += format_lines(&list, &notes, x->kind, x->changes, strlen(x->changes));
     if (count) {
         put(&t, "Conferência no %s desta máquina:\n%s", shell_name, items);
+        if (notes.len)
+            put(&t, "  - sem manual nesta máquina para %s: conferido pela lista embutida (%s), e a versão daqui pode "
+                    "ter outras opções.\n", noted, cmdcheck_index_source());
         if (x->foreign[0])
             put(&t, "  - %s %s não conferido%s: %s para outro shell.\n", plural ? "blocos" : "bloco", x->foreign,
                 plural ? "s" : "", plural ? "são" : "é");
@@ -270,10 +337,11 @@ void cmdcheck_format(const char *findings, size_t n, const CmdExtract *x, const 
         return;
     }
     if (x->checked)
-        put(&t,
-            "(conferido no %s desta máquina: os nomes e parâmetros existem. Isso não diz se o comando faz o que você "
-            "pediu.)\n",
-            shell_name);
+        put(&t, "(conferido no %s desta máquina: %s. Isso não diz se o comando faz o que você pediu.)\n", shell_name,
+            posix ? "os programas existem e as opções aparecem no manual" : "os nomes e parâmetros existem");
+    if (x->checked && notes.len)
+        put(&t, "(sem manual nesta máquina para %s: conferido pela lista embutida (%s), e a versão daqui pode ter "
+                "outras opções.)\n", noted, cmdcheck_index_source());
     if (x->foreign[0])
         put(&t, "(%s %s não conferido%s: %s para outro shell, e só o %s desta máquina é conferido.)\n",
             plural ? "blocos" : "bloco", x->foreign, plural ? "s" : "", plural ? "são" : "é", shell_name);
@@ -436,27 +504,56 @@ static const char *const SCRIPT[] = {
     "}"
 };
 
+#define SH_ENV "SMOLMOE_CHECK_SCRIPT" /* Windows: the sh script travels in this variable, unquoted */
+#define SH_SCRIPT_MAX 8192
+#define POSIX_ANSWER_MS 15000u /* man pages of a whole reply, on a slow disk */
+#define INDEX_LINE_MAX 768
+
 struct CmdChecker {
-    Shell ps;
-    Child *child;
+    Shell sh;
+    CmdCheckKind kind;
+    Child *child; /* PowerShell, kept running; a POSIX sh lives for one reply */
     int answered; /* the running PowerShell answered once: it is warm */
 };
 
-int cmdcheck_shell(const char *choice, const Shell *chat, Shell *out, char *err, size_t cap) {
-    if (choice) {
-        if (!shell_choose(choice, NULL, out, err, cap)) return 0;
-        if (out->kind == SHELL_POWERSHELL) return 1;
-        snprintf(err, cap, "a conferência dos comandos precisa de um PowerShell (pwsh ou powershell), não do %s",
-                 out->name);
-        return 0;
-    }
-    if (chat && chat->kind == SHELL_POWERSHELL) {
-        *out = *chat;
+/* sh from PATH; else the chosen shell, when it runs sh scripts (not zsh or fish). */
+static int posix_shell(const Shell *chosen, Shell *out, char *err, size_t cap) {
+    static const char *const RUNS_SH[] = {"sh", "bash", "dash", "ksh", "ash", "mksh"};
+    if (shell_choose("sh", NULL, out, err, cap)) return 1;
+    if (chosen && in_list(chosen->name, strlen(chosen->name), RUNS_SH, COUNT(RUNS_SH))) {
+        *out = *chosen;
         return 1;
     }
+    snprintf(err, cap, "nenhum sh no PATH para conferir os comandos");
+    return 0;
+}
+
+int cmdcheck_shell(const char *choice, const Shell *chat, Shell *out, char *err, size_t cap) {
+    Shell picked;
+    const Shell *base = NULL;
+    if (choice) {
+        if (!shell_choose(choice, NULL, &picked, err, cap)) return 0;
+        if (picked.kind == SHELL_CMD) {
+            snprintf(err, cap, "a conferência dos comandos precisa de um PowerShell ou de um shell POSIX (sh, bash), "
+                               "não do cmd");
+            return 0;
+        }
+        base = &picked;
+    } else if (chat && chat->kind != SHELL_CMD) {
+        base = chat;
+    }
+    if (base && base->kind == SHELL_POWERSHELL) {
+        *out = *base;
+        return 1;
+    }
+    if (base) return posix_shell(base, out, err, cap);
+#if defined(_WIN32)
     if (shell_choose("pwsh", NULL, out, err, cap) || shell_choose("powershell", NULL, out, err, cap)) return 1;
     snprintf(err, cap, "nenhum PowerShell (pwsh ou powershell) no PATH");
     return 0;
+#else
+    return posix_shell(NULL, out, err, cap);
+#endif
 }
 
 /* PowerShell's -EncodedCommand: the script as UTF-16LE, in base64. */
@@ -464,7 +561,7 @@ static char *encoded_script(void) {
     size_t i, n = 0, at = 0, cap;
     unsigned char *wide;
     char *b64;
-    for (i = 0; i < sizeof(SCRIPT) / sizeof(SCRIPT[0]); ++i) n += strlen(SCRIPT[i]) + 1;
+    for (i = 0; i < COUNT(SCRIPT); ++i) n += strlen(SCRIPT[i]) + 1;
     wide = (unsigned char *)malloc(n * 2);
     cap = n * 2 / 3 * 4 + 8;
     b64 = (char *)malloc(cap);
@@ -473,7 +570,7 @@ static char *encoded_script(void) {
         free(b64);
         return NULL;
     }
-    for (i = 0; i < sizeof(SCRIPT) / sizeof(SCRIPT[0]); ++i) {
+    for (i = 0; i < COUNT(SCRIPT); ++i) {
         const char *p;
         for (p = SCRIPT[i]; *p; ++p) wide[at++] = (unsigned char)*p, wide[at++] = 0;
         wide[at++] = '\n', wide[at++] = 0;
@@ -486,7 +583,7 @@ static char *encoded_script(void) {
     return b64;
 }
 
-static Child *start_child(const Shell *ps, char *err, size_t cap) {
+static Child *start_powershell(const Shell *ps, char *err, size_t cap) {
     char *script = encoded_script(), *line = NULL;
     Child *child = NULL;
     if (!script) {
@@ -497,14 +594,14 @@ static Child *start_child(const Shell *ps, char *err, size_t cap) {
     line = (char *)malloc(strlen(ps->program) + strlen(script) + 96);
     if (line) {
         sprintf(line, "\"%s\" -NoLogo -NoProfile -NonInteractive -EncodedCommand %s", ps->program, script);
-        child = child_start(NULL, line, err, cap);
+        child = child_start(NULL, line, NULL, NULL, err, cap);
     } else {
         snprintf(err, cap, "sem memória");
     }
 #else
     {
         const char *argv[] = {ps->program, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", script, NULL};
-        child = child_start(argv, NULL, err, cap);
+        child = child_start(argv, NULL, NULL, NULL, err, cap);
     }
 #endif
     free(line);
@@ -512,14 +609,38 @@ static Child *start_child(const Shell *ps, char *err, size_t cap) {
     return child;
 }
 
-CmdChecker *cmdcheck_start(const Shell *ps, int warm, char *err, size_t cap) {
+/* The sh script goes in -c (POSIX) or in a variable (Windows), never on
+ * stdin: a shell that reads its script in blocks (dash) would take request
+ * lines for commands. */
+static Child *start_sh(const Shell *sh, char *err, size_t cap) {
+    char script[SH_SCRIPT_MAX];
+    if (!cmdcheck_sh_script(script, sizeof(script))) {
+        snprintf(err, cap, "o roteiro da conferência não coube");
+        return NULL;
+    }
+#if defined(_WIN32)
+    {
+        char line[SHELL_PATH_MAX + 64];
+        snprintf(line, sizeof(line), "\"%s\" -c \"eval \\\"$" SH_ENV "\\\"\"", sh->program);
+        return child_start(NULL, line, SH_ENV, script, err, cap);
+    }
+#else
+    {
+        const char *argv[] = {sh->program, "-c", script, NULL};
+        return child_start(argv, NULL, NULL, NULL, err, cap);
+    }
+#endif
+}
+
+CmdChecker *cmdcheck_start(const Shell *sh, int warm, char *err, size_t cap) {
     CmdChecker *c = (CmdChecker *)calloc(1, sizeof(*c));
     if (!c) {
         snprintf(err, cap, "sem memória");
         return NULL;
     }
-    c->ps = *ps;
-    if (warm && !(c->child = start_child(ps, err, cap))) {
+    c->sh = *sh;
+    c->kind = sh->kind == SHELL_POWERSHELL ? CMDCHECK_POWERSHELL : CMDCHECK_POSIX;
+    if (warm && c->kind == CMDCHECK_POWERSHELL && !(c->child = start_powershell(sh, err, cap))) {
         free(c);
         return NULL;
     }
@@ -528,7 +649,7 @@ CmdChecker *cmdcheck_start(const Shell *ps, int warm, char *err, size_t cap) {
 
 /* Sends the request and reads the findings; 0 when PowerShell left or did not
  * answer in time (it is then stopped, and started again next time). */
-static int ask(CmdChecker *c, const char *request, size_t n, char *findings, size_t cap) {
+static int ask_powershell(CmdChecker *c, const char *request, size_t n, char *findings, size_t cap) {
     char err[256];
     size_t b64_cap = (n + 2) / 3 * 4 + 2, len;
     char *b64 = (char *)malloc(b64_cap);
@@ -536,7 +657,7 @@ static int ask(CmdChecker *c, const char *request, size_t n, char *findings, siz
     if (!b64) return 0;
     if (!c->child) {
         c->answered = 0;
-        c->child = start_child(&c->ps, err, sizeof(err));
+        c->child = start_powershell(&c->sh, err, sizeof(err));
     }
     len = cmdcheck_base64(request, n, b64, b64_cap);
     b64[len++] = '\n';
@@ -552,23 +673,91 @@ static int ask(CmdChecker *c, const char *request, size_t n, char *findings, siz
     return 1;
 }
 
+static int ask_sh(CmdChecker *c, const char *request, size_t n, char *findings, size_t cap) {
+    char err[256];
+    Child *child = start_sh(&c->sh, err, sizeof(err));
+    int ok = child && child_write(child, request, n) && child_write(child, "E\n", 2) &&
+             child_read_until(child, "E", POSIX_ANSWER_MS, findings, cap);
+    child_stop(child);
+    return ok;
+}
+
+/* Copies field `k` (tab-separated) of line[0..n) into out; 0 when absent. */
+static int field(const char *line, size_t n, int k, char *out, size_t cap) {
+    size_t i = 0, w = 0;
+    for (; k > 0 && i < n; ++i)
+        if (line[i] == '\t') --k;
+    if (k > 0 || i > n) return 0;
+    while (i < n && line[i] != '\t' && w + 1 < cap) out[w++] = line[i++];
+    out[w] = 0;
+    return w > 0 || (i < n && line[i] == '\t');
+}
+
+/* The index's verdict on one request line of a program without a manual. */
+static void index_line(Text *t, const char *line, size_t n, const char *name) {
+    char sub[FIELD_MAX], opt[FIELD_MAX];
+    int k;
+    if (field(line, n, 1, sub, sizeof(sub)) && strcmp(sub, ".") && !cmdcheck_index_sub(name, sub))
+        put(t, "S\t%s\t%s\tlista\n", name, sub);
+    for (k = 2; field(line, n, k, opt, sizeof(opt)); ++k)
+        if (!cmdcheck_index_option(name, opt)) put(t, "O\t%s\t%s\tlista\n", name, opt);
+}
+
+/* Replaces each "M" finding (no manual here) of a program the index knows by
+ * the index's verdict and an "L" line; the others stay. */
+static void apply_index(const char *request, size_t request_len, char *findings, size_t cap) {
+    char *out = (char *)malloc(cap), name[FIELD_MAX];
+    Text t;
+    size_t i = 0, flen = strlen(findings);
+    if (!out) return;
+    t.p = out, t.cap = cap, t.len = 0;
+    out[0] = 0;
+    while (i < flen) {
+        const char *nl = (const char *)memchr(findings + i, '\n', flen - i);
+        size_t e = nl ? (size_t)(nl - findings) : flen, j = 0;
+        if (!(findings[i] == 'M' && field(findings + i, e - i, 1, name, sizeof(name)) && cmdcheck_index_has(name))) {
+            put(&t, "%.*s\n", (int)(e - i), findings + i);
+            i = e + 1;
+            continue;
+        }
+        while (j < request_len) {
+            const char *rn = (const char *)memchr(request + j, '\n', request_len - j);
+            size_t re = rn ? (size_t)(rn - request) : request_len;
+            char first[FIELD_MAX];
+            if (field(request + j, re - j, 0, first, sizeof(first)) && !strcmp(first, name))
+                index_line(&t, request + j, re - j, name);
+            j = re + 1;
+        }
+        put(&t, "L\t%s\n", name);
+        i = e + 1;
+    }
+    memcpy(findings, out, t.len + 1);
+    free(out);
+}
+
 int cmdcheck_reply(CmdChecker *c, const char *reply, size_t n, char *out, size_t cap) {
     char *request = (char *)malloc(REQUEST_MAX), *findings = (char *)malloc(FINDINGS_MAX);
     CmdExtract x;
     size_t len;
+    int ok = 1;
     if (cap) out[0] = 0;
     if (!request || !findings) {
         free(request);
         free(findings);
         return 0;
     }
-    len = cmdcheck_extract(reply, n, request, REQUEST_MAX, &x);
+    len = cmdcheck_extract(reply, n, c->kind, request, REQUEST_MAX, &x);
     findings[0] = 0;
-    if (x.checked && !ask(c, request, len, findings, FINDINGS_MAX))
+    if (x.checked) {
+        ok = c->kind == CMDCHECK_POWERSHELL ? ask_powershell(c, request, len, findings, FINDINGS_MAX)
+                                            : ask_sh(c, request, len, findings, FINDINGS_MAX);
+        if (ok && c->kind == CMDCHECK_POSIX) apply_index(request, len, findings, FINDINGS_MAX);
+    }
+    if (!ok)
         snprintf(out, cap, "(não consegui conferir os comandos: o %s não respondeu; tento de novo na próxima "
-                           "resposta)\n", c->ps.name);
+                           "resposta)\n", c->sh.name);
     else
-        cmdcheck_format(findings, strlen(findings), &x, c->ps.name, out, cap);
+        cmdcheck_format(findings, strlen(findings), &x, c->sh.name, out, cap);
     free(request);
     free(findings);
     return cap && out[0];

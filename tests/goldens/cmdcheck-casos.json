@@ -1,0 +1,212 @@
+{
+  "descricao": "Respostas sintéticas para a conferência de comandos (src/cmdcheck.c, src/cmdcheck_sh.c). Cada caso roda com --check-commands no shell indicado, onde ele existir. 'deve' e 'nao_deve' são expressões regulares sobre o aviso. Os casos de posix aceitam os dois caminhos honestos: o manual da máquina ou a lista embutida, e 'não está no PATH' quando o programa falta naquela máquina (systemctl no Windows ou no macOS).",
+  "casos": [
+    {
+      "id": "ps-cmdlet-inventado",
+      "shell": "powershell",
+      "resposta": "Use:\n```powershell\nGet-NetAdapterInfo | Select-Object Name\n```",
+      "deve": ["Get-NetAdapterInfo: não achei aqui"],
+      "nao_deve": ["os nomes e parâmetros existem"]
+    },
+    {
+      "id": "ps-parametro-inventado",
+      "shell": "powershell",
+      "resposta": "```powershell\nGet-ChildItem -Path C:\\Temp -Recursive\n```",
+      "deve": ["Get-ChildItem não tem o parâmetro -Recursive\\. Parecidos: [^\\n]*-Recurse"],
+      "nao_deve": []
+    },
+    {
+      "id": "ps-parametro-do-dolphin",
+      "shell": "powershell",
+      "resposta": "```powershell\nGet-ChildItem C:\\Temp | ForEach-Object { (Get-ItemProperty -Path $_.FullName -Property Length).Count }\n```",
+      "deve": ["Get-ItemProperty não tem o parâmetro -Property\\."],
+      "nao_deve": ["ForEach-Object muda o sistema"]
+    },
+    {
+      "id": "ps-erro-de-digitacao-no-nome",
+      "shell": "powershell",
+      "resposta": "Rode `Get-Proccess -Name pwsh` para ver o processo.",
+      "deve": ["Get-Proccess: não achei aqui[^\\n]*Parecidos: [^\\n]*Get-Process"],
+      "nao_deve": []
+    },
+    {
+      "id": "ps-correto-e-somente-leitura",
+      "shell": "powershell",
+      "resposta": "```powershell\nGet-ChildItem -Recurse -File C:\\Temp | Sort-Object Length -Descending | Select-Object -First 10\n```",
+      "deve": ["os nomes e parâmetros existem", "não diz se o comando faz o que você pediu"],
+      "nao_deve": ["não tem o parâmetro", "muda o sistema", "não achei"]
+    },
+    {
+      "id": "ps-real-que-muda-o-sistema",
+      "shell": "powershell",
+      "resposta": "```powershell\nRemove-Item -Recurse -Force C:\\Temp\\velho\nStop-Process -Name notepad\n```",
+      "deve": ["Remove-Item muda o sistema: confira o alvo e teste antes com -WhatIf", "Stop-Process muda o sistema"],
+      "nao_deve": ["os nomes e parâmetros existem"]
+    },
+    {
+      "id": "ps-impacto-alto",
+      "shell": "powershell",
+      "so_windows": true,
+      "resposta": "```powershell\nClear-RecycleBin -Force\n```",
+      "deve": ["Clear-RecycleBin muda o sistema e o impacto é alto"],
+      "nao_deve": []
+    },
+    {
+      "id": "ps-so-a-sessao",
+      "shell": "powershell",
+      "resposta": "```powershell\n$x = Get-Date\nSet-Alias -Name ll -Value Get-ChildItem\nNew-Variable -Name y -Value 1\n```",
+      "deve": ["os nomes e parâmetros existem"],
+      "nao_deve": ["muda o sistema"]
+    },
+    {
+      "id": "ps-alias-e-abreviacao",
+      "shell": "powershell",
+      "resposta": "```\ngci -Rec -Force -ErrorAction SilentlyContinue\n```",
+      "deve": ["os nomes e parâmetros existem"],
+      "nao_deve": ["não tem o parâmetro"]
+    },
+    {
+      "id": "ps-flag-unix-no-powershell",
+      "shell": "powershell",
+      "so_windows": true,
+      "resposta": "```\nls -la\n```",
+      "deve": ["Get-ChildItem não tem o parâmetro -la\\."],
+      "nao_deve": []
+    },
+    {
+      "id": "ps-bloco-bash-nao-conferido",
+      "shell": "powershell",
+      "resposta": "No Debian:\n```bash\nsudo apt update\n```",
+      "deve": ["bloco bash não conferido"],
+      "nao_deve": ["não achei", "não está no PATH"]
+    },
+    {
+      "id": "ps-prosa-com-palavras-hifenizadas",
+      "shell": "powershell",
+      "resposta": "Ligue o Wi-Fi, confira o e-mail e o Plug-and-Play; depois use Get-Servicee para listar.",
+      "deve": ["Get-Servicee: não achei aqui"],
+      "nao_deve": ["Wi-Fi", "e-mail", "Plug-and-Play"]
+    },
+    {
+      "id": "ps-nada-roda",
+      "shell": "powershell",
+      "resposta": "```powershell\nNew-Item -ItemType File -Path ./smolmoe-caso-nao-devia-existir.txt\n```",
+      "deve": ["New-Item muda o sistema"],
+      "nao_deve": [],
+      "arquivo_que_nao_pode_existir": "smolmoe-caso-nao-devia-existir.txt"
+    },
+    {
+      "id": "sh-opcao-inventada",
+      "shell": "posix",
+      "resposta": "```bash\nls -la --recursive-all /var/log\n```",
+      "deve": ["ls: (o manual desta máquina|a lista embutida \\([^)]*\\)) não cita a opção --recursive-all\\."],
+      "nao_deve": ["os programas existem"]
+    },
+    {
+      "id": "sh-opcao-longa-inventada-no-grep",
+      "shell": "posix",
+      "resposta": "Rode `grep --recursiv-search erro /var/log/syslog`.",
+      "deve": ["grep: (o manual desta máquina|a lista embutida \\([^)]*\\)) não cita a opção --recursiv-search\\."],
+      "nao_deve": []
+    },
+    {
+      "id": "sh-subcomando-inventado",
+      "shell": "posix",
+      "resposta": "```bash\nsudo systemctl restat nginx\n```",
+      "deve": ["systemctl: ((o manual desta máquina|a lista embutida \\([^)]*\\)) não cita o subcomando restat|não está no PATH)"],
+      "nao_deve": ["systemctl muda o sistema", "os programas existem"]
+    },
+    {
+      "id": "sh-subcomando-real-que-muda",
+      "shell": "posix",
+      "resposta": "```bash\nsudo systemctl restart nginx\n```",
+      "deve": ["systemctl muda o sistema: confira o alvo antes de rodar"],
+      "nao_deve": ["subcomando restart"]
+    },
+    {
+      "id": "sh-programa-inventado",
+      "shell": "posix",
+      "resposta": "```bash\nnetstatx -tulpn\n```",
+      "deve": ["netstatx: não está no PATH desta máquina \\(se o comando é para outra máquina, ignore este aviso\\)"],
+      "nao_deve": []
+    },
+    {
+      "id": "sh-apaga-com-rm",
+      "shell": "posix",
+      "resposta": "Limpe o cache:\n```sh\nrm -rf /tmp/cache-antigo\n```",
+      "deve": ["rm muda o sistema: confira o alvo antes de rodar"],
+      "nao_deve": ["não cita a opção"]
+    },
+    {
+      "id": "sh-find-delete",
+      "shell": "posix",
+      "resposta": "```bash\nfind /var/log -name '*.gz' -mtime +30 -delete\n```",
+      "deve": ["find muda o sistema"],
+      "nao_deve": ["não cita a opção -name", "não cita a opção -mtime"]
+    },
+    {
+      "id": "sh-find-so-leitura",
+      "shell": "posix",
+      "resposta": "```bash\nfind /var/log -name '*.log' -type f\n```",
+      "deve": ["os programas existem|sem manual nesta máquina para find"],
+      "nao_deve": ["muda o sistema", "não cita"]
+    },
+    {
+      "id": "sh-sed-in-place",
+      "shell": "posix",
+      "resposta": "```bash\nsed -i 's/old/new/' /etc/hosts\n```",
+      "deve": ["sed muda o sistema"],
+      "nao_deve": ["não cita a opção -i"]
+    },
+    {
+      "id": "sh-correto-e-somente-leitura",
+      "shell": "posix",
+      "resposta": "```bash\nls -la /var/log | grep -v debug | sort -u | head -n 20\n```",
+      "deve": ["os programas existem e as opções aparecem no manual|sem manual nesta máquina para", "não diz se o comando faz o que você pediu"],
+      "nao_deve": ["não cita", "muda o sistema", "não está no PATH"]
+    },
+    {
+      "id": "sh-opcoes-juntas-e-com-valor",
+      "shell": "posix",
+      "resposta": "```bash\ntail -n50 /var/log/syslog\ndu -sh /var/* 2>/dev/null | sort -h\n```",
+      "deve": [],
+      "nao_deve": ["não cita a opção -n50", "não cita a opção -sh", "não cita a opção -h"]
+    },
+    {
+      "id": "sh-prompt-heredoc-e-redirecionamento",
+      "shell": "posix",
+      "resposta": "```console\n$ cat <<EOF > /tmp/x.conf\nopcao --nao-e-comando\nEOF\n$ sort -u /tmp/x.conf 2>&1\n```",
+      "deve": [],
+      "nao_deve": ["--nao-e-comando", "opcao", "EOF"]
+    },
+    {
+      "id": "sh-bloco-powershell-nao-conferido",
+      "shell": "posix",
+      "resposta": "No Windows:\n```powershell\nGet-ChildItem -Recurse\n```",
+      "deve": ["bloco powershell não conferido"],
+      "nao_deve": ["não está no PATH", "Get-ChildItem:"]
+    },
+    {
+      "id": "sh-arquivo-em-crase-nao-e-comando",
+      "shell": "posix",
+      "resposta": "Abra `/etc/fstab` e `config.ini`, depois rode `df -h`.",
+      "deve": [],
+      "nao_deve": ["fstab", "config.ini"]
+    },
+    {
+      "id": "sh-pacman-consulta-e-mudanca",
+      "shell": "posix",
+      "resposta": "```bash\npacman -Ss vim\n```",
+      "deve": [],
+      "nao_deve": ["pacman muda o sistema"]
+    },
+    {
+      "id": "sh-nada-roda",
+      "shell": "posix",
+      "resposta": "```bash\ntouch ./smolmoe-caso-sh-nao-devia-existir.txt\n```",
+      "deve": [],
+      "nao_deve": [],
+      "arquivo_que_nao_pode_existir": "smolmoe-caso-sh-nao-devia-existir.txt"
+    }
+  ]
+}

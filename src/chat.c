@@ -191,7 +191,8 @@ void chat_run(const ChatContext *c) {
     if (e->tools) fputs("Ferramentas: data_atual, dias_ate, calcular, converter, contar.\n", stderr);
     if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s.\n", c->shell->name);
     if (reply.checker)
-        fprintf(stderr, "Conferência: os comandos das respostas são procurados no %s desta máquina (nada roda).\n",
+        fprintf(stderr,
+                "Conferência: os comandos das respostas são procurados no %s desta máquina (nada da resposta roda).\n",
                 c->check_shell->name);
     else if (!checking)
         fprintf(stderr, "(conferência dos comandos desligada: %s)\n", check_err);

@@ -175,7 +175,7 @@ Qualquer linha digitada começando com `!` roda diretamente no shell do sistema 
 
 ### Conferência dos comandos das respostas
 
-Modelos pequenos inventam cmdlets e parâmetros. Depois de cada resposta, o chat procura os comandos dela no PowerShell da própria máquina. O PowerShell só analisa o texto; nada da resposta é executado:
+Modelos pequenos inventam comandos, opções e parâmetros. Depois de cada resposta, o chat procura os comandos dela na própria máquina, no tipo de shell do chat: PowerShell no Windows (ou quando o chat roda nele) e `sh` no Linux, no macOS e no Git Bash. Nada da resposta é executado. O PowerShell só analisa o texto, e o `sh` só usa `command -v`, `man -w` e lê a página do manual (nunca roda o programa, nem com `--help`):
 
 ```text
 > Como listo os arquivos com o tamanho?
@@ -187,17 +187,30 @@ Conferência no PowerShell 7 desta máquina:
 Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.
 ```
 
+No bash, o mesmo tipo de aviso:
+
+```text
+Conferência no sh desta máquina:
+  - ls: o manual desta máquina não cita a opção --recursive-all.
+  - systemctl: o manual desta máquina não cita o subcomando restat.
+  - netstatx: não está no PATH desta máquina (se o comando é para outra máquina, ignore este aviso).
+  - rm muda o sistema: confira o alvo antes de rodar.
+Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.
+```
+
 O aviso aponta:
-- um cmdlet que não existe aqui, com nomes parecidos que existem (`Get-NetAdapterInfo` → `Get-NetAdapter`);
-- um parâmetro que o cmdlet não tem, com os parecidos (`-Recursive` → `-Recurse`);
-- um cmdlet real que **muda o sistema** (os que aceitam `-WhatIf`, como `Remove-Item` e `Stop-Process`), mesmo escrito certo.
+- **PowerShell:** um cmdlet que não existe aqui, com nomes parecidos que existem (`Get-NetAdapterInfo` → `Get-NetAdapter`); um parâmetro que o cmdlet não tem, com os parecidos (`-Recursive` → `-Recurse`); e um cmdlet real que **muda o sistema** (os que aceitam `-WhatIf`, como `Remove-Item` e `Stop-Process`), mesmo escrito certo.
+- **bash/sh:** um programa que não está no PATH; uma opção ou um subcomando (`systemctl`, `apt`, `docker`, `git`...) que o manual não cita; e um comando que **muda o sistema**, por uma tabela (`rm`, `dd`, `mkfs`, `systemctl restart`, `apt install`, `pacman -S`, `sed -i`, `find -delete`, `docker rm`...). O separador entende pipes, `&&`, `sudo`, `VAR=valor`, redirecionamentos, here-documents e o prompt `$ ` copiado de um terminal.
+
+**Sem manual na máquina** (containers e instalações mínimas costumam vir sem): o smolmoe leva um **índice embutido** com as opções e os subcomandos que os manuais do Ubuntu 24.04 citam para 178 programas de manutenção. Só os nomes, nunca o texto, ~60 KB no binário. O aviso diz quando a conferência veio dessa lista. Um programa fora dela e sem manual fica com "as opções não foram conferidas". O índice é refeito com `scripts/cmdcheck/index-man.sh` (num Linux com manuais) e `scripts/cmdcheck/gen-index.ts`.
 
 > [!IMPORTANT]
-> **Nenhum aviso não quer dizer "comando certo".** A conferência não pega um comando real que faz a coisa errada (parar um serviço quando você pediu para reiniciar, apagar a pasta errada). Ela vale só para esta máquina: um cmdlet que falta aqui pode existir na máquina que você vai consertar, e o contrário. Blocos marcados como `bash`, `sh` ou `cmd` são citados como "não conferidos", nunca como inexistentes.
+> **Nenhum aviso não quer dizer "comando certo".** A conferência não pega um comando real que faz a coisa errada (parar um serviço quando você pediu para reiniciar, apagar a pasta errada). Ela vale só para esta máquina: o que falta aqui pode existir na máquina que você vai consertar, e o contrário. A lista embutida é a do Ubuntu 24.04; outra versão pode ter outras opções. Blocos do outro tipo de shell (`bash` no PowerShell, `powershell` no sh, e `cmd`) são citados como "não conferidos", nunca como inexistentes.
 
-- Liga sozinha no terminal quando há um PowerShell (`pwsh` ou `powershell`); com entrada por pipe, só com `--command-check`. `--no-command-check` desliga.
-- O PowerShell abre em segundo plano depois do prompt de sistema e se aquece enquanto você digita. Medido no i7-10610U: ~14 ms por resposta com comandos que existem, ~90–190 ms quando há um nome inventado.
-- `smolmoe --check-commands ARQUIVO` confere um texto qualquer (uma resposta, um script) sem carregar modelo.
+- Liga sozinha no terminal; com entrada por pipe, só com `--command-check`. `--no-command-check` desliga. Se não houver shell para conferir, o chat avisa ao abrir.
+- O PowerShell abre em segundo plano depois do prompt de sistema e se aquece enquanto você digita. Medido no i7-10610U: ~14 ms por resposta com comandos que existem, ~90–190 ms quando há um nome inventado. O `sh` abre a cada resposta: ~0,1–0,2 s no Ubuntu (WSL), ~0,4–0,6 s no Git Bash.
+- `smolmoe --check-commands ARQUIVO` confere um texto qualquer (uma resposta, um script) sem carregar modelo; `--shell` escolhe o PowerShell ou o sh.
+- `tests/goldens/cmdcheck-casos.json` tem as respostas sintéticas que testam as duas conferências.
 
 ---
 
@@ -216,7 +229,7 @@ O aviso aponta:
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa data/hora para as ferramentas |
 | `--shell NOME\|CAMINHO` | shell pai | Define o shell usado por `!comando` (`pwsh`, `bash`, `cmd`...) |
 | `--no-command-check` / `--command-check` | ligado no terminal | Desliga a conferência dos comandos das respostas / liga também com entrada por pipe |
-| `--check-commands ARQUIVO` | — | Confere os comandos de um texto no PowerShell desta máquina, sem modelo |
+| `--check-commands ARQUIVO` | — | Confere os comandos de um texto nesta máquina (PowerShell ou sh), sem modelo |
 | `--tokens N` | `64` (`512` no chat) | Máximo de novos tokens gerados |
 | `--context N` | `min(modelo, 2048)` | Tamanho do cache KV em tokens |
 | `--threads N` | núcleos físicos | Número de threads de trabalho |

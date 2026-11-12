@@ -80,7 +80,7 @@ static void usage(FILE *out) {
           "                       (default: the shell that started smolmoe, else the system's)\n"
           "  --no-shell-escape    \"!command\" lines are plain messages\n"
           "  --shell-escape       also run them when input is piped (off there by default)\n"
-          "  --no-command-check   do not look up the reply's commands in this machine's PowerShell\n"
+          "  --no-command-check   do not look up the reply's commands on this machine (PowerShell or sh)\n"
           "  --command-check      also look them up when input is piped (off there by default)\n"
           "generation\n"
           "  --tokens N           max new tokens (default 64; 512 per reply in chat)\n"
@@ -103,7 +103,7 @@ static void usage(FILE *out) {
           "  --token-ids FILE     prompt and generated token IDs, one per line\n"
           "  --perplexity         score the prompt (teacher-forced NLL, perplexity); no generation\n"
           "  --tokenize-only      encode and render the prompt; no weights needed\n"
-          "  --check-commands FILE  look up the commands in FILE (a reply) in this machine's PowerShell,\n"
+          "  --check-commands FILE  look up the commands in FILE (a reply) on this machine (--shell: which),\n"
           "                       as the chat does after each reply; no weights needed\n"
           "  --version, --help\n", out);
 }
@@ -516,24 +516,22 @@ static const Shell *chat_shell(const Options *o, int terminal, Shell *shell) {
     return on ? shell : NULL;
 }
 
-/* The PowerShell that looks up each reply's commands: on in a terminal, on
- * piped input only with --command-check. The chat's own shell when it is a
- * PowerShell, else pwsh or powershell from PATH (--shell picks the "!" shell,
- * which may be cmd or bash). Without one the check is off, with a notice when
- * it was asked for. */
-static const Shell *chat_check_shell(const Options *o, int terminal, const Shell *chat, Shell *ps) {
+/* The shell that looks up each reply's commands (cmdcheck_shell): on in a
+ * terminal, on piped input only with --command-check. Without one the check is
+ * off, and the chat says so: a silent "off" would read as "nothing to report". */
+static const Shell *chat_check_shell(const Options *o, int terminal, const Shell *chat, Shell *sh) {
     char err[SHELL_PATH_MAX + 128];
     int on = o->command_check > 0 || (!o->command_check && terminal);
     if (!on) return NULL;
-    if (cmdcheck_shell(NULL, chat, ps, err, sizeof(err))) return ps;
-    if (o->command_check > 0) fprintf(stderr, "(conferência dos comandos desligada: %s)\n", err);
+    if (cmdcheck_shell(NULL, chat, sh, err, sizeof(err))) return sh;
+    fprintf(stderr, "(conferência dos comandos desligada: %s)\n", err);
     return NULL;
 }
 
 #define CHECK_FILE_MAX (256u * 1024u)
 
 /* --check-commands: prints what the chat would print after a reply holding
- * FILE's text. Needs no model; PowerShell starts only when there is a command
+ * FILE's text. Needs no model; the checking shell starts only when there is a command
  * to look up. */
 static int check_commands_file(const Options *o) {
     char err[SHELL_PATH_MAX + 128], notice[CMDCHECK_NOTICE_MAX], *text = (char *)malloc(CHECK_FILE_MAX);

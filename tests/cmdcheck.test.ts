@@ -12,14 +12,16 @@ import { run, tempDir } from "./support/run";
 const work = tempDir("cmdcheck");
 afterAll(() => work.dispose());
 
-const hasPowerShell = ["pwsh", "powershell"].some((name) => Bun.which(name) !== null);
+/* Asked for by name: without --shell, Linux and macOS check in sh (tests/cmdcheck-casos.test.ts covers both). */
+const POWERSHELL = ["pwsh", "powershell"].find((name) => Bun.which(name) !== null) ?? null;
+const hasPowerShell = POWERSHELL !== null;
 /* PowerShell starts in about a second here; a cold CI runner can take several. */
 const SLOW = 60_000;
 
 function check(reply: string, extra: readonly string[] = []): { code: number; out: string; err: string } {
   const file = join(work.path, `reply-${Math.random().toString(36).slice(2)}.md`);
   writeFileSync(file, reply);
-  const r = run(["--check-commands", file, ...extra]);
+  const r = run(["--check-commands", file, ...(POWERSHELL ? ["--shell", POWERSHELL] : []), ...extra]);
   return { code: r.code, out: r.stdout.toString(), err: r.stderr };
 }
 
@@ -109,11 +111,19 @@ describe("--check-commands errors", () => {
     expect(r.stderr).toContain("--check-commands");
   });
 
-  test("--shell picks the PowerShell, and a non-PowerShell is refused", () => {
+  test.skipIf(process.platform !== "win32")("--shell cmd is refused: the check needs a PowerShell or a POSIX shell", () => {
     const file = join(work.path, "x.md");
     writeFileSync(file, "`Get-Item x`");
-    const r = run(["--check-commands", file, "--shell", process.platform === "win32" ? "cmd" : "sh"]);
+    const r = run(["--check-commands", file, "--shell", "cmd"]);
     expect(r.code).not.toBe(0);
-    expect(r.stderr).toContain("PowerShell");
+    expect(r.stderr).toContain("PowerShell ou de um shell POSIX");
+  });
+
+  test("an unknown --shell is an error", () => {
+    const file = join(work.path, "y.md");
+    writeFileSync(file, "`Get-Item x`");
+    const r = run(["--check-commands", file, "--shell", "notepad"]);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toContain("--check-commands: shell desconhecido");
   });
 });

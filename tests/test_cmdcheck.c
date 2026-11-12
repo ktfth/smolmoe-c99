@@ -23,7 +23,7 @@ static int failures;
 static void expect_extract(const char *reply, const char *want, const char *want_foreign) {
     char got[2048];
     CmdExtract x;
-    size_t n = cmdcheck_extract(reply, strlen(reply), got, sizeof(got), &x);
+    size_t n = cmdcheck_extract(reply, strlen(reply), CMDCHECK_POWERSHELL, got, sizeof(got), &x);
     CHECK(n == strlen(want) && !memcmp(got, want, n), "extract(%s)\n  got  [%.*s]\n  want [%s]", reply, (int)n, got,
           want);
     CHECK(!strcmp(x.foreign, want_foreign), "foreign of (%s): got [%s] want [%s]", reply, x.foreign, want_foreign);
@@ -70,10 +70,85 @@ static void test_inline_and_prose(void) {
 static void test_limits(void) {
     char small[16];
     CmdExtract x;
-    size_t n = cmdcheck_extract("```\nGet-ChildItem -Recurse C:\\Windows\n```", 41, small, sizeof(small), &x);
+    size_t n = cmdcheck_extract("```\nGet-ChildItem -Recurse C:\\Windows\n```", 41, CMDCHECK_POWERSHELL, small,
+                                sizeof(small), &x);
     CHECK(n == 0, "a snippet that does not fit is dropped whole, got %zu", n);
-    n = cmdcheck_extract("", 0, small, sizeof(small), &x);
+    n = cmdcheck_extract("", 0, CMDCHECK_POWERSHELL, small, sizeof(small), &x);
     CHECK(n == 0 && !x.foreign[0], "empty reply");
+}
+
+/* ---- POSIX: splitting shell snippets into commands ---------------------- */
+
+static void expect_sh(const char *text, const char *want, const char *want_changes) {
+    char got[2048], changes[512];
+    size_t len = 0;
+    changes[0] = 0;
+    got[0] = 0;
+    cmdcheck_sh_commands(text, strlen(text), got, sizeof(got), &len, changes, sizeof(changes));
+    CHECK(len == strlen(want) && !strcmp(got, want), "sh(%s)\n  got  [%s]\n  want [%s]", text, got, want);
+    CHECK(!strcmp(changes, want_changes), "changes of (%s)\n  got  [%s]\n  want [%s]", text, changes, want_changes);
+}
+
+static void test_sh_commands(void) {
+    /* Pipes, && and options, with combined short flags kept whole. */
+    expect_sh("ls -la /tmp | grep -v foo && rm -rf /tmp/x\n", "ls\t.\t-la\ngrep\t.\t-v\nrm\t.\t-rf\n",
+              "W\trm\t-\n");
+    /* sudo is looked up on its own; its options and their values are not the command's. */
+    expect_sh("sudo -u www-data apt-get instal -y nginx", "sudo\t.\napt-get\tinstal\t-y\n", "");
+    expect_sh("sudo apt-get install -y nginx", "sudo\t.\napt-get\tinstall\t-y\n", "W\tapt-get\t-\n");
+    /* A prompt, a subcommand typo and the real one. */
+    expect_sh("$ systemctl restat nginx\n$ systemctl restart nginx\n", "systemctl\trestat\nsystemctl\trestart\n",
+              "W\tsystemctl\t-\n");
+    expect_sh("systemctl status nginx --no-pager", "systemctl\tstatus\t--no-pager\n", "");
+    /* NAME=value, redirections, here-documents and comments. */
+    expect_sh("LANG=C sort -u nomes.txt > saida.txt 2>&1", "sort\t.\t-u\n", "");
+    expect_sh("dmesg -T 2>/dev/null | tail -n50\n# comentario -x\n", "dmesg\t.\t-T\ntail\t.\t-n50\n", "");
+    expect_sh("cat <<EOF > /etc/x.conf\nfoo -bar\nEOF\nuname -r\n", "cat\t.\nuname\t.\t-r\n", "");
+    /* Values after = go, and only safe characters stay in an option. */
+    expect_sh("ls --color=auto --sort='time' -1", "ls\t.\t--color\t--sort\t-1\n", "");
+    expect_sh("grep -E 'a|b' x; echo \"-n\"", "grep\t.\t-E\necho\t.\n", "");
+    /* Keywords lead to the real command; paths and substitutions are skipped. */
+    expect_sh("if grep -q root /etc/passwd; then echo ok; fi", "grep\t.\t-q\necho\t.\n", "");
+    expect_sh("./configure --prefix=/usr && make -j4", "make\t.\t-j4\n", "");
+    expect_sh("kill -9 $(pidof nginx)", "kill\t.\t-9\n", "W\tkill\t-\n");
+    expect_sh("$(which ls) -la; `echo ls` -l", "", "");
+    /* Continued lines are one command. */
+    expect_sh("tar -czf backup.tgz \\\n  --exclude=cache /srv", "tar\t.\t-czf\t--exclude\n", "");
+    /* find: single-dash long options; -delete changes the system. */
+    expect_sh("find /var/log -name '*.gz' -mtime +30 -delete", "find\t.\t-name\t-mtime\t-delete\n",
+              "W\tfind\t-\n");
+    expect_sh("find / -name core -type f", "find\t.\t-name\t-type\n", "");
+    /* Package managers: changes, and queries that are not. */
+    expect_sh("pacman -Syu", "pacman\t.\t-Syu\n", "W\tpacman\t-\n");
+    expect_sh("pacman -Ss vim", "pacman\t.\t-Ss\n", "");
+    expect_sh("apt list --installed", "apt\tlist\t--installed\n", "");
+    expect_sh("sed -i 's/a/b/' f; sed -n 1p f", "sed\t.\t-i\nsed\t.\t-n\n", "W\tsed\t-\n");
+    expect_sh("service nginx restart", "service\t.\n", "W\tservice\t-\n");
+    expect_sh("docker ps -a; docker rm -f web", "docker\tps\t-a\ndocker\trm\t-f\n", "W\tdocker\t-\n");
+    /* Repeated commands once; each change once. */
+    expect_sh("rm a\nrm a\nrm -r b", "rm\t.\nrm\t.\t-r\n", "W\trm\t-\n");
+}
+
+static void expect_posix(const char *reply, const char *want, const char *want_foreign) {
+    char got[2048];
+    CmdExtract x;
+    size_t n = cmdcheck_extract(reply, strlen(reply), CMDCHECK_POSIX, got, sizeof(got), &x);
+    CHECK(n == strlen(want) && !memcmp(got, want, n), "posix(%s)\n  got  [%.*s]\n  want [%s]", reply, (int)n, got,
+          want);
+    CHECK(!strcmp(x.foreign, want_foreign), "foreign of (%s): got [%s] want [%s]", reply, x.foreign, want_foreign);
+    CHECK(x.kind == CMDCHECK_POSIX, "kind");
+}
+
+static void test_posix_extract(void) {
+    expect_posix("No Debian:\n```bash\nsudo apt update\n```\n", "sudo\t.\napt\tupdate\n", "");
+    expect_posix("```\nls -la\n```", "ls\t.\t-la\n", "");
+    expect_posix("```console\n$ df -h\n```", "df\t.\t-h\n", "");
+    /* PowerShell and cmd blocks are for another shell here. */
+    expect_posix("```powershell\nGet-ChildItem -Recurse\n```\n```cmd\ndir /s\n```", "", "powershell, cmd");
+    /* Inline code: a command name and more words; prose is not read. */
+    expect_posix("Rode `sudo systemctl restart nginx` e veja `/etc/fstab` e `config.ini`.",
+                 "sudo\t.\nsystemctl\trestart\n", "");
+    expect_posix("Use Get-Process ou ls -la no texto.", "", "");
 }
 
 static void expect_format(const char *findings, int checked, const char *foreign, const char *want) {
@@ -121,6 +196,57 @@ static void test_format(void) {
                   "faz o que você pediu.)\n");
 }
 
+static void expect_format_posix(const char *findings, const char *changes, int checked, const char *foreign,
+                                const char *want) {
+    char got[2048];
+    CmdExtract x;
+    memset(&x, 0, sizeof(x));
+    x.kind = CMDCHECK_POSIX;
+    x.checked = checked;
+    snprintf(x.foreign, sizeof(x.foreign), "%s", foreign);
+    snprintf(x.changes, sizeof(x.changes), "%s", changes);
+    cmdcheck_format(findings, strlen(findings), &x, "sh", got, sizeof(got));
+    CHECK(!strcmp(got, want), "format posix(%s)\n  got  [%s]\n  want [%s]", findings, got, want);
+}
+
+static void test_format_posix(void) {
+    expect_format_posix("", "", 1, "",
+                        "(conferido no sh desta máquina: os programas existem e as opções aparecem no manual. Isso "
+                        "não diz se o comando faz o que você pediu.)\n");
+    expect_format_posix("", "", 0, "powershell",
+                        "(bloco powershell não conferido: é para outro shell, e só o sh desta máquina é "
+                        "conferido.)\n");
+    expect_format_posix("N\tnetstatx\t\nO\tls\t--recursive-all\nS\tsystemctl\trestat\nM\tbusybox\n",
+                        "W\trm\t-\n", 1, "",
+                        "Conferência no sh desta máquina:\n"
+                        "  - netstatx: não está no PATH desta máquina (se o comando é para outra máquina, ignore "
+                        "este aviso).\n"
+                        "  - ls: o manual desta máquina não cita a opção --recursive-all.\n"
+                        "  - systemctl: o manual desta máquina não cita o subcomando restat.\n"
+                        "  - busybox: sem manual nesta máquina; as opções não foram conferidas.\n"
+                        "  - rm muda o sistema: confira o alvo antes de rodar.\n"
+                        "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
+    /* A change alone is a finding: no "everything exists" line hides it. */
+    expect_format_posix("", "W\tsystemctl\t-\n", 1, "",
+                        "Conferência no sh desta máquina:\n"
+                        "  - systemctl muda o sistema: confira o alvo antes de rodar.\n"
+                        "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
+    /* A dashed program name is not read as a PowerShell Verb-Noun. */
+    expect_format_posix("N\tapt-get\t\n", "", 1, "",
+                        "Conferência no sh desta máquina:\n"
+                        "  - apt-get: não está no PATH desta máquina (se o comando é para outra máquina, ignore "
+                        "este aviso).\n"
+                        "Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.\n");
+}
+
+static void test_sh_script(void) {
+    char script[8192];
+    size_t n = cmdcheck_sh_script(script, sizeof(script));
+    CHECK(n > 100 && strstr(script, "man -w") && strstr(script, "command -v"), "the sh script is there (%zu)", n);
+    CHECK(!strstr(script, "--help"), "the sh script never runs a program from the reply");
+    CHECK(cmdcheck_sh_script(script, 10) == 0, "a script that does not fit is refused");
+}
+
 static void test_base64(void) {
     char out[64];
     CHECK(cmdcheck_base64("", 0, out, sizeof(out)) == 0 && !out[0], "empty");
@@ -136,6 +262,10 @@ int main(void) {
     test_inline_and_prose();
     test_limits();
     test_format();
+    test_sh_commands();
+    test_posix_extract();
+    test_format_posix();
+    test_sh_script();
     test_base64();
     if (failures) {
         fprintf(stderr, "%d failure(s)\n", failures);
