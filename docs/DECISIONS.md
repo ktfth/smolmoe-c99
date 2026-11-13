@@ -792,7 +792,7 @@ parâmetro, opção ou subcomando inventado). `scripts/cmdcheck/eval-docs.ts`.
 **Decisão:** C não entra. A etapa 2 só vale com uma **busca da pergunta para o comando** antes da resposta, medida
 contra A e contra o teto B, com documentação mais curta. Até lá, nada no runtime.
 
-**Etapa 2, o livro de comandos (medido, não entrou):** 62 tarefas de manutenção em português, cada uma ligada a
+**Etapa 2, o livro de comandos (no 1º teste não entrou; passou no 2º, abaixo):** 62 tarefas de manutenção em português, cada uma ligada a
 comandos reais de PowerShell e bash com um comentário curto (`scripts/cmdcheck/livro.json`). Uma busca por palavras
 em comum (pesadas pela raridade, com um radical tosco, tudo fácil em C) põe no prompt até duas tarefas, cerca de 80
 tokens (braço D). O livro foi congelado em `c42b497` **antes** de ler o conjunto de teste: os 42 pedidos de comando
