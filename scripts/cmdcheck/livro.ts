@@ -22,11 +22,11 @@ export interface Achado {
 }
 
 export const LIVRO = join(import.meta.dir, "livro.json");
-const MIN_PONTOS = 2.5; /* below this a match is one common word: no book in the prompt */
-const SEGUNDA = 0.75; /* a second task joins when it scores this close to the first */
-const MAX_TAREFAS = 2;
+export const MIN_PONTOS = 2.5; /* below this a match is one common word: no book in the prompt */
+export const SEGUNDA = 0.75; /* a second task joins when it scores this close to the first */
+export const MAX_TAREFAS = 2;
 
-const STOP = new Set(("a o as os um uma uns umas de do da dos das no na nos nas em num numa para pra por pelo pela " +
+export const STOP = new Set(("a o as os um uma uns umas de do da dos das no na nos nas em num numa para pra por pelo pela " +
   "com sem se e ou que qual quais quem como onde quando quanto eu me meu minha meus minhas seu sua isso esse essa " +
   "este esta aqui ali ja nao sim mais muito ver vejo veja posso pode consigo faco fazer quero preciso comando " +
   "tem ter ta estar estou ser sao vai vou foi saber sei sobre todo toda tudo " +
@@ -67,7 +67,7 @@ export function carregar(file = LIVRO): Livro {
   return { tarefas, termos, frases, peso };
 }
 
-const BONUS_FRASE = 2; /* points for a phrase the question covers whole: breaks ties between tasks sharing words */
+export const BONUS_FRASE = 2; /* points for a phrase the question covers whole: breaks ties between tasks sharing words */
 
 export function buscar(livro: Livro, pergunta: string, shell: Shell): Achado[] {
   const q = new Set(palavras(pergunta));

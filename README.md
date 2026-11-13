@@ -212,6 +212,24 @@ O aviso aponta:
 - `smolmoe --check-commands ARQUIVO` confere um texto qualquer (uma resposta, um script) sem carregar modelo; `--shell` escolhe o PowerShell ou o sh.
 - `tests/goldens/cmdcheck-casos.json` tem as respostas sintéticas que testam as duas conferências.
 
+### Livro de comandos
+
+A conferência pega o nome inventado depois da resposta; o livro tenta evitá-lo antes. O binário leva 62 tarefas de manutenção em português (espaço em disco, serviço que caiu, porta presa, firewall, pacotes, usuários...), cada uma com comandos reais de PowerShell e de bash e um comentário curto. Quando a mensagem tem palavras em comum com uma tarefa, até duas tarefas vão antes dela, e o chat diz quais:
+
+```text
+> Como vejo o espaço livre do disco?
+(livro de comandos: espaco-disco)
+O espaço livre do disco pode ser visto com o comando `df -h` ...
+```
+
+- **Medido antes de entrar:** em 120 pedidos de comando escritos por quem não viu o livro, o Dolphin 1B acertou 58 com o livro e 42 sem ele (23 melhoraram, 7 pioraram, p = 0,005). O ganho está no PowerShell e nas perguntas do dia a dia; no apt quase empata. Detalhes em `docs/DECISIONS.md`.
+- **Custo:** cerca de 80 tokens a mais por pergunta que casa, uns 2 s no notebook de referência. Mensagens sem nada de manutenção vão sem o livro.
+- **Quais exemplos:** os do shell que o chat confere (PowerShell no Windows, bash no Linux, no macOS e no Git Bash); `--shell` escolhe.
+- **O risco:** quando a busca escolhe a tarefa errada, o modelo pode copiar o exemplo errado (a versão do sistema no lugar da do kernel). O aviso com o nome da tarefa existe para você perceber isso.
+- Liga sozinho no chat; `--no-book` desliga. Com `--chat --prompt`, só com `--book`.
+- As ferramentas (data, cálculo) decidem só pelas suas palavras, nunca pelos exemplos do livro.
+- O livro é `scripts/cmdcheck/livro.json`. Depois de mudá-lo, `bun scripts/cmdcheck/gen-book.ts inc > src/book_data.inc` e `bun scripts/cmdcheck/gen-book.ts golden > tests/goldens/livro-busca.tsv`. Mudar o livro ou a busca pede uma nova medição, como diz o `docs/DECISIONS.md`.
+
 ---
 
 ## Principais Opções da CLI (`smolmoe`)

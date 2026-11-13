@@ -125,7 +125,7 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
               ? e->tool_close
               : sampler_next(e->sampler, m->logits);
         if (i == 0 && !prefix && e->tools) {
-            if (!e->banned[e->tool_open] && token != e->tool_open && chosen_tool(e->message)) {
+            if (!e->banned[e->tool_open] && token != e->tool_open && chosen_tool(e->words)) {
                 aborted = 1;
                 break;
             }
@@ -148,7 +148,7 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
         else shown += emit(e, calls, token, &last);
         if (prefix && calls->open && !calls->truncated[0] && calls->len[0] > prefix_len &&
             calls->text[0][calls->len[0] - 1] == '}' &&
-            tool_call_grounded(calls->text[0], calls->len[0], e->message)) {
+            tool_call_grounded(calls->text[0], calls->len[0], e->words)) {
             calls->open = 0;
         }
         model_forward(m, &token, 1, e->pos++, LOGITS_LAST);
@@ -187,14 +187,14 @@ static uint32_t tool_results(Engine *e, const Calls *calls) {
     size_t used = 0;
     uint32_t k;
     if (e->model->c.gemma3) {
-        int w = snprintf(response, sizeof(response), "%s", e->message);
+        int w = snprintf(response, sizeof(response), "%s", e->words);
         if (w < 0 || (size_t)w >= sizeof(response)) die("internal error: tool response overflow");
         used = (size_t)w;
     }
     for (k = 0; k < calls->count; ++k) {
         Notice n;
         int w;
-        tool_run(calls->text[k], calls->truncated[k] ? 0 : calls->len[k], e->message, &now, name, result);
+        tool_run(calls->text[k], calls->truncated[k] ? 0 : calls->len[k], e->words, &now, name, result);
         n.len = 0;
         notice_put(&n, "[ferramenta] ");
         notice_name(&n, name);
@@ -241,7 +241,7 @@ static int all_grounded(const Engine *e, const Calls *calls) {
     int grounded = 1;
     for (k = 0; k < calls->count; ++k) {
         Notice n;
-        if (!calls->truncated[k] && tool_call_grounded(calls->text[k], calls->len[k], e->message)) continue;
+        if (!calls->truncated[k] && tool_call_grounded(calls->text[k], calls->len[k], e->words)) continue;
         n.len = 0;
         notice_put(&n, "(chamada de ferramenta descartada: ");
         notice_call(&n, calls, k);
@@ -262,7 +262,7 @@ static int fits(const Engine *e, uint32_t n) {
  * no forced choice or no room for it. */
 static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     char prefix[CALL_BYTES];
-    const char *tool = chosen_tool(e->message);
+    const char *tool = chosen_tool(e->words);
     Notice note;
     uint32_t n, plen;
     if (!tool || !(plen = (uint32_t)tools_call_prefix(tool, prefix, sizeof(prefix)))) return 0;
@@ -298,13 +298,13 @@ static void drop_stopped_call(Engine *e, Calls *calls, uint32_t start) {
 static void first_reply(Engine *e, Calls *calls, uint32_t len) {
     const unsigned char *text = (const unsigned char *)e->message;
     uint32_t start = e->pos, n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
-    offer_tools(e, e->tools && tools_relevant(e->message));
+    offer_tools(e, e->tools && tools_relevant(e->words));
     assistant_turn(e, n, calls, NULL, 0);
     if (e->stopped) {
         drop_stopped_call(e, calls, start);
         return;
     }
-    if (calls->count ? all_grounded(e, calls) : (!e->tools || !chosen_tool(e->message))) return;
+    if (calls->count ? all_grounded(e, calls) : (!e->tools || !chosen_tool(e->words))) return;
     e->pos = start;
     if (forced_reply(e, calls, len)) {
         if (e->stopped) {
@@ -380,10 +380,12 @@ void engine_start(Engine *e) {
     model_prefill(e->model, e->ids, n, 0, 0);
     e->stats.prefill_seconds = now_seconds() - t0;
     e->stats.prompt_tokens = e->system_len = e->pos = n;
-    e->message = NULL;
+    e->message = e->words = NULL;
 }
 
-int engine_send(Engine *e, const char *text, uint32_t len) {
+int engine_send(Engine *e, const char *text, uint32_t len) { return engine_send_prefixed(e, text, len, 0); }
+
+int engine_send_prefixed(Engine *e, const char *text, uint32_t len, uint32_t prefix_len) {
     uint32_t n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)text, len, 1, e->ids);
     e->stopped = 0;
     if (!fits(e, n)) {
@@ -395,8 +397,9 @@ int engine_send(Engine *e, const char *text, uint32_t len) {
         say(e, "(contexto cheio: conversa reiniciada)");
     }
     e->message = text;
+    e->words = text + prefix_len;
     answer(e, len);
-    e->message = NULL;
+    e->message = e->words = NULL;
     ++e->stats.turns;
     return 1;
 }

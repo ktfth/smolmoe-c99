@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include "book.h"
 #include "engine.h"
 #include "output.h"
 #include "shell.h"
@@ -18,13 +19,17 @@ typedef struct ChatContext {
     const Shell *shell;     /* where a typed "!comando" line runs; NULL: "!" is plain text */
     const Shell *check_shell; /* the PowerShell that looks up each reply's commands (cmdcheck.h); NULL: off */
     int terminal;           /* stdin is a terminal: lines pasted together form one message */
+    int book;               /* the command book's examples go before the messages that match a task (book.h) */
+    BookShell book_shell;   /* whose examples: PowerShell or bash */
 } ChatContext;
 
 /* Runs until EOF or "/sair". "/limpar" restarts the conversation, keeping the
  * already-processed system prompt. A line typed on its own as "!comando" runs
  * in c->shell and never reaches the model. After each reply, its commands are
- * looked up in c->check_shell and a notice goes to stderr. Statistics end up
- * in c->engine. */
+ * looked up in c->check_shell and a notice goes to stderr. With c->book, a
+ * message that matches the command book's tasks reaches the model after their
+ * example commands, and stderr names the tasks. Statistics end up in
+ * c->engine. */
 void chat_run(const ChatContext *c);
 
 #endif

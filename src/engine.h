@@ -43,6 +43,7 @@ typedef struct Engine {
     uint32_t pos, system_len;
     int stopped;            /* the last engine_send() was ended by sink.stop */
     const char *message;    /* the user message being answered */
+    const char *words;      /* the user's own words in it, after any prefix: what the tools decide from */
     ChatStats stats;
 } Engine;
 
@@ -65,6 +66,11 @@ void engine_start(Engine *e);
  * history as far as it got, unless it was inside a tool call: then the whole
  * message leaves the history, so it never holds a call without its result. */
 int engine_send(Engine *e, const char *text, uint32_t len);
+
+/* engine_send for a message whose first prefix_len bytes are not the user's
+ * (the command book's examples, book.h): the model reads all of it, but the
+ * tools decide from the user's words alone, so an example cannot ask for one. */
+int engine_send_prefixed(Engine *e, const char *text, uint32_t len, uint32_t prefix_len);
 
 /* Forgets the conversation, keeping the processed system prompt. */
 void engine_reset(Engine *e);

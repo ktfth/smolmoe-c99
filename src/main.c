@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "book.h"
 #include "bundle.h"
 #include "chat.h"
 #include "cmdcheck.h"
@@ -41,6 +42,7 @@ typedef struct Options {
         profile;
     int shell_escape; /* "!comando": 0 on in a terminal, 1 also on piped input, -1 off */
     int command_check; /* looking up the reply's commands: 0 on in a terminal, 1 also on piped input, -1 off */
+    int book; /* the command book before chat messages: 0 on in the interactive chat, 1 also with --chat, -1 off */
     int memory_given; /* --memory-mib: otherwise the KV cache is added to the default budget */
     ToolClock clock; /* --now */
 } Options;
@@ -82,6 +84,8 @@ static void usage(FILE *out) {
           "  --shell-escape       also run them when input is piped (off there by default)\n"
           "  --no-command-check   do not look up the reply's commands on this machine (PowerShell or sh)\n"
           "  --command-check      also look them up when input is piped (off there by default)\n"
+          "  --no-book            no command book examples before maintenance questions (PowerShell or bash)\n"
+          "  --book               also put them before a --chat prompt (off there by default)\n"
           "generation\n"
           "  --tokens N           max new tokens (default 64; 512 per reply in chat)\n"
           "  --temperature X      0 = greedy (default), positive = sample\n"
@@ -175,6 +179,8 @@ static void parse_args(int argc, char **argv, Options *o) {
         if (!strcmp(opt, "--no-shell-escape")) { o->shell_escape = -1; continue; }
         if (!strcmp(opt, "--command-check")) { o->command_check = 1; continue; }
         if (!strcmp(opt, "--no-command-check")) { o->command_check = -1; continue; }
+        if (!strcmp(opt, "--book")) { o->book = 1; continue; }
+        if (!strcmp(opt, "--no-book")) { o->book = -1; continue; }
         if (!strcmp(opt, "--profile")) { o->profile = 1; continue; }
         if (opt[0] != '-' && !o->model) { o->model = opt; continue; }
         if (a + 1 >= argc) die("missing argument for %s", opt);
@@ -222,6 +228,38 @@ static uint32_t read_prompt(const Options *o, unsigned char *buf, uint32_t cap) 
         memcpy(buf, o->prompt, n);
     }
     return (uint32_t)n;
+}
+
+/* Whose examples the command book gives: those of `chosen` (the shell the chat
+ * uses), else of --shell, else of the system's shell (PowerShell on Windows). */
+static BookShell book_shell(const Options *o, const Shell *chosen) {
+    Shell named;
+    if (!chosen && o->shell && shell_classify(o->shell, &named)) chosen = &named;
+    if (chosen) return chosen->kind == SHELL_POSIX ? BOOK_POSIX : BOOK_POWERSHELL;
+#ifdef _WIN32
+    return BOOK_POWERSHELL;
+#else
+    return BOOK_POSIX;
+#endif
+}
+
+/* --chat --book: the prompt (n bytes of buf, which holds cap + 1) after the
+ * command book's examples when it matches a task, as the chat does. */
+static uint32_t book_before_prompt(const Options *o, unsigned char *buf, uint32_t n, uint32_t cap) {
+    char prefix[BOOK_PREFIX_MAX];
+    int found[BOOK_FOUND_MAX], count, i;
+    BookShell shell = book_shell(o, NULL);
+    size_t len;
+    buf[n] = 0;
+    if ((count = book_find((const char *)buf, shell, found)) == 0) return n;
+    if ((len = book_prefix(found, count, shell, prefix, sizeof(prefix))) == 0 || len > cap - n)
+        die("prompt too long for the command book: at most %u bytes for this --context", cap);
+    memmove(buf + len, buf, n);
+    memcpy(buf, prefix, len);
+    fputs("(livro de comandos:", stderr);
+    for (i = 0; i < count; ++i) fprintf(stderr, "%s %s", i ? "," : "", book_task_id(found[i]));
+    fputs(")\n", stderr);
+    return n + (uint32_t)len;
 }
 
 static FILE *open_output(const char *path) {
@@ -581,6 +619,8 @@ static void run_chat(const Run *r) {
     cc.terminal = stdin_is_terminal();
     cc.shell = chat_shell(r->o, cc.terminal, &shell);
     cc.check_shell = chat_check_shell(r->o, cc.terminal, cc.shell, &check_shell);
+    cc.book = r->o->book >= 0;
+    cc.book_shell = book_shell(r->o, cc.check_shell ? cc.check_shell : cc.shell);
     st->loaded = now_seconds();
     chat_run(&cc);
     /* Stats count time spent computing, not time spent waiting for the user. */
@@ -668,8 +708,9 @@ int main(int argc, char **argv) {
     run.piece = (unsigned char *)mem_alloc(&mem, tokenizer_max_piece(run.tok), 1);
     out = output_to(stdout);
     if (!o.interactive) {
-        run.np = tokenizer_encode(run.tok, run.prompt, read_prompt(&o, run.prompt, run.prompt_cap), run.ids, o.chat,
-                                  o.system);
+        uint32_t n = read_prompt(&o, run.prompt, run.prompt_cap);
+        if (o.chat && o.book > 0) n = book_before_prompt(&o, run.prompt, n, run.prompt_cap);
+        run.np = tokenizer_encode(run.tok, run.prompt, n, run.ids, o.chat, o.system);
         if (run.np > context) die("encoded prompt (%u tokens) exceeds --context (%u)", run.np, context);
     }
 

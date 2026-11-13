@@ -93,7 +93,8 @@ describe.skipIf(!built)("WebAssembly build", () => {
   }, SLOW);
 
   test.skipIf(!qwen)("Qwen chat with a tool call, threaded module: the same reply and notices as the native build", () => {
-    const args = [...modelArgs(qwen!), "-i", "--now", "2026-11-06T10:30", "--tokens", 48];
+    /* No command book: its examples follow the platform's shell (PowerShell on Windows, bash in WASI). */
+    const args = [...modelArgs(qwen!), "-i", "--now", "2026-11-06T10:30", "--tokens", 48, "--no-book"];
     const input = "Quanto é 15% de 230?\n/sair\n";
     const native = runWithInput(args, input, BINARY);
     const web = wasm(THREADED, [...args, "--threads", 4], input);

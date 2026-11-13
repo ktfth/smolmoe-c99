@@ -165,6 +165,25 @@ static int start_check(const ChatContext *c, Reply *r, char *err, size_t cap) {
     return 0;
 }
 
+/* ---- the command book ----------------------------------------------------- */
+
+/* Sends the message, after the command book's examples when it matches a task.
+ * `message` has room for line_cap + BOOK_PREFIX_MAX bytes; NULL: no book. */
+static void send_message(const ChatContext *c, char *message, int len) {
+    int found[BOOK_FOUND_MAX], n, i;
+    size_t prefix;
+    if (!message || (n = book_find(c->line, c->book_shell, found)) == 0 ||
+        (prefix = book_prefix(found, n, c->book_shell, message, BOOK_PREFIX_MAX)) == 0) {
+        engine_send(c->engine, c->line, (uint32_t)len);
+        return;
+    }
+    memcpy(message + prefix, c->line, (size_t)len + 1);
+    fputs("(livro de comandos:", stderr);
+    for (i = 0; i < n; ++i) fprintf(stderr, "%s %s", i ? "," : "", book_task_id(found[i]));
+    fputs(")\n", stderr);
+    engine_send_prefixed(c->engine, message, (uint32_t)(prefix + (size_t)len), (uint32_t)prefix);
+}
+
 static void notice(void *ctx, const char *line) {
     (void)ctx;
     fprintf(stderr, "%s\n", line);
@@ -173,7 +192,7 @@ static void notice(void *ctx, const char *line) {
 void chat_run(const ChatContext *c) {
     Engine *e = c->engine;
     Reply reply;
-    char check_err[256];
+    char check_err[256], *message = NULL;
     int checking;
     memset(&reply, 0, sizeof(reply));
     reply.out = c->out;
@@ -183,6 +202,8 @@ void chat_run(const ChatContext *c) {
     e->sink.notice = notice;
     engine_start(e);
     checking = start_check(c, &reply, check_err, sizeof(check_err));
+    if (c->book && (message = (char *)malloc((size_t)c->line_cap + BOOK_PREFIX_MAX)) == NULL)
+        fputs("(livro de comandos desligado: sem memória)\n", stderr);
     if (c->terminal) {
         terminal_input_unbuffered();
         bracketed_paste_start();
@@ -196,6 +217,9 @@ void chat_run(const ChatContext *c) {
                 c->check_shell->name);
     else if (!checking)
         fprintf(stderr, "(conferência dos comandos desligada: %s)\n", check_err);
+    if (message)
+        fprintf(stderr, "Livro de comandos: perguntas de manutenção levam ao modelo exemplos reais de %s.\n",
+                c->book_shell == BOOK_POWERSHELL ? "PowerShell" : "bash");
     for (;;) {
         int len, truncated, pasted;
         fputs("\n> ", stderr);
@@ -211,8 +235,9 @@ void chat_run(const ChatContext *c) {
             continue;
         }
         if (command_line(c, truncated, pasted)) continue;
-        engine_send(e, c->line, (uint32_t)len);
+        send_message(c, message, len);
     }
     cmdcheck_stop(reply.checker);
     free(reply.text);
+    free(message);
 }

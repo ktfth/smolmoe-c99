@@ -792,7 +792,7 @@ parâmetro, opção ou subcomando inventado). `scripts/cmdcheck/eval-docs.ts`.
 **Decisão:** C não entra. A etapa 2 só vale com uma **busca da pergunta para o comando** antes da resposta, medida
 contra A e contra o teto B, com documentação mais curta. Até lá, nada no runtime.
 
-**Etapa 2, o livro de comandos (no 1º teste não entrou; passou no 2º, abaixo):** 62 tarefas de manutenção em português, cada uma ligada a
+**Etapa 2, o livro de comandos (no 1º teste não entrou; passou no 2º e está no runtime, abaixo):** 62 tarefas de manutenção em português, cada uma ligada a
 comandos reais de PowerShell e bash com um comentário curto (`scripts/cmdcheck/livro.json`). Uma busca por palavras
 em comum (pesadas pela raridade, com um radical tosco, tudo fácil em C) põe no prompt até duas tarefas, cerca de 80
 tokens (braço D). O livro foi congelado em `c42b497` **antes** de ler o conjunto de teste: os 42 pedidos de comando
@@ -864,6 +864,22 @@ da rodada anterior; o livro e a busca não mudaram desde `c42b497`.
 
   A segunda causa é o risco a cuidar ao portar: com a tarefa errada no prompt, o modelo copia o exemplo errado.
 - **Custo:** +81 tokens de prompt e +2,2 s por resposta, quase tudo no PowerShell (13,4 → 18,3 s).
+
+**No runtime (2026-11-13):** a busca foi portada para C sem mudança (`src/book.c`). O livro, as palavras vazias, as
+constantes e os pesos vêm do `livro.ts` por `scripts/cmdcheck/gen-book.ts` (`src/book_data.inc`), então C e TypeScript
+somam os mesmos doubles na mesma ordem.
+- **Mesma busca:** o C escolhe as mesmas tarefas que o TypeScript em 1.064 casos (as perguntas dos três conjuntos e
+  cada frase do livro, nos dois shells; `tests/goldens/livro-busca.tsv`, `tests/test_book.c`).
+- **Mesmo prompt:** com `--chat --book`, o binário monta byte a byte o prompt do braço D nas 162 perguntas dos dois
+  conjuntos de teste (`tests/book.test.ts`).
+- **Mesmo resultado:** o braço D do conjunto 2 rodado de novo pelo binário deu as 120 respostas idênticas: 58/120,
+  23 ganhos, 7 perdas.
+- **Onde liga:** no chat interativo, por padrão, com os exemplos do shell que a conferência usa; `--no-book` desliga.
+  Com `--chat --prompt`, só com `--book`, para não mudar as medições e os goldens que usam esse caminho.
+- **As ferramentas decidem pelas palavras do usuário** (`engine_send_prefixed`): um exemplo do livro com data ou
+  número não pode pedir uma ferramenta. Essa parte não foi medida, porque o eval roda com `--no-tools`.
+- **Fica de fora por enquanto:** a janela (GUI) e a página web, que chamam o motor direto. Diminuir as tarefas erradas
+  copiadas fica para outra rodada, com conjunto novo: mexer na busca invalida esta medição.
 
 ## O que sustenta o projeto (o "pó" que ficou)
 

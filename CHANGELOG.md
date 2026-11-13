@@ -19,6 +19,12 @@
   os manuais em mdoc (`ssh-keygen`), os manuais próprios de subcomando (`docker-ps`, `git-commit`) e reconhece os
   builtins do bash (`history`, `source`); cada aviso sai uma vez só. O chat avisa quando não há shell para conferir.
   Respostas sintéticas das duas conferências em `tests/goldens/cmdcheck-casos.json`.
+- **Livro de comandos:** 62 tarefas de manutenção em português com comandos reais de PowerShell e bash, embutidas no
+  binário. Uma mensagem do chat com palavras em comum com uma tarefa chega ao modelo depois dos exemplos de até duas
+  tarefas, e o chat diz quais. Em 120 pedidos escritos sem ver o livro, o Dolphin 1B acertou 58 contra 42 (p = 0,005).
+  Liga no chat; `--no-book` desliga, `--book` liga também com `--chat --prompt`. As ferramentas decidem só pelas
+  palavras do usuário. A busca em C (`src/book.c`) é a mesma do eval (`scripts/cmdcheck/livro.ts`), conferida em
+  1.064 perguntas (`tests/goldens/livro-busca.tsv`).
 - **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
   3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
   O runtime ganhou o escalonamento de RoPE `llama3` (quatro chaves opcionais `rope_llama3_*` na `config.ini`), o
