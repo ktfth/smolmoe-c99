@@ -839,6 +839,32 @@ em `c42b497`; o dev só copia o conjunto, sem editar, e roda A e D uma vez, com 
   uns 26 discordantes, e o esperado (20 contra 6) tem p ≈ 0,01. Se o efeito real for metade disso, o teste
   provavelmente não o pega, e o livro fica de fora.
 
+**Resultado do próximo teste (2026-11-13): passou nas duas condições, o livro entra.** O conjunto
+(`tests/evals/livro-2`, sha do `perguntas.json` `ebaa6468…4424`) foi escrito por um subagente adversário que não leu o
+livro, a busca nem os resultados: 120 pedidos, 60 PowerShell e 60 apt, metade em palavras do dia a dia. Cada item tem uma
+resposta certa e uma errada, conferidas pela nota do eval (120 e 120). Binário `build/dev` sha `32e3514f…8c19`, o mesmo
+da rodada anterior; o livro e a busca não mudaram desde `c42b497`.
+
+| Recorte | A | D | D contra A |
+|---|---|---|---|
+| todas (a regra) | 42/120 | 58/120 | 23 ganhos, 7 perdas, **p = 0,005** |
+| PowerShell | 13/60 | 26/60 | 14 ganhos, 1 perda, p = 0,001 |
+| apt | 29/60 | 32/60 | 9 ganhos, 6 perdas, p = 0,61 |
+| dia a dia (sensibilidade) | 22/60 | 35/60 | 15 ganhos, 2 perdas |
+| técnico (sensibilidade) | 20/60 | 23/60 | 8 ganhos, 5 perdas |
+| sem os 2 itens que repetem tarefas das 90 dúvidas | 42/118 | 58/118 | 23 ganhos, 7 perdas |
+| aceitando código entre crases | 46/120 | 62/120 | 24 ganhos, 8 perdas, p = 0,007 |
+
+- **O ganho está no PowerShell e nas perguntas do dia a dia.** No apt o modelo já sabia bastante sozinho, e o livro
+  quase empata.
+- **As 7 perdas têm duas causas:**
+  - três são de formato: o comando veio em prosa, fora de bloco;
+  - três são de tarefa errada copiada: `cat /etc/os-release` para a versão do kernel, `pkill firefox` para o OOM
+    killer, `ntpdate` para conferir o NTP. Um parâmetro inventado no `New-LocalUser` completa as sete.
+
+  A segunda causa é o risco a cuidar ao portar: com a tarefa errada no prompt, o modelo copia o exemplo errado.
+- **Custo:** +81 tokens de prompt e +2,2 s por resposta, quase tudo no PowerShell (13,4 → 18,3 s).
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é

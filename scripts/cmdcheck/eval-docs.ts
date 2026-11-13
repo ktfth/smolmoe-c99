@@ -10,7 +10,8 @@
  * The command check itself scores every answer.
  *
  * --conjunto livro runs A and D on tests/evals/livro/perguntas.json instead:
- * questions the book was frozen before, scored by their own rubric.
+ * questions the book was frozen before, scored by their own rubric. --conjunto livro2 does the same on
+ * tests/evals/livro-2, 120 questions written by the adversary without reading the book.
  *
  *   bun scripts/cmdcheck/eval-docs.ts capturar            # once: fills "docs" (PowerShell here, sh help in Linux)
  *   bun scripts/cmdcheck/eval-docs.ts gerar --braco A     # writes build/docs-A.jsonl (heavy: runs the model)
@@ -38,6 +39,7 @@ const WINDOWS = process.platform === "win32";
 const SETS = {
   docs: join(ROOT, "tests", "evals", "docs-no-prompt", "perguntas.json"),
   livro: join(ROOT, "tests", "evals", "livro", "perguntas.json"),
+  livro2: join(ROOT, "tests", "evals", "livro-2", "perguntas.json"),
 } as const;
 const DOC_MAX = 1800; /* characters of documentation per question: ~450 tokens, ~10 s of prefill on Dolphin */
 const HELP_LINES = 40;

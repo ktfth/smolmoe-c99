@@ -1,0 +1,1227 @@
+{
+  "descricao": "Referências do conjunto liv2. Nunca vão ao modelo. Por item: o estilo da pergunta, uma resposta certa e uma errada no formato markdown que o modelo usaria, e o que conferir.ts --comandos verifica (cmdlet:Parâmetros, exe:, ajuda:linha:texto (a saída da linha cita o texto), cim:Classe:Propriedade, svc:, 51: só no Windows PowerShell 5.1; cmd:, man:programa:texto, help:programa:texto, sh:, pkg:pacote:comando, deb:pacote:página:texto no WSL).",
+  "origem": {
+    "autor": "adversario",
+    "data": "2026-11-13"
+  },
+  "referencias": [
+    {
+      "id": "liv2-001",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-Process | Sort-Object CPU -Descending | Select-Object -First 10 Name, Id, CPU\n```\n",
+      "errada": "Use:\n\n```bash\nps aux --sort=-%cpu | head\n```\n",
+      "verificar": [
+        "Get-Process",
+        "Sort-Object:Property,Descending",
+        "Select-Object:First"
+      ]
+    },
+    {
+      "id": "liv2-002",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nSet-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser\n```\n",
+      "errada": "Use:\n\n```powershell\nSet-ExecutionPolicy RemoteSigned -Scope LocalMachine\n```\n",
+      "verificar": [
+        "Set-ExecutionPolicy:ExecutionPolicy,Scope"
+      ]
+    },
+    {
+      "id": "liv2-003",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\n(Get-ChildItem \"$env:USERPROFILE\\Downloads\" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1GB\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-ChildItem \"$env:USERPROFILE\\Downloads\" | Measure-Object\n```\n",
+      "verificar": [
+        "Get-ChildItem:Recurse,File",
+        "Measure-Object:Property,Sum"
+      ]
+    },
+    {
+      "id": "liv2-004",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-NetTCPConnection -LocalPort 3389 -State Listen | Select-Object LocalAddress, OwningProcess, @{n='Processo';e={(Get-Process -Id $_.OwningProcess).ProcessName}}\n```\n",
+      "errada": "Use:\n\n```powershell\nnetstat -an | findstr 3389\n```\n",
+      "verificar": [
+        "Get-NetTCPConnection:LocalPort,State",
+        "exe:netstat"
+      ]
+    },
+    {
+      "id": "liv2-005",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nipconfig /release\nipconfig /renew\n```\n",
+      "errada": "Use:\n\n```bash\nsudo dhclient -r && sudo dhclient\n```\n",
+      "verificar": [
+        "exe:ipconfig",
+        "ajuda:ipconfig /?:/renew"
+      ]
+    },
+    {
+      "id": "liv2-006",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-Kernel-Power'; Id=41}\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-WinEvent -LogName Application -MaxEvents 20\n```\n",
+      "verificar": [
+        "Get-WinEvent:FilterHashtable"
+      ]
+    },
+    {
+      "id": "liv2-007",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nshutdown /a\n```\n",
+      "errada": "Use:\n\n```bash\nshutdown -c\n```\n",
+      "verificar": [
+        "exe:shutdown",
+        "ajuda:shutdown /?:/a"
+      ]
+    },
+    {
+      "id": "liv2-008",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\n$senha = Read-Host -AsSecureString \"Senha\"\nNew-LocalUser -Name suporte -Password $senha\n```\n",
+      "errada": "Use:\n\n```bash\nsudo useradd -m suporte\n```\n",
+      "verificar": [
+        "New-LocalUser:Name,Password",
+        "Read-Host:AsSecureString",
+        "exe:net"
+      ]
+    },
+    {
+      "id": "liv2-009",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-PrintJob -PrinterName \"HP\" | Remove-PrintJob\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-PrintJob -PrinterName \"HP\"\n```\n",
+      "verificar": [
+        "Get-PrintJob:PrinterName",
+        "Remove-PrintJob:InputObject"
+      ]
+    },
+    {
+      "id": "liv2-010",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nAdd-LocalGroupMember -Group \"Administradores\" -Member \"suporte\"\n```\n",
+      "errada": "Use:\n\n```bash\nsudo usermod -aG sudo suporte\n```\n",
+      "verificar": [
+        "Add-LocalGroupMember:Group,Member,SID"
+      ]
+    },
+    {
+      "id": "liv2-011",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nnetsh wlan show profile name=\"CasaAna\" key=clear\n```\n",
+      "errada": "Use:\n\n```powershell\nnetsh wlan show profiles\n```\n",
+      "verificar": [
+        "exe:netsh",
+        "ajuda:netsh wlan show profile ?:key=clear"
+      ]
+    },
+    {
+      "id": "liv2-012",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nDISM /Online /Cleanup-Image /RestoreHealth\n```\n",
+      "errada": "Use:\n\n```powershell\nDISM /Online /Cleanup-Image /CheckHealth\n```\n",
+      "verificar": [
+        "exe:dism",
+        "Repair-WindowsImage:Online,RestoreHealth"
+      ]
+    },
+    {
+      "id": "liv2-013",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-CimInstance -ClassName Win32_BIOS | Select-Object SerialNumber\n```\n",
+      "errada": "Use:\n\n```bash\nsudo dmidecode -s system-serial-number\n```\n",
+      "verificar": [
+        "Get-CimInstance:ClassName",
+        "cim:Win32_BIOS:SerialNumber"
+      ]
+    },
+    {
+      "id": "liv2-014",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nExport-WindowsDriver -Online -Destination C:\\Drivers\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-WindowsDriver -Online\n```\n",
+      "verificar": [
+        "Export-WindowsDriver:Online,Destination",
+        "exe:pnputil",
+        "ajuda:pnputil /?:/export-driver"
+      ]
+    },
+    {
+      "id": "liv2-015",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\npowercfg /batteryreport /output \"$env:USERPROFILE\\Desktop\\bateria.html\"\n```\n",
+      "errada": "Use:\n\n```powershell\npowercfg /energy\n```\n",
+      "verificar": [
+        "exe:powercfg",
+        "ajuda:powercfg /?:/BATTERYREPORT"
+      ]
+    },
+    {
+      "id": "liv2-016",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nchkdsk C: /f\n```\n",
+      "errada": "Use:\n\n```powershell\nchkdsk C:\n```\n",
+      "verificar": [
+        "exe:chkdsk",
+        "ajuda:chkdsk /?:/F",
+        "Repair-Volume:DriveLetter,OfflineScanAndFix,SpotFix"
+      ]
+    },
+    {
+      "id": "liv2-017",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\npowercfg /lastwake\n```\n",
+      "errada": "Use:\n\n```powershell\npowercfg /batteryreport\n```\n",
+      "verificar": [
+        "exe:powercfg",
+        "ajuda:powercfg /?:/LASTWAKE"
+      ]
+    },
+    {
+      "id": "liv2-018",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nSet-NetConnectionProfile -InterfaceAlias \"Ethernet\" -NetworkCategory Private\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-NetConnectionProfile -InterfaceAlias \"Ethernet\"\n```\n",
+      "verificar": [
+        "Set-NetConnectionProfile:InterfaceAlias,NetworkCategory"
+      ]
+    },
+    {
+      "id": "liv2-019",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-ChildItem -Path $env:USERPROFILE -Recurse -Filter *.xlsx -ErrorAction SilentlyContinue\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-ChildItem -Path $env:USERPROFILE -Filter *.xlsx\n```\n",
+      "verificar": [
+        "Get-ChildItem:Path,Recurse,Filter"
+      ]
+    },
+    {
+      "id": "liv2-020",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nSet-DnsClientServerAddress -InterfaceAlias \"Wi-Fi\" -ServerAddresses (\"1.1.1.1\",\"8.8.8.8\")\n```\n",
+      "errada": "Use:\n\n```bash\necho \"nameserver 1.1.1.1\" | sudo tee /etc/resolv.conf\n```\n",
+      "verificar": [
+        "Set-DnsClientServerAddress:InterfaceAlias,ServerAddresses"
+      ]
+    },
+    {
+      "id": "liv2-021",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\n(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB\n```\n",
+      "errada": "Use:\n\n```bash\nfree -h\n```\n",
+      "verificar": [
+        "Get-CimInstance",
+        "cim:Win32_ComputerSystem:TotalPhysicalMemory"
+      ]
+    },
+    {
+      "id": "liv2-022",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-NetAdapter | Select-Object Name, Status, LinkSpeed\n```\n",
+      "errada": "Use:\n\n```powershell\nipconfig /all\n```\n",
+      "verificar": [
+        "Get-NetAdapter"
+      ]
+    },
+    {
+      "id": "liv2-023",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-PnpDevice -PresentOnly | Where-Object { $_.Status -ne 'OK' }\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-PnpDevice\n```\n",
+      "verificar": [
+        "Get-PnpDevice:PresentOnly,Status"
+      ]
+    },
+    {
+      "id": "liv2-024",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nNew-NetFirewallRule -DisplayName \"Porta 8080\" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow\n```\n",
+      "errada": "Use:\n\n```bash\nsudo ufw allow 8080/tcp\n```\n",
+      "verificar": [
+        "New-NetFirewallRule:DisplayName,Direction,Protocol,LocalPort,Action"
+      ]
+    },
+    {
+      "id": "liv2-025",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-PhysicalDisk | Select-Object FriendlyName, MediaType, HealthStatus, OperationalStatus\n```\n",
+      "errada": "Use:\n\n```powershell\nchkdsk C:\n```\n",
+      "verificar": [
+        "Get-PhysicalDisk",
+        "Get-StorageReliabilityCounter"
+      ]
+    },
+    {
+      "id": "liv2-026",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-WindowsOptionalFeature -Online | Where-Object State -eq 'Enabled' | Select-Object FeatureName\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-WindowsFeature | Where-Object Installed\n```\n",
+      "verificar": [
+        "Get-WindowsOptionalFeature:Online"
+      ]
+    },
+    {
+      "id": "liv2-027",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-FileHash .\\setup.exe -Algorithm SHA256\n```\n",
+      "errada": "Use:\n\n```bash\nsha256sum setup.exe\n```\n",
+      "verificar": [
+        "Get-FileHash:Algorithm",
+        "exe:certutil",
+        "ajuda:certutil -hashfile -?:hashfile"
+      ]
+    },
+    {
+      "id": "liv2-028",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nwsl --install\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt install wsl\n```\n",
+      "verificar": [
+        "exe:wsl",
+        "Enable-WindowsOptionalFeature:Online,FeatureName"
+      ]
+    },
+    {
+      "id": "liv2-029",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-ComputerInfo -Property OsName, OsVersion, OsBuildNumber\n```\n",
+      "errada": "Use:\n\n```powershell\n$PSVersionTable\n```\n",
+      "verificar": [
+        "Get-ComputerInfo:Property"
+      ]
+    },
+    {
+      "id": "liv2-030",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\npowercfg /setactive SCHEME_MIN\n```\n",
+      "errada": "Use:\n\n```powershell\npowercfg /list\n```\n",
+      "verificar": [
+        "exe:powercfg",
+        "ajuda:powercfg /?:/SETACTIVE",
+        "ajuda:powercfg /aliases:SCHEME_MIN"
+      ]
+    },
+    {
+      "id": "liv2-031",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\ncleanmgr /d C:\n```\n",
+      "errada": "Use:\n\n```powershell\nRemove-Item C:\\Windows\\Temp\\* -Recurse -Force\n```\n",
+      "verificar": [
+        "exe:cleanmgr"
+      ]
+    },
+    {
+      "id": "liv2-032",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\npowercfg /hibernate off\n```\n",
+      "errada": "Use:\n\n```powershell\nRemove-Item C:\\hiberfil.sys -Force\n```\n",
+      "verificar": [
+        "exe:powercfg",
+        "ajuda:powercfg /?:/HIBERNATE"
+      ]
+    },
+    {
+      "id": "liv2-033",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nResolve-DnsName google.com\n```\n",
+      "errada": "Use:\n\n```bash\ndig google.com\n```\n",
+      "verificar": [
+        "Resolve-DnsName",
+        "exe:nslookup"
+      ]
+    },
+    {
+      "id": "liv2-034",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nDism /Online /Cleanup-Image /StartComponentCleanup\n```\n",
+      "errada": "Use:\n\n```powershell\nRemove-Item C:\\Windows\\WinSxS\\Backup\\* -Recurse -Force\n```\n",
+      "verificar": [
+        "exe:dism",
+        "Repair-WindowsImage:Online,StartComponentCleanup"
+      ]
+    },
+    {
+      "id": "liv2-035",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\ntracert 8.8.8.8\n```\n",
+      "errada": "Use:\n\n```powershell\nping 8.8.8.8\n```\n",
+      "verificar": [
+        "exe:tracert",
+        "ajuda:tracert /?:tracert",
+        "exe:pathping",
+        "Test-NetConnection:TraceRoute"
+      ]
+    },
+    {
+      "id": "liv2-036",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nStop-Service -Name wuauserv -Force\nRemove-Item -Path C:\\Windows\\SoftwareDistribution\\Download\\* -Recurse -Force\nStart-Service -Name wuauserv\n```\n",
+      "errada": "Use:\n\n```powershell\nRestart-Service wuauserv\n```\n",
+      "verificar": [
+        "Stop-Service:Name,Force",
+        "Remove-Item:Path,Recurse,Force",
+        "Start-Service:Name",
+        "svc:wuauserv"
+      ]
+    },
+    {
+      "id": "liv2-037",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nwinget uninstall Spotify\n```\n",
+      "errada": "Use:\n\n```powershell\nwinget install Spotify\n```\n",
+      "verificar": [
+        "exe:winget",
+        "ajuda:winget uninstall --help:winget uninstall"
+      ]
+    },
+    {
+      "id": "liv2-038",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-Content (Get-PSReadLineOption).HistorySavePath\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-History\n```\n",
+      "verificar": [
+        "Get-PSReadLineOption",
+        "Get-Content"
+      ]
+    },
+    {
+      "id": "liv2-039",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nslmgr /xpr\n```\n",
+      "errada": "Use:\n\n```powershell\nslmgr /upk\n```\n",
+      "verificar": [
+        "exe:slmgr",
+        "ajuda:cscript //nologo %SystemRoot%\\System32\\slmgr.vbs /?:/xpr"
+      ]
+    },
+    {
+      "id": "liv2-040",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-SmbShare\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-SmbMapping\n```\n",
+      "verificar": [
+        "Get-SmbShare",
+        "exe:net"
+      ]
+    },
+    {
+      "id": "liv2-041",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nw32tm /resync\n```\n",
+      "errada": "Use:\n\n```powershell\nSet-Date \"13/11/2026 10:00\"\n```\n",
+      "verificar": [
+        "exe:w32tm",
+        "ajuda:w32tm /?:/resync"
+      ]
+    },
+    {
+      "id": "liv2-042",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nNew-SmbShare -Name \"Publico\" -Path \"D:\\Publico\" -ReadAccess \"Todos\"\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-SmbShare -Name \"Publico\"\n```\n",
+      "verificar": [
+        "New-SmbShare:Name,Path,ReadAccess"
+      ]
+    },
+    {
+      "id": "liv2-043",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-NetTCPConnection -State Established | Select-Object RemoteAddress, RemotePort, OwningProcess, @{n='Programa';e={(Get-Process -Id $_.OwningProcess).ProcessName}}\n```\n",
+      "errada": "Use:\n\n```powershell\nnetstat -an\n```\n",
+      "verificar": [
+        "Get-NetTCPConnection:State"
+      ]
+    },
+    {
+      "id": "liv2-044",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\n[Environment]::SetEnvironmentVariable(\"Path\", [Environment]::GetEnvironmentVariable(\"Path\", \"User\") + \";C:\\Tools\", \"User\")\n```\n",
+      "errada": "Use:\n\n```powershell\n$env:Path += \";C:\\Tools\"\n```\n",
+      "verificar": [
+        "exe:setx"
+      ]
+    },
+    {
+      "id": "liv2-045",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-ComputerRestorePoint\n```\n",
+      "errada": "Use:\n\n```powershell\nCheckpoint-Computer -Description \"Antes\"\n```\n",
+      "verificar": [
+        "51:Get-ComputerRestorePoint"
+      ]
+    },
+    {
+      "id": "liv2-046",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nwinget upgrade\n```\n",
+      "errada": "Use:\n\n```powershell\nwinget upgrade --all\n```\n",
+      "verificar": [
+        "exe:winget",
+        "ajuda:winget upgrade --help:winget upgrade"
+      ]
+    },
+    {
+      "id": "liv2-047",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nNew-PSDrive -Name Z -PSProvider FileSystem -Root \"\\\\servidor\\fotos\" -Persist\n```\n",
+      "errada": "Use:\n\n```powershell\nNew-PSDrive -Name Z -PSProvider FileSystem -Root \"\\\\servidor\\fotos\"\n```\n",
+      "verificar": [
+        "New-PSDrive:Name,PSProvider,Root,Persist",
+        "New-SmbMapping:LocalPath,RemotePath",
+        "exe:net"
+      ]
+    },
+    {
+      "id": "liv2-048",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nGet-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors\n```\n",
+      "errada": "Use:\n\n```bash\nlscpu\n```\n",
+      "verificar": [
+        "cim:Win32_Processor:NumberOfCores"
+      ]
+    },
+    {
+      "id": "liv2-049",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nnetsh wlan show interfaces\n```\n",
+      "errada": "Use:\n\n```powershell\nnetsh wlan show drivers\n```\n",
+      "verificar": [
+        "exe:netsh",
+        "ajuda:netsh wlan show interfaces ?:interfaces"
+      ]
+    },
+    {
+      "id": "liv2-050",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nSelect-String -Path C:\\logs\\app.log -Pattern \"ERROR\"\n```\n",
+      "errada": "Use:\n\n```bash\ngrep ERROR C:\\logs\\app.log\n```\n",
+      "verificar": [
+        "Select-String:Path,Pattern",
+        "exe:findstr"
+      ]
+    },
+    {
+      "id": "liv2-051",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nRename-Computer -NewName \"ESCRITORIO-02\" -Restart\n```\n",
+      "errada": "Use:\n\n```powershell\nhostname ESCRITORIO-02\n```\n",
+      "verificar": [
+        "Rename-Computer:NewName,Restart"
+      ]
+    },
+    {
+      "id": "liv2-052",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nquser\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-LocalUser\n```\n",
+      "verificar": [
+        "exe:quser",
+        "exe:qwinsta",
+        "ajuda:quser /?:QUERY USER"
+      ]
+    },
+    {
+      "id": "liv2-053",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nGet-Disk\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-PSDrive -PSProvider FileSystem\n```\n",
+      "verificar": [
+        "Get-Disk",
+        "exe:diskpart"
+      ]
+    },
+    {
+      "id": "liv2-054",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\n$acao = New-ScheduledTaskAction -Execute \"powershell.exe\" -Argument \"-NoProfile -File C:\\scripts\\backup.ps1\"\n$gatilho = New-ScheduledTaskTrigger -Daily -At 2am\nRegister-ScheduledTask -TaskName \"Backup\" -Action $acao -Trigger $gatilho\n```\n",
+      "errada": "Use:\n\n```bash\n0 2 * * * C:\\scripts\\backup.ps1\n```\n",
+      "verificar": [
+        "New-ScheduledTaskAction:Execute,Argument",
+        "New-ScheduledTaskTrigger:Daily,At",
+        "Register-ScheduledTask:TaskName,Action,Trigger",
+        "exe:schtasks",
+        "ajuda:schtasks /create /?:DAILY"
+      ]
+    },
+    {
+      "id": "liv2-055",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nrobocopy \"$env:USERPROFILE\\Documents\" \"E:\\Backup\\Documentos\" /E\n```\n",
+      "errada": "Use:\n\n```powershell\nCopy-Item \"$env:USERPROFILE\\Documents\" \"E:\\Backup\" -Recurse\n```\n",
+      "verificar": [
+        "exe:robocopy",
+        "ajuda:robocopy /?:/MIR",
+        "ajuda:robocopy /?:/E"
+      ]
+    },
+    {
+      "id": "liv2-056",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nExpand-Archive -Path C:\\temp\\fotos.zip -DestinationPath C:\\temp\\fotos\n```\n",
+      "errada": "Use:\n\n```powershell\nCompress-Archive -Path C:\\temp\\fotos -DestinationPath C:\\temp\\fotos.zip\n```\n",
+      "verificar": [
+        "Expand-Archive:Path,DestinationPath",
+        "exe:tar"
+      ]
+    },
+    {
+      "id": "liv2-057",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nStart-MpScan -ScanType QuickScan\n```\n",
+      "errada": "Use:\n\n```powershell\nGet-MpThreat\n```\n",
+      "verificar": [
+        "Start-MpScan:ScanType"
+      ]
+    },
+    {
+      "id": "liv2-058",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\nRestart-NetAdapter -Name \"Ethernet\"\n```\n",
+      "errada": "Use:\n\n```powershell\nipconfig /release Ethernet\n```\n",
+      "verificar": [
+        "Restart-NetAdapter:Name",
+        "Disable-NetAdapter:Name",
+        "Enable-NetAdapter:Name"
+      ]
+    },
+    {
+      "id": "liv2-059",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```powershell\nUpdate-MpSignature\n```\n",
+      "errada": "Use:\n\n```powershell\nStart-MpScan -ScanType QuickScan\n```\n",
+      "verificar": [
+        "Update-MpSignature"
+      ]
+    },
+    {
+      "id": "liv2-060",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```powershell\n(Get-CimInstance Win32_OperatingSystem).InstallDate\n```\n",
+      "errada": "Use:\n\n```powershell\n(Get-CimInstance Win32_OperatingSystem).LastBootUpTime\n```\n",
+      "verificar": [
+        "cim:Win32_OperatingSystem:InstallDate"
+      ]
+    },
+    {
+      "id": "liv2-061",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nps aux --sort=-%cpu | head -n 10\n```\n",
+      "errada": "Use:\n\n```bash\nps aux --sort=-%mem | head -n 10\n```\n",
+      "verificar": [
+        "cmd:ps",
+        "man:ps:--sort",
+        "cmd:top",
+        "cmd:htop"
+      ]
+    },
+    {
+      "id": "liv2-062",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\njournalctl -u ssh | grep -Ei \"failed|invalid\"\n```\n",
+      "errada": "Use:\n\n```bash\nlast -n 20\n```\n",
+      "verificar": [
+        "cmd:journalctl",
+        "man:journalctl:--unit",
+        "cmd:lastb"
+      ]
+    },
+    {
+      "id": "liv2-063",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo apt clean\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt autoremove\n```\n",
+      "verificar": [
+        "cmd:apt",
+        "man:apt-get:autoclean",
+        "man:apt-get:clean clears out the local repository"
+      ]
+    },
+    {
+      "id": "liv2-064",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo adduser joao\n```\n",
+      "errada": "Use:\n\n```bash\nsudo useradd joao\n```\n",
+      "verificar": [
+        "cmd:adduser",
+        "cmd:useradd",
+        "man:useradd:--create-home"
+      ]
+    },
+    {
+      "id": "liv2-065",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nresolvectl query debian.org\n```\n",
+      "errada": "Use:\n\n```bash\ncat /etc/hostname\n```\n",
+      "verificar": [
+        "cmd:resolvectl",
+        "man:resolvectl:query",
+        "cmd:getent",
+        "cmd:dig",
+        "cmd:nslookup",
+        "cmd:host"
+      ]
+    },
+    {
+      "id": "liv2-066",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo usermod -aG sudo joao\n```\n",
+      "errada": "Use:\n\n```bash\nsudo usermod -G sudo joao\n```\n",
+      "verificar": [
+        "cmd:usermod",
+        "man:usermod:--append",
+        "cmd:gpasswd",
+        "man:adduser:prio] user group"
+      ]
+    },
+    {
+      "id": "liv2-067",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nls /var/run/reboot-required\n```\n",
+      "errada": "Use:\n\n```bash\nuptime\n```\n",
+      "verificar": [
+        "sh:d=$(mktemp -d) && cd $d && apt-get download update-notifier-common >/dev/null 2>&1 && dpkg-deb -x update-notifier-common_*.deb x && grep -q /var/run/reboot-required x/usr/share/update-notifier/notify-reboot-required; r=$?; cd /; rm -rf $d; exit $r"
+      ]
+    },
+    {
+      "id": "liv2-068",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\napt-mark showmanual\n```\n",
+      "errada": "Use:\n\n```bash\ndpkg -l\n```\n",
+      "verificar": [
+        "cmd:apt-mark",
+        "man:apt-mark:showmanual",
+        "sh:apt list --manual-installed 2>/dev/null | head -n 2 | grep -q ."
+      ]
+    },
+    {
+      "id": "liv2-069",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo reboot\n```\n",
+      "errada": "Use:\n\n```bash\nsudo shutdown -h now\n```\n",
+      "verificar": [
+        "cmd:reboot",
+        "cmd:shutdown",
+        "man:shutdown:--reboot"
+      ]
+    },
+    {
+      "id": "liv2-070",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\napt-cache policy nginx\n```\n",
+      "errada": "Use:\n\n```bash\ndpkg -l nginx\n```\n",
+      "verificar": [
+        "cmd:apt-cache",
+        "man:apt-cache:madison",
+        "sh:apt policy nginx 2>/dev/null | grep -q Candidate"
+      ]
+    },
+    {
+      "id": "liv2-071",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nwho\n```\n",
+      "errada": "Use:\n\n```bash\nwhoami\n```\n",
+      "verificar": [
+        "cmd:who",
+        "cmd:w",
+        "cmd:users",
+        "cmd:loginctl"
+      ]
+    },
+    {
+      "id": "liv2-072",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo apt purge apache2\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt remove apache2\n```\n",
+      "verificar": [
+        "man:apt:purge",
+        "man:apt-get:--purge",
+        "man:dpkg:--purge"
+      ]
+    },
+    {
+      "id": "liv2-073",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\npasswd maria\n```\n",
+      "errada": "Use:\n\n```bash\npasswd\n```\n",
+      "verificar": [
+        "cmd:passwd",
+        "cmd:chpasswd"
+      ]
+    },
+    {
+      "id": "liv2-074",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo apt install --reinstall openssh-server\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt remove openssh-server && sudo apt install openssh-server\n```\n",
+      "verificar": [
+        "man:apt-get:--reinstall",
+        "man:apt:reinstall"
+      ]
+    },
+    {
+      "id": "liv2-075",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\napt search pdf viewer\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt install pdf\n```\n",
+      "verificar": [
+        "man:apt:search",
+        "man:apt-cache:search"
+      ]
+    },
+    {
+      "id": "liv2-076",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsystemctl --failed\n```\n",
+      "errada": "Use:\n\n```bash\nsystemctl list-units --type=service\n```\n",
+      "verificar": [
+        "cmd:systemctl",
+        "man:systemctl:--failed"
+      ]
+    },
+    {
+      "id": "liv2-077",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo apt install ./google-chrome-stable_current_amd64.deb\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt install google-chrome-stable_current_amd64.deb\n```\n",
+      "verificar": [
+        "sh:d=$(mktemp -d) && cd $d && apt-get download hello >/dev/null 2>&1 && apt-get -s install ./hello_*.deb 2>&1 | grep -q \"^Inst hello\" && apt -s install ./hello_*.deb 2>&1 | grep -q \"^Inst hello\"; r=$?; cd /; rm -rf $d; exit $r",
+        "cmd:dpkg",
+        "man:dpkg:--install"
+      ]
+    },
+    {
+      "id": "liv2-078",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo systemctl enable ssh\n```\n",
+      "errada": "Use:\n\n```bash\nsudo systemctl start ssh\n```\n",
+      "verificar": [
+        "man:systemctl:enable",
+        "cmd:update-rc.d"
+      ]
+    },
+    {
+      "id": "liv2-079",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo timedatectl set-timezone America/Sao_Paulo\n```\n",
+      "errada": "Use:\n\n```bash\nsudo date -s \"10:00\"\n```\n",
+      "verificar": [
+        "man:timedatectl:set-timezone",
+        "sh:test -e /usr/share/zoneinfo/America/Sao_Paulo",
+        "cmd:dpkg-reconfigure"
+      ]
+    },
+    {
+      "id": "liv2-080",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo systemctl disable --now cups\n```\n",
+      "errada": "Use:\n\n```bash\nsudo systemctl stop cups\n```\n",
+      "verificar": [
+        "man:systemctl:--now",
+        "man:systemctl:disable"
+      ]
+    },
+    {
+      "id": "liv2-081",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo mkdir -p /mnt/pendrive\nsudo mount /dev/sdb1 /mnt/pendrive\n```\n",
+      "errada": "Use:\n\n```bash\nsudo mount /mnt/pendrive /dev/sdb1\n```\n",
+      "verificar": [
+        "cmd:mount"
+      ]
+    },
+    {
+      "id": "liv2-082",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo hostnamectl set-hostname servidor2\n```\n",
+      "errada": "Use:\n\n```bash\nsudo hostname servidor2\n```\n",
+      "verificar": [
+        "cmd:hostnamectl",
+        "man:hostnamectl:hostname"
+      ]
+    },
+    {
+      "id": "liv2-083",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nlsblk\n```\n",
+      "errada": "Use:\n\n```bash\ndf -h\n```\n",
+      "verificar": [
+        "cmd:lsblk",
+        "cmd:fdisk",
+        "man:fdisk:--list",
+        "pkg:parted:parted"
+      ]
+    },
+    {
+      "id": "liv2-084",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\ntimedatectl status\n```\n",
+      "errada": "Use:\n\n```bash\ndate\n```\n",
+      "verificar": [
+        "cmd:timedatectl",
+        "man:timedatectl:timesync-status"
+      ]
+    },
+    {
+      "id": "liv2-085",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo umount /mnt/pendrive\n```\n",
+      "errada": "Use:\n\n```bash\nsudo unmount /mnt/pendrive\n```\n",
+      "verificar": [
+        "cmd:umount",
+        "cmd:eject",
+        "pkg:udisks2:udisksctl"
+      ]
+    },
+    {
+      "id": "liv2-086",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo ufw allow 80/tcp\n```\n",
+      "errada": "Use:\n\n```bash\nsudo ufw enable\n```\n",
+      "verificar": [
+        "pkg:ufw:ufw",
+        "deb:ufw:ufw.8:allow"
+      ]
+    },
+    {
+      "id": "liv2-087",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo smartctl -H /dev/sda\n```\n",
+      "errada": "Use:\n\n```bash\nsudo fsck /dev/sda\n```\n",
+      "verificar": [
+        "pkg:smartmontools:smartctl",
+        "deb:smartmontools:smartctl.8:--health"
+      ]
+    },
+    {
+      "id": "liv2-088",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nuname -r\n```\n",
+      "errada": "Use:\n\n```bash\nlsb_release -a\n```\n",
+      "verificar": [
+        "cmd:uname",
+        "man:uname:--kernel-release"
+      ]
+    },
+    {
+      "id": "liv2-089",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nlscpu\n```\n",
+      "errada": "Use:\n\n```bash\nnproc\n```\n",
+      "verificar": [
+        "cmd:lscpu",
+        "sh:test -r /proc/cpuinfo"
+      ]
+    },
+    {
+      "id": "liv2-090",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\ndpkg --list 'linux-image*'\n```\n",
+      "errada": "Use:\n\n```bash\nuname -r\n```\n",
+      "verificar": [
+        "cmd:dpkg",
+        "man:dpkg:--list",
+        "man:apt:--installed"
+      ]
+    },
+    {
+      "id": "liv2-091",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\njournalctl --disk-usage\n```\n",
+      "errada": "Use:\n\n```bash\nsudo journalctl --vacuum-size=100M\n```\n",
+      "verificar": [
+        "man:journalctl:--disk-usage"
+      ]
+    },
+    {
+      "id": "liv2-092",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nssh-keygen -t ed25519 -C \"meu-notebook\"\n```\n",
+      "errada": "Use:\n\n```bash\nssh-keygen -t rsa\n```\n",
+      "verificar": [
+        "cmd:ssh-keygen",
+        "man:ssh-keygen:ed25519"
+      ]
+    },
+    {
+      "id": "liv2-093",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nfind ~ -name \"relatorio.pdf\"\n```\n",
+      "errada": "Use:\n\n```bash\nls relatorio.pdf\n```\n",
+      "verificar": [
+        "cmd:find",
+        "man:find:-iname",
+        "pkg:plocate:locate"
+      ]
+    },
+    {
+      "id": "liv2-094",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nssh-copy-id admin@192.168.0.10\n```\n",
+      "errada": "Use:\n\n```bash\nscp ~/.ssh/id_ed25519 admin@192.168.0.10:~/.ssh/\n```\n",
+      "verificar": [
+        "cmd:ssh-copy-id"
+      ]
+    },
+    {
+      "id": "liv2-095",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nnmcli device wifi list\n```\n",
+      "errada": "Use:\n\n```bash\nnmcli connection show\n```\n",
+      "verificar": [
+        "pkg:network-manager:nmcli",
+        "deb:network-manager:nmcli.1:wifi list"
+      ]
+    },
+    {
+      "id": "liv2-096",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nless /var/log/apt/history.log\n```\n",
+      "errada": "Use:\n\n```bash\nhistory | grep apt\n```\n",
+      "verificar": [
+        "sh:test -f /var/log/apt/history.log"
+      ]
+    },
+    {
+      "id": "liv2-097",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nnmcli device wifi connect \"CasaAna\" password \"12345678\"\n```\n",
+      "errada": "Use:\n\n```bash\nnmcli connection up CasaAna\n```\n",
+      "verificar": [
+        "pkg:network-manager:nmcli",
+        "deb:network-manager:nmcli.1:password"
+      ]
+    },
+    {
+      "id": "liv2-098",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo blkid /dev/sdb1\n```\n",
+      "errada": "Use:\n\n```bash\nsudo fdisk -l /dev/sdb\n```\n",
+      "verificar": [
+        "cmd:blkid",
+        "man:lsblk:--fs"
+      ]
+    },
+    {
+      "id": "liv2-099",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\ntar -xzf backup.tar.gz\n```\n",
+      "errada": "Use:\n\n```bash\ntar -czf backup.tar.gz .\n```\n",
+      "verificar": [
+        "cmd:tar",
+        "man:tar:--extract"
+      ]
+    },
+    {
+      "id": "liv2-100",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\ncat /etc/apt/sources.list.d/ubuntu.sources\n```\n",
+      "errada": "Use:\n\n```bash\napt list --installed\n```\n",
+      "verificar": [
+        "sh:test -f /etc/apt/sources.list.d/ubuntu.sources"
+      ]
+    },
+    {
+      "id": "liv2-101",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nls -l /srv/dados/relatorio.txt\n```\n",
+      "errada": "Use:\n\n```bash\nsudo chmod 777 /srv/dados/relatorio.txt\n```\n",
+      "verificar": [
+        "cmd:ls",
+        "cmd:stat",
+        "cmd:namei"
+      ]
+    },
+    {
+      "id": "liv2-102",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\njournalctl -k | grep -i -E \"out of memory|oom\"\n```\n",
+      "errada": "Use:\n\n```bash\nfree -h\n```\n",
+      "verificar": [
+        "cmd:dmesg",
+        "man:journalctl:--dmesg"
+      ]
+    },
+    {
+      "id": "liv2-103",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo snap refresh\n```\n",
+      "errada": "Use:\n\n```bash\nsnap list\n```\n",
+      "verificar": [
+        "cmd:snap",
+        "help:snap:refresh"
+      ]
+    },
+    {
+      "id": "liv2-104",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo netplan apply\n```\n",
+      "errada": "Use:\n\n```bash\nsudo systemctl restart networking\n```\n",
+      "verificar": [
+        "cmd:netplan",
+        "help:netplan:apply"
+      ]
+    },
+    {
+      "id": "liv2-105",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\ncancel -a\n```\n",
+      "errada": "Use:\n\n```bash\nlpstat -o\n```\n",
+      "verificar": [
+        "pkg:cups-client:cancel",
+        "deb:cups-client:cancel.1:-a",
+        "pkg:cups-bsd:lprm",
+        "deb:cups-bsd:lprm.1:use the - option to cancel all jobs"
+      ]
+    },
+    {
+      "id": "liv2-106",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nip route show default\n```\n",
+      "errada": "Use:\n\n```bash\nip addr\n```\n",
+      "verificar": [
+        "cmd:ip",
+        "man:ip-route:default"
+      ]
+    },
+    {
+      "id": "liv2-107",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nupower -i /org/freedesktop/UPower/devices/battery_BAT0\n```\n",
+      "errada": "Use:\n\n```bash\npowercfg /batteryreport\n```\n",
+      "verificar": [
+        "pkg:upower:upower",
+        "deb:upower:upower.1:--show-info"
+      ]
+    },
+    {
+      "id": "liv2-108",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\n0 2 * * * /opt/backup.sh\n```\n",
+      "errada": "Use:\n\n```bash\n2 0 * * * /opt/backup.sh\n```\n",
+      "verificar": [
+        "cmd:crontab",
+        "sh:man -w 5 crontab"
+      ]
+    },
+    {
+      "id": "liv2-109",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsensors\n```\n",
+      "errada": "Use:\n\n```bash\ntop\n```\n",
+      "verificar": [
+        "pkg:lm-sensors:sensors"
+      ]
+    },
+    {
+      "id": "liv2-110",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo apt update && sudo apt full-upgrade\n```\n",
+      "errada": "Use:\n\n```bash\nsudo apt upgrade\n```\n",
+      "verificar": [
+        "man:apt:full-upgrade",
+        "man:apt-get:dist-upgrade"
+      ]
+    },
+    {
+      "id": "liv2-111",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsystemd-analyze blame\n```\n",
+      "errada": "Use:\n\n```bash\nuptime\n```\n",
+      "verificar": [
+        "cmd:systemd-analyze",
+        "man:systemd-analyze:blame"
+      ]
+    },
+    {
+      "id": "liv2-112",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\njournalctl -p err --since \"1 hour ago\"\n```\n",
+      "errada": "Use:\n\n```bash\njournalctl -p err -b\n```\n",
+      "verificar": [
+        "man:journalctl:--since",
+        "man:journalctl:--priority"
+      ]
+    },
+    {
+      "id": "liv2-113",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nlspci -nnk | grep -iA3 net\n```\n",
+      "errada": "Use:\n\n```bash\nip link\n```\n",
+      "verificar": [
+        "pkg:pciutils:lspci",
+        "pkg:usbutils:lsusb",
+        "deb:pciutils:lspci.8:-nn"
+      ]
+    },
+    {
+      "id": "liv2-114",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\ndf -i\n```\n",
+      "errada": "Use:\n\n```bash\ndf -h\n```\n",
+      "verificar": [
+        "cmd:df",
+        "man:df:--inodes"
+      ]
+    },
+    {
+      "id": "liv2-115",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\nsudo apt purge 'libreoffice*'\nsudo apt autoremove\n```\n",
+      "errada": "Use:\n\n```bash\nsudo rm -rf /usr/lib/libreoffice\n```\n",
+      "verificar": [
+        "man:apt:remove",
+        "man:apt:autoremove"
+      ]
+    },
+    {
+      "id": "liv2-116",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo update-grub\n```\n",
+      "errada": "Use:\n\n```bash\nsudo grub-install /dev/sda\n```\n",
+      "verificar": [
+        "pkg:grub2-common:update-grub",
+        "pkg:grub-common:grub-mkconfig"
+      ]
+    },
+    {
+      "id": "liv2-117",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\napt-file search bin/ifconfig\n```\n",
+      "errada": "Use:\n\n```bash\ndpkg -S ifconfig\n```\n",
+      "verificar": [
+        "pkg:apt-file:apt-file",
+        "pkg:net-tools:ifconfig",
+        "deb:apt-file:apt-file.1:search"
+      ]
+    },
+    {
+      "id": "liv2-118",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo lsof +L1\n```\n",
+      "errada": "Use:\n\n```bash\nsudo du -sh /*\n```\n",
+      "verificar": [
+        "cmd:lsof",
+        "man:lsof:+L"
+      ]
+    },
+    {
+      "id": "liv2-119",
+      "estilo": "dia a dia",
+      "certa": "Use:\n\n```bash\ndocker system prune -a\n```\n",
+      "errada": "Use:\n\n```bash\nsudo rm -rf /var/lib/docker\n```\n",
+      "verificar": [
+        "cmd:docker",
+        "help:docker system prune:--all"
+      ]
+    },
+    {
+      "id": "liv2-120",
+      "estilo": "técnico",
+      "certa": "Use:\n\n```bash\nsudo systemctl daemon-reload\nsudo mount -a\n```\n",
+      "errada": "Use:\n\n```bash\nsudo reboot\n```\n",
+      "verificar": [
+        "man:mount:--all",
+        "man:findmnt:--verify"
+      ]
+    }
+  ]
+}
