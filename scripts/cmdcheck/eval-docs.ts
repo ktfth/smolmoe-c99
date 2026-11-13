@@ -90,6 +90,8 @@ const { positionals, values } = parseArgs({
     saida: { type: "string", default: join(ROOT, "build") },
     conjunto: { type: "string", default: "docs" },
     forcar: { type: "boolean", default: false },
+    /* D: the binary adds the book itself (--chat --book, src/book.c) instead of livro.ts. */
+    "livro-no-binario": { type: "boolean", default: false },
   },
 });
 
@@ -169,14 +171,16 @@ function capturar(): void {
 const withDocs = (docs: string, pergunta: string): string =>
   `Sintaxe real destes comandos nesta máquina:\n\`\`\`text\n${docs}\n\`\`\`\n\n${pergunta}`;
 
-function ask(prompt: string): { resposta: string; prompt_tokens: number; segundos: number } {
+function ask(prompt: string, extra: readonly string[] = []): { resposta: string; prompt_tokens: number; segundos: number;
+  aviso: string } {
   const m = values.modelo!;
   const r = spawn([values.binario!, "--model", join(m, "model.smoe"), "--config", join(m, "config.ini"),
-    "--tokenizer", join(m, "tokenizer.qbp"), "--chat", "--no-tools", "--tokens", values.tokens!, "--prompt", prompt]);
+    "--tokenizer", join(m, "tokenizer.qbp"), "--chat", "--no-tools", "--tokens", values.tokens!, ...extra, "--prompt", prompt]);
   if (r.code !== 0) throw new Error(`o modelo falhou (${r.code}): ${r.err.slice(-400)}`);
   const stats = JSON.parse(r.err.trim().split("\n").pop()!) as { prompt_tokens: number; ttft_seconds: number;
     decode_seconds: number; load_seconds: number };
-  return { resposta: r.out, prompt_tokens: stats.prompt_tokens, segundos: stats.ttft_seconds + stats.decode_seconds };
+  return { resposta: r.out, prompt_tokens: stats.prompt_tokens, segundos: stats.ttft_seconds + stats.decode_seconds,
+    aviso: r.err };
 }
 
 /* What the findings of a notice name, for C's documentation. */
@@ -206,8 +210,10 @@ function gerar(): void {
   mkdirSync(values.saida!, { recursive: true });
   const linhas: string[] = [];
   for (const p of perguntas) {
-    let prompt = p.pergunta, refeita = false, tarefas: string[] | undefined;
-    if (braco === "D") {
+    let prompt = p.pergunta, refeita = false, tarefas: string[] | undefined, extra: string[] = [];
+    if (braco === "D" && values["livro-no-binario"]) {
+      extra = ["--book", "--shell", p.shell === "powershell" ? "pwsh" : "bash"];
+    } else if (braco === "D") {
       const achados = buscar(livro!, p.pergunta, p.shell);
       tarefas = achados.map((a) => a.tarefa.id);
       prompt = prefixo(achados, p.shell) + p.pergunta;
@@ -227,7 +233,8 @@ function gerar(): void {
         (docs ? withDocs(docs, p.pergunta) : p.pergunta);
       refeita = true;
     }
-    const r = ask(prompt);
+    const { aviso, ...r } = ask(prompt, extra);
+    if (extra.length) tarefas = /\(livro de comandos: ([^)]*)\)/.exec(aviso)?.[1]?.split(", ") ?? [];
     linhas.push(JSON.stringify({ id: p.id, braco, prompt, refeita, ...(tarefas ? { livro: tarefas } : {}), ...r } satisfies
       Resposta));
     console.log(`${braco} ${p.id}: ${r.prompt_tokens} tokens de prompt, ${r.segundos.toFixed(1)} s` +
