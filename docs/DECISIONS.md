@@ -829,6 +829,16 @@ com a sua rubrica (obrigatórios e proibidos nos blocos de código).
 poder estatístico, o próximo passo é um conjunto de teste maior (cerca de 120 pedidos, escrito por quem não viu o
 livro), e não mais ajuste da busca.
 
+**Regra do próximo teste (fixada em 2026-11-13, antes de o conjunto existir):** o livro, a busca e o prompt ficam como
+em `c42b497`; o dev só copia o conjunto, sem editar, e roda A e D uma vez, com o mesmo binário e os mesmos parâmetros.
+- **Entra no runtime** se D ganhar de A no teste do sinal pareado, bilateral, com p < 0,05 nos itens novos, e se em
+  nenhuma das duas famílias (PowerShell, apt) D tiver mais perdas que ganhos.
+- **Não entra** em qualquer outro caso, inclusive com p entre 0,05 e 0,10. Leituras alternativas (código entre crases,
+  rubrica corrigida) aparecem só como sensibilidade e não mudam a decisão.
+- Poder: com a proporção vista aqui (7 ganhos para 2 perdas, um em cada cinco itens discordando), 120 itens dão
+  uns 26 discordantes, e o esperado (20 contra 6) tem p ≈ 0,01. Se o efeito real for metade disso, o teste
+  provavelmente não o pega, e o livro fica de fora.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é
