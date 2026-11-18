@@ -58,7 +58,7 @@ static uint32_t argmax(const Sampler *s, const float *logits) {
     uint32_t i, best = UINT32_MAX;
     for (i = 0; i < s->vocab; ++i)
         if (!s->banned[i] && (best == UINT32_MAX || logits[i] > logits[best])) best = i;
-    if (best == UINT32_MAX) sm_fail(SM_ERR_STATE, "every token is banned");
+    if (best == UINT32_MAX) return sm_set(SM_ERR_STATE, "every token is banned");
     return best;
 }
 
@@ -105,7 +105,7 @@ static uint32_t sampler_next_body(Sampler *s, const float *logits) {
     double total = 0, cumulative = 0, target;
     if (s->temperature == 0) return argmax(s, logits);
     n = s->top_k ? collect_top_k(s, logits) : collect_all(s, logits);
-    if (!n) sm_fail(SM_ERR_STATE, "every token is banned");
+    if (!n) return sm_set(SM_ERR_STATE, "every token is banned");
     for (i = 0; i < n; ++i) {
         s->probs[i] = exp(((double)s->ranked[i].logit - (double)s->ranked[0].logit) / (double)s->temperature);
         total += s->probs[i];

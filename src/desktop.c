@@ -194,13 +194,16 @@ static int start_engine(Desktop *d, const DesktopOptions *o) {
     d->message_cap = d->model.context * DESKTOP_BYTES_PER_TOKEN;
     encode_cap = (uint32_t)strlen(CHAT_DEFAULT_SYSTEM) + TOOLS_PROMPT_BYTES;
     ids = tokenizer_prepare(d->tok, encode_cap > d->message_cap ? encode_cap : d->message_cap, &d->mem);
+    if (sm_failed() || !ids) return 0;
     d->message = (char *)mem_alloc(&d->mem, (size_t)d->message_cap + 1, 1);
     e->ids = (uint32_t *)mem_alloc(&d->mem, ids, sizeof(uint32_t));
     e->piece = (unsigned char *)mem_alloc(&d->mem, tokenizer_max_piece(d->tok), 1);
     banned = (unsigned char *)mem_alloc(&d->mem, d->c.vocab, 1);
+    if (sm_failed()) return 0;
     for (i = 0; i < d->c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(d->tok, i);
     tools = engine_tools_prompt(d->tok, CHAT_DEFAULT_SYSTEM, d->model.context, e->ids, &open_marker, &close_marker,
                                 &needed, &d->mem);
+    if (sm_failed()) return 0;
     if (sampler_init(&d->sampler, d->c.vocab, banned, 0.0f, 40, 0.95f, 1, &d->mem) != SM_OK) return 0;
     e->model = &d->model;
     e->tok = d->tok;

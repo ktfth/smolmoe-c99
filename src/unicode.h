@@ -36,15 +36,15 @@ static inline uint32_t combining_class(uint32_t cp) {
 }
 static inline uint32_t read_utf8(const unsigned char *s,uint32_t bytes,uint32_t *pos) {
     uint32_t c,n,k,minimum;
-    if(*pos>=bytes)sm_fail(SM_ERR_FORMAT, "invalid UTF-8 position");
+    if(*pos>=bytes)return sm_set(SM_ERR_FORMAT, "invalid UTF-8 position");
     c=s[(*pos)++];if(c<128)return c;
     if(c>=194 && c<=223){n=1;c&=31;minimum=128;}
     else if(c>=224 && c<=239){n=2;c&=15;minimum=2048;}
     else if(c>=240 && c<=244){n=3;c&=7;minimum=65536;}
-    else {sm_fail(SM_ERR_FORMAT, "the tokenizer requires valid UTF-8");return 0;}
-    if(bytes-*pos<n)sm_fail(SM_ERR_FORMAT, "truncated UTF-8");
-    for(k=0;k<n;++k){uint32_t b=s[(*pos)++];if((b&192)!=128)sm_fail(SM_ERR_FORMAT, "invalid UTF-8 continuation");c=(c<<6)|(b&63);}
-    if(c<minimum || c>0x10ffff || (c>=0xd800 && c<=0xdfff))sm_fail(SM_ERR_FORMAT, "invalid UTF-8 code point");
+    else {return sm_set(SM_ERR_FORMAT, "the tokenizer requires valid UTF-8");return 0;}
+    if(bytes-*pos<n)return sm_set(SM_ERR_FORMAT, "truncated UTF-8");
+    for(k=0;k<n;++k){uint32_t b=s[(*pos)++];if((b&192)!=128)return sm_set(SM_ERR_FORMAT, "invalid UTF-8 continuation");c=(c<<6)|(b&63);}
+    if(c<minimum || c>0x10ffff || (c>=0xd800 && c<=0xdfff))return sm_set(SM_ERR_FORMAT, "invalid UTF-8 code point");
     return c;
 }
 static inline uint32_t write_utf8(uint32_t cp,unsigned char *p) {
@@ -57,8 +57,9 @@ static inline uint32_t write_utf8(uint32_t cp,unsigned char *p) {
 static inline uint32_t decode_utf8(const unsigned char *s, uint32_t bytes, uint32_t *cp, uint32_t cap) {
     uint32_t pos = 0, n = 0;
     while (pos < bytes) {
-        if (n >= cap) sm_fail(SM_ERR_FORMAT, "decoding workspace exceeded");
+        if (n >= cap) return sm_set(SM_ERR_FORMAT, "decoding workspace exceeded");
         cp[n++] = read_utf8(s, bytes, &pos);
+        if (sm_failed()) return n;
     }
     return n;
 }
@@ -80,7 +81,7 @@ static inline uint32_t canonical_compose(uint32_t a,uint32_t b) {
 }
 static inline uint32_t normalize_nfc(const unsigned char *s,uint32_t bytes,uint32_t *cp,uint32_t cap) {
     uint32_t pos=0,n=0,i,out=0,starter=0,last_cc=0;
-    while(pos<bytes)canonical_decompose(read_utf8(s,bytes,&pos),cp,&n,cap);
+    while(pos<bytes){canonical_decompose(read_utf8(s,bytes,&pos),cp,&n,cap);if(sm_failed())return out;}
     for(i=0;i<n;++i){uint32_t cc=combining_class(cp[i]),composed=out?canonical_compose(cp[starter],cp[i]):0;
         if(composed && (last_cc<cc || !last_cc)){cp[starter]=composed;continue;}
         if(!cc)starter=out;

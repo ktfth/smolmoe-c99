@@ -58,6 +58,7 @@ static void modelfile_parse_body(ModelFile *mf, const unsigned char *data, uint6
     previous = HEADER_BYTES + (uint64_t)mf->count * RECORD_BYTES;
     if (previous > size) sm_fail(SM_ERR_FORMAT, "truncated checkpoint directory");
     mf->tensors = (Tensor *)mem_alloc(mem, mf->count, sizeof(Tensor));
+    if (!mf->tensors) return;
     for (i = 0; i < mf->count; ++i) {
         const unsigned char *rec = data + HEADER_BYTES + (uint64_t)i * RECORD_BYTES;
         Tensor *t = &mf->tensors[i];
@@ -70,10 +71,12 @@ static void modelfile_parse_body(ModelFile *mf, const unsigned char *data, uint6
         t->offset = rd_u64(rec + 56);
         t->bytes = rd_u64(rec + 64);
         check_metadata(mf, t);
+        if (sm_failed()) return;
         if (t->bytes != expected_bytes(t) || (!t->alias && t->offset < previous) || t->offset > size ||
             t->bytes > size - t->offset)
             sm_fail(SM_ERR_FORMAT, "invalid tensor extent: %s", t->name);
         if (t->alias) check_alias(mf, t, i);
+        if (sm_failed()) return;
         else previous = t->offset + t->bytes;
         if (i && strcmp(mf->tensors[i - 1].name, t->name) >= 0)
             sm_fail(SM_ERR_FORMAT, "tensor directory must have unique sorted names");

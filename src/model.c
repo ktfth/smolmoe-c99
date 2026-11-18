@@ -12,9 +12,12 @@
 /* ---- weights ----------------------------------------------------------- */
 
 static QMat qmat(const ModelFile *f, const char *name, uint32_t rows, uint32_t cols) {
-    const Tensor *t = modelfile_find(f, name, rows, cols, DTYPE_QUANTIZED);
     QMat q;
-    if (!t) sm_reraise();
+    const Tensor *t;
+    memset(&q, 0, sizeof(q));
+    if (!name || sm_failed()) return q;
+    t = modelfile_find(f, name, rows, cols, DTYPE_QUANTIZED);
+    if (!t) return q;
     q.data = t->data;
     q.rows = rows;
     q.cols = cols;
@@ -28,8 +31,9 @@ static QMat qmat(const ModelFile *f, const char *name, uint32_t rows, uint32_t c
 static const float *fvec(const ModelFile *f, const char *name, uint32_t n, Memory *mem) {
     const Tensor *t = modelfile_find(f, name, 1, n, DTYPE_F32);
     float *v;
-    if (!t) sm_reraise();
+    if (!t || sm_failed()) return NULL;
     v = (float *)mem_alloc(mem, n, sizeof(float));
+    if (!v) return NULL;
     uint32_t i;
     for (i = 0; i < n; ++i) v[i] = rd_f32(t->data + (size_t)i * 4);
     return v;
@@ -37,7 +41,10 @@ static const float *fvec(const ModelFile *f, const char *name, uint32_t n, Memor
 
 static const char *layer_name(char *buf, uint32_t layer, const char *suffix) {
     int n = snprintf(buf, TENSOR_NAME_SIZE, "l.%u.%s", layer, suffix);
-    if (n < 0 || n >= (int)TENSOR_NAME_SIZE) sm_fail(SM_ERR_RANGE, "tensor name too long");
+    if (n < 0 || n >= (int)TENSOR_NAME_SIZE) {
+        sm_set(SM_ERR_RANGE, "tensor name too long");
+        return NULL;
+    }
     return buf;
 }
 
@@ -76,6 +83,7 @@ static void load_layer(Layer *l, const ModelFile *f, const Config *c, uint32_t i
     }
     l->experts = (Expert *)mem_alloc(mem, c->experts, sizeof(Expert));
     l->shared = (Expert *)mem_alloc(mem, c->shared ? c->shared : 1, sizeof(Expert));
+    if (sm_failed()) return;
     for (e = 0; e < c->experts; ++e) l->experts[e] = expert_weights(f, c, i, "e", e);
     for (e = 0; e < c->shared; ++e) l->shared[e] = expert_weights(f, c, i, "s", e);
 }
@@ -122,7 +130,11 @@ static void model_init_body(Model *m, const Config *c, const ModelFile *f, uint3
     m->head = qmat(f, "lm_head", c->vocab, c->dim);
     m->final_norm = fvec(f, "final_norm", c->dim, mem);
     m->layers = (Layer *)mem_alloc(mem, c->layers, sizeof(Layer));
-    for (i = 0; i < c->layers; ++i) load_layer(&m->layers[i], f, c, i, m->q_dim, m->kv_dim, mem);
+    if (sm_failed()) return;
+    for (i = 0; i < c->layers; ++i) {
+        load_layer(&m->layers[i], f, c, i, m->q_dim, m->kv_dim, mem);
+        if (sm_failed()) return;
+    }
 
     m->x = (float *)buffer(mem, batch, c->dim, sizeof(float));
     m->xn = (float *)buffer(mem, batch, c->dim, sizeof(float));
@@ -149,6 +161,7 @@ static void model_init_body(Model *m, const Config *c, const ModelFile *f, uint3
     m->logits = (float *)buffer(mem, logit_rows, c->vocab, sizeof(float));
     m->inv_freq = (double *)mem_alloc(mem, half, sizeof(double));
     m->inv_freq_local = (double *)mem_alloc(mem, half, sizeof(double));
+    if (sm_failed()) return;
     for (i = 0; i < half; ++i) {
         m->inv_freq[i] = llama3_scale(c, pow((double)c->theta, -(double)(2 * i) / (double)c->rotary_dim));
         m->inv_freq_local[i] = pow((double)c->local_theta, -(double)(2 * i) / (double)c->rotary_dim);
@@ -275,6 +288,7 @@ static MatItem item(const QMat *w, const float *bias, float *y) {
 /* Computes up to three matrices that share one quantized input, splitting
  * their concatenated rows across the pool. */
 static void matmul(Model *m, const MatItem *items, uint32_t n, const float *xd, const int8_t *xq, uint32_t ntok) {
+    if (sm_failed()) return;
     MatTask t;
     uint32_t i;
     memset(&t, 0, sizeof(t));
@@ -368,6 +382,7 @@ static RowTask rows_of(float *rows, uint32_t n, uint32_t cols, uint32_t nb, floa
 
 /* A single token (decode) runs inline: waking the pool would cost more. */
 static void run_rows(Model *m, RowTask *t) {
+    if (sm_failed()) return;
     if (t->n == 1) row_task(t, 0, 1);
     else pool_run(m->pool, row_task, t);
     if (t->fault) sm_fail(SM_ERR_NUMERIC, "non-finite activation; the checkpoint is outside the supported numeric range");
@@ -375,6 +390,7 @@ static void run_rows(Model *m, RowTask *t) {
 
 /* RMSNorm of n rows of src into m->xn, quantized into m->xd/m->xq. */
 static void norm_quantize(Model *m, const float *src, const float *weight, uint32_t n) {
+    if (sm_failed()) return;
     RowTask t = rows_of(m->xn, n, m->c.dim, m->nb_dim, m->xd, m->xq);
     t.src = src;
     t.norm = weight;
@@ -383,12 +399,14 @@ static void norm_quantize(Model *m, const float *src, const float *weight, uint3
 }
 
 static void quantize_attention(Model *m, uint32_t n) {
+    if (sm_failed()) return;
     RowTask t = rows_of(m->att, n, m->q_dim, m->nb_q, m->xd, m->xq);
     run_rows(m, &t);
 }
 
 /* m->up *= act(m->gate), quantized into m->hd/m->hq. */
 static void silu_quantize(Model *m, uint32_t n) {
+    if (sm_failed()) return;
     RowTask t = rows_of(m->up, n, m->c.hidden, m->nb_hidden, m->hd, m->hq);
     t.gate = m->gate;
     t.gemma3 = m->c.gemma3;
@@ -396,6 +414,7 @@ static void silu_quantize(Model *m, uint32_t n) {
 }
 
 static void norm_rows_inplace(float *rows, const float *weight, uint32_t n, uint32_t cols, float eps) {
+    if (sm_failed()) return;
     uint32_t r;
     for (r = 0; r < n; ++r)
         if (rmsnorm(rows + (size_t)r * cols, weight, rows + (size_t)r * cols, cols, eps))
@@ -403,6 +422,7 @@ static void norm_rows_inplace(float *rows, const float *weight, uint32_t n, uint
 }
 
 static void rope_tables(Model *m, uint32_t n, uint32_t pos0) {
+    if (sm_failed()) return;
     uint32_t t, i, half = m->c.rotary_dim / 2;
     for (t = 0; t < n; ++t)
         for (i = 0; i < half; ++i) {
@@ -470,6 +490,7 @@ static void attention_task(void *ctx, uint32_t index, uint32_t count) {
 }
 
 static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
+    if (sm_failed()) return;
     const Config *c = &m->c;
     Layer *L = &m->layers[l];
     uint32_t t, half = c->rotary_dim / 2;
@@ -523,6 +544,7 @@ static void attention_block(Model *m, uint32_t l, uint32_t n, uint32_t pos0) {
 
 /* out[t] = down(act(gate x_t) * up x_t) for ntok quantized inputs. */
 static void expert_mlp(Model *m, const Expert *e, const float *xd, const int8_t *xq, uint32_t ntok) {
+    if (sm_failed()) return;
     MatItem items[2];
     double clock = clock_start(m);
     items[0] = item(&e->gate, NULL, m->gate);
@@ -540,6 +562,7 @@ static void expert_mlp(Model *m, const Expert *e, const float *xd, const int8_t 
 /* Exact top-k, lower expert index wins ties; sigmoid weights renormalized
  * over the selected experts only. */
 static void route_tokens(Model *m, uint32_t n) {
+    if (sm_failed()) return;
     const Config *c = &m->c;
     uint32_t t, k, e, j;
     for (t = 0; t < n; ++t) {
@@ -563,6 +586,7 @@ static void route_tokens(Model *m, uint32_t n) {
 }
 
 static void routed_experts(Model *m, const Layer *L, uint32_t n) {
+    if (sm_failed()) return;
     const Config *c = &m->c;
     uint32_t e, t, k, j, dim = c->dim, nbd = m->nb_dim;
     MatItem router = item(&L->router, NULL, m->route);
@@ -598,6 +622,7 @@ static void routed_experts(Model *m, const Layer *L, uint32_t n) {
 }
 
 static void ffn_block(Model *m, uint32_t l, uint32_t n) {
+    if (sm_failed()) return;
     const Config *c = &m->c;
     const Layer *L = &m->layers[l];
     uint32_t s;
@@ -626,6 +651,7 @@ static void ffn_block(Model *m, uint32_t l, uint32_t n) {
 /* ---- forward ----------------------------------------------------------- */
 
 static void output_logits(Model *m, uint32_t n, LogitsMode mode) {
+    if (sm_failed()) return;
     const Config *c = &m->c;
     uint32_t first = mode == LOGITS_ALL ? 0 : n - 1, rows = n - first;
     MatItem head = item(&m->head, NULL, m->logits);

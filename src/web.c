@@ -97,13 +97,16 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
     web.message_cap = context * WEB_BYTES_PER_TOKEN;
     encode_cap = (uint32_t)strlen(CHAT_DEFAULT_SYSTEM) + TOOLS_PROMPT_BYTES;
     ids = tokenizer_prepare(web.tok, encode_cap > web.message_cap ? encode_cap : web.message_cap, &web.mem);
+    if (sm_failed() || !ids) die("%s", sm_last_error());
     web.message = (char *)mem_alloc(&web.mem, (size_t)web.message_cap + 1, 1);
     web.engine.ids = (uint32_t *)mem_alloc(&web.mem, ids, sizeof(uint32_t));
     web.engine.piece = (unsigned char *)mem_alloc(&web.mem, tokenizer_max_piece(web.tok), 1);
     banned = (unsigned char *)mem_alloc(&web.mem, web.c.vocab, 1);
+    if (sm_failed()) die("%s", sm_last_error());
     for (i = 0; i < web.c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(web.tok, i);
     tools = engine_tools_prompt(web.tok, CHAT_DEFAULT_SYSTEM, context, web.engine.ids, &open_marker, &close_marker,
                                 &needed, &web.mem);
+    if (sm_failed()) die("%s", sm_last_error());
     sm_check(sampler_init(&web.sampler, web.c.vocab, banned, 0.0f, 40, 0.95f, 1, &web.mem));
 
     web.engine.model = &web.model;

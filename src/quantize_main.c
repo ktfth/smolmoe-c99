@@ -53,6 +53,7 @@ static void parse(int argc, char **argv, Options *o) {
         else if (!strcmp(argv[a], "--out")) o->out = argv[++a];
         else if (!strcmp(argv[a], "--simulate-bits")) {
             o->simulate_bits = (int)parse_u32(argv[++a], 7, "simulate-bits");
+            sm_check(sm_last_status());
             if (o->simulate_bits < 3) die("--simulate-bits must be in 3..7");
         } else if (!strcmp(argv[a], "--keep")) {
             if (o->nkeep == MAX_KEEP) die("too many --keep patterns");

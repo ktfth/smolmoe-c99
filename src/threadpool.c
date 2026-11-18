@@ -16,6 +16,7 @@ struct Pool {
 Pool *pool_create(uint32_t threads, Memory *mem) {
     Pool *p = (Pool *)mem_alloc(mem, 1, sizeof(*p));
     (void)threads;
+    if (!p) return NULL;
     p->threads = 1;
     return p;
 }
@@ -267,12 +268,14 @@ static void join_worker(Pool *p, uint32_t i) {
 Pool *pool_create(uint32_t threads, Memory *mem) {
     Pool *p = (Pool *)mem_alloc(mem, 1, sizeof(*p));
     uint32_t i;
+    if (!p) return NULL;
     if (!threads) threads = 1;
     threads = thread_limit(threads);
     p->threads = threads;
     pool_init_sync(p);
     p->handles = (Thread *)mem_alloc(mem, threads, sizeof(*p->handles));
     p->workers = (Worker *)mem_alloc(mem, threads, sizeof(*p->workers));
+    if (!p->handles || !p->workers) return NULL;
     for (i = 1; i < threads; ++i) {
         p->workers[i].pool = p;
         p->workers[i].index = i;

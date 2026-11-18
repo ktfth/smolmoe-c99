@@ -137,15 +137,18 @@ static void parse_value(Options *o, const char *opt, const char *value) {
     else if (!strcmp(opt, "--top-k")) o->top_k = parse_u32(value, UINT32_MAX, "top-k");
     else if (!strcmp(opt, "--top-p")) {
         double p = parse_real(value, "top-p");
+        sm_check(sm_last_status());
         if (!(p > 0 && p <= 1)) die("top-p must be in (0, 1]");
         o->top_p = (float)p;
     } else if (!strcmp(opt, "--temperature")) {
         double t = parse_real(value, "temperature");
+        sm_check(sm_last_status());
         if (t < 0 || t > 100 || (t > 0 && t < 1e-6)) die("temperature must be 0 or in [1e-6, 100]");
         o->temperature = (float)t;
     } else {
         die("unknown option: %s", opt);
     }
+    sm_check(sm_last_status());
 }
 
 static void parse_args(int argc, char **argv, Options *o) {
@@ -653,14 +656,17 @@ int main(int argc, char **argv) {
         uint32_t encode_cap = system_bytes > run.prompt_cap ? (uint32_t)system_bytes : run.prompt_cap;
         if (system_bytes > MAX_CONTEXT * PROMPT_BYTES_PER_TOKEN) die("--system is too long");
         id_cap = tokenizer_prepare(run.tok, encode_cap, &mem);
+        sm_check(sm_last_status());
     }
     run.prompt = (unsigned char *)mem_alloc(&mem, (size_t)run.prompt_cap + 1, 1);
     run.ids = (uint32_t *)mem_alloc(&mem, id_cap, sizeof(uint32_t));
     run.piece = (unsigned char *)mem_alloc(&mem, tokenizer_max_piece(run.tok), 1);
+    if (sm_failed()) die("%s", sm_last_error());
     out = output_to(stdout);
     if (!o.interactive) {
         run.np = tokenizer_encode(run.tok, run.prompt, read_prompt(&o, run.prompt, run.prompt_cap), run.ids, o.chat,
                                   o.system);
+        if (sm_failed()) die("%s", sm_last_error());
         if (run.np > context) die("encoded prompt (%u tokens) exceeds --context (%u)", run.np, context);
     }
 
@@ -690,6 +696,7 @@ int main(int argc, char **argv) {
         model.profiling = o.profile;
     }
     banned = (unsigned char *)mem_alloc(&mem, c.vocab, 1);
+    if (!banned) die("%s", sm_last_error());
     for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(run.tok, i);
     run.banned = banned;
     if (o.interactive) enable_tools(&run, context, &mem);

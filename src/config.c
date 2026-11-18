@@ -58,11 +58,12 @@ static void config_parse_body(const unsigned char *text, size_t size, Config *ou
     char line[LINE_CAPACITY];
     unsigned seen = 0;
     ByteReader r = byte_reader(text, size);
+    int got;
     memset(&c, 0, sizeof(c));
     fields[0] = &c.dim; fields[1] = &c.hidden; fields[2] = &c.layers; fields[3] = &c.heads;
     fields[4] = &c.kv_heads; fields[5] = &c.experts; fields[6] = &c.top_k; fields[7] = &c.vocab;
     fields[8] = &c.max_context; fields[9] = &c.shared; fields[10] = &c.bos; fields[11] = &c.eos;
-    while (br_line(&r, line, sizeof(line), "config")) {
+    while ((got = br_line(&r, line, sizeof(line), "config")) > 0) {
         char *s, *eq, *value, *comment;
         unsigned k;
         comment = strchr(line, '#');
@@ -107,7 +108,9 @@ static void config_parse_body(const unsigned char *text, size_t size, Config *ou
         } else {
             c.llama3_original = parse_u32(value, MAX_CONTEXT, s);
         }
+        if (sm_failed()) return;
     }
+    if (got < 0) return;
     if ((seen & ALL_REQUIRED) != ALL_REQUIRED) sm_fail(SM_ERR_FORMAT, "config is missing required fields");
     if (!(seen & (1u << KEY_HEAD_DIM))) {
         if (!c.heads || c.heads > c.dim || c.dim % c.heads)
@@ -123,6 +126,7 @@ static void config_parse_body(const unsigned char *text, size_t size, Config *ou
         !(c.eps > 0 && c.eps < 1) || !(c.theta > 1) || !isfinite(c.theta))
         sm_fail(SM_ERR_FORMAT, "invalid config dimensions or special token IDs");
     rope_defaults(&c, seen);
+    if (sm_failed()) return;
     *out = c;
 }
 
