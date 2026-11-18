@@ -13,8 +13,10 @@ int bundle_find(const unsigned char *data, uint64_t size, uint64_t *offset, uint
     off = rd_u64(t + 8);
     len = rd_u64(t + 16);
     if (off % BUNDLE_ALIGN || len < 16 || off > size - BUNDLE_TRAILER_BYTES ||
-        len != size - BUNDLE_TRAILER_BYTES - off)
-        die("corrupt bundle trailer");
+        len != size - BUNDLE_TRAILER_BYTES - off) {
+        sm_set(SM_ERR_FORMAT, "corrupt bundle trailer");
+        return 0;
+    }
     *offset = off;
     *length = len;
     return 1;
