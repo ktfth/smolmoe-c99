@@ -101,7 +101,7 @@ static void validate(const ModelFile *mf, const Blob *config, const Blob *tok, P
     Config c = config_parse(config->data, (size_t)config->size);
     Model model;
     tokenizer_parse(tok->data, (size_t)tok->size, c.vocab, mem);
-    model_init(&model, &c, mf, 1, 1, 1, pool, mem);
+    model_init(&model, &c, mf, 1, 1, 1, pool, mem, 0);
 }
 
 static void copy_runtime(FILE *f, const char *exe, uint64_t *written) {

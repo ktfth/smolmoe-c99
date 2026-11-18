@@ -3,11 +3,46 @@
  * batch sizes and kernels, routing accounting, sampling and stats.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { type Fixture, type ModelConfig, configText, writeFixture } from "./support/fixture";
 import { BINARY, SCALAR_BINARY, runFails, runOk, tempDir } from "./support/run";
+
+/** Minimal SMQBP1 ChatML vocabulary: byte tokens plus the two template markers. */
+function chatTokenizer(): Buffer {
+  const pieces: Buffer[] = [];
+  for (let i = 0; i < 256; i++) pieces.push(Buffer.from([i]));
+  pieces.push(Buffer.from("<|im_start|>"), Buffer.from("<|im_end|>"), Buffer.from("X"), Buffer.from("Y"));
+  const header = Buffer.alloc(24);
+  header.write("SMQBP1\0", 0, "ascii");
+  header[7] = 1;
+  header.writeUInt32LE(pieces.length, 8);
+  header.writeUInt32LE(0, 12);
+  header.writeUInt32LE(Buffer.concat(pieces).length, 16);
+  header.writeUInt32LE(256, 20);
+  const body: Buffer[] = [header];
+  for (let i = 0; i < pieces.length; i++) {
+    const rec = Buffer.alloc(8);
+    rec.writeUInt32LE(pieces[i].length, 0);
+    rec.writeUInt32LE(i === 256 || i === 257 ? 1 : 0, 4);
+    body.push(rec, pieces[i]);
+  }
+  return Buffer.concat(body);
+}
+
+function chatRun(args: readonly string[], input: string, env: Record<string, string> = {}) {
+  const proc = Bun.spawnSync([BINARY, ...args], {
+    stdin: new TextEncoder().encode(input),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, SMOLMOE_KV_CACHE: "0", ...env },
+  });
+  const stderr = proc.stderr.toString();
+  const line = stderr.split("\n").map((l) => l.replace(/^> /, "")).filter((l) => l.startsWith("{")).at(-1) ?? "";
+  if (proc.exitCode !== 0) throw new Error(`chat failed (${proc.exitCode}): ${stderr}`);
+  return { stdout: Buffer.from(proc.stdout).toString(), stderr, stats: JSON.parse(line) as { system_kv: string } };
+}
 
 const work = tempDir("runtime");
 let small: Fixture;
@@ -186,5 +221,62 @@ describe("perplexity", () => {
     expect(a.stats.perplexity).toBeGreaterThan(1);
     expect(Math.abs(Math.exp(a.stats.nll) / a.stats.perplexity - 1)).toBeLessThan(1e-5);
     expect(b.stats.nll).toBe(a.stats.nll);
+  });
+});
+
+describe("context window and KV cache", () => {
+  const tok = join(work.path, "chat.qbp");
+  beforeAll(() => writeFileSync(tok, chatTokenizer()));
+
+  const chatArgs = (extra: string[]) => ["--model", small.model, "--config", small.config, "--tokenizer", tok,
+    "--system", "ok", "--no-tools", "--memory-mib", "64", ...extra];
+
+  test("drops the oldest turns and keeps the system prompt", () => {
+    const r = chatRun(chatArgs(["--tokens", "8", "--context", "96"]), "aa\nbb\ncc\ndd\n/sair\n");
+    expect(r.stderr).toContain("(contexto cheio: mensagens antigas saíram da conversa)");
+    expect(r.stderr).not.toContain("conversa reiniciada");
+    expect(r.stdout.length).toBeGreaterThan(0);
+  });
+
+  test("refuses a message that cannot fit beside the system prompt", () => {
+    const r = chatRun(chatArgs(["--tokens", "20", "--context", "48"]), "aa\n/sair\n");
+    expect(r.stderr).toContain("(mensagem longa demais para o contexto; aumente --context)");
+    expect(r.stdout.trim()).toBe("");
+  });
+
+  test("reuses the system-prompt KV and ignores a corrupt file", () => {
+    const cache = join(work.path, "kv");
+    mkdirSync(cache, { recursive: true });
+    const args = chatArgs(["--tokens", "4", "--context", "128"]);
+    const env = { SMOLMOE_KV_CACHE: cache };
+    const first = chatRun(args, "aa\n/sair\n", env);
+    const second = chatRun(args, "aa\n/sair\n", env);
+    expect(first.stats.system_kv).toBe("miss");
+    expect(second.stats.system_kv).toBe("hit");
+    expect(second.stdout).toBe(first.stdout);
+    const files = readdirSync(cache).filter((name) => !name.endsWith(".tmp"));
+    expect(files.length).toBe(1);
+    const path = join(cache, files[0]!);
+    const bytes = readFileSync(path);
+    bytes[bytes.length - 1] ^= 0xff;
+    writeFileSync(path, bytes);
+    const third = chatRun(args, "aa\n/sair\n", env);
+    expect(third.stats.system_kv).toBe("miss");
+    expect(third.stdout).toBe(first.stdout);
+  });
+});
+
+describe("float16 KV cache", () => {
+  test("uses half the memory and matches across threads, batches and kernels", () => {
+    const f32 = runOk(args(small, ["--hash-logits"]));
+    const wide = runOk(args(small, ["--hash-logits", "--kv-f16", "--threads", "4", "--batch", "16"]));
+    const narrow = runOk(args(small, ["--hash-logits", "--kv-f16", "--threads", "1", "--batch", "1", "--scalar"]));
+    const scalar = runOk(args(small, ["--hash-logits", "--kv-f16", "--threads", "2", "--batch", "7"]), SCALAR_BINARY);
+    expect(wide.stats.kv_bytes * 2).toBe(f32.stats.kv_bytes);
+    expect(wide.stats.logits_hash).not.toBe(f32.stats.logits_hash);
+    expect(narrow.stats.logits_hash).toBe(wide.stats.logits_hash);
+    expect(scalar.stats.logits_hash).toBe(wide.stats.logits_hash);
+    expect(narrow.stdout.equals(wide.stdout)).toBe(true);
+    expect(scalar.stdout.equals(wide.stdout)).toBe(true);
   });
 });
