@@ -144,6 +144,9 @@ describe("Llama-shaped synthetic checkpoint", () => {
       const a = go(["--threads", 1, "--batch", 1]);
       expect(go(["--threads", 3, "--batch", 4])).toBe(a);
       expect(go(["--scalar"])).toBe(a);
+      const f16 = go(["--kv-f16", "--threads", 1, "--batch", 1]);
+      expect(go(["--kv-f16", "--threads", 2, "--batch", 3, "--scalar"])).toBe(f16);
+      expect(f16).not.toBe(a);
       runOk([...args(tiedOut), "--prompt", "zq", "--tokens", 3]);
     });
 
