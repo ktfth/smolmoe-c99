@@ -208,7 +208,7 @@ static void build_whole(QwenTokenizer *q, Memory *mem) {
 }
 
 QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
-    unsigned char rec[12], *data;
+    unsigned char rec[12] = {0}, *data;
     uint32_t i, total, used = 0;
     QwenTokenizer *q = (QwenTokenizer *)mem_alloc(mem, 1, sizeof(*q));
     if (!q) return NULL;
