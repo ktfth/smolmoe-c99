@@ -55,6 +55,7 @@ static int map_own_model(Desktop *d, uint64_t *offset, uint64_t *length, const c
     if (!self) return 0;
     if (try_map_file(self, &d->file, err, sizeof(err))) {
         if (bundle_find(d->file.data, d->file.size, offset, length)) return 1;
+        if (sm_failed()) return 0;
         unmap_file(&d->file);
     }
     if (!bundle_sibling_path(self, sibling, sizeof(sibling))) return 0;
@@ -148,6 +149,7 @@ static int map_model(Desktop *d, const char **path, char *err) {
             return fail(err, "não consegui abrir o arquivo (%s)", why);
         length = d->file.size;
     } else if (!map_own_model(d, &offset, &length, &beside)) {
+        if (sm_failed()) return fail_msg(err, sm_last_error());
         return fail(err, "%s", "este programa não traz um modelo: escolha um arquivo .smoe");
     } else if (beside) {
         *path = beside;

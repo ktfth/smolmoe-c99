@@ -387,6 +387,7 @@ static void open_source(Options *o, Source *s, Memory *mem) {
             s->present = 1;
             return;
         }
+        if (sm_failed()) die("%s", sm_last_error());
         unmap_file(&s->file);
     }
     /* Windows cannot run an executable of 4 GiB or more. `make` then leaves

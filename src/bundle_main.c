@@ -110,7 +110,9 @@ static void copy_runtime(FILE *f, const char *exe, uint64_t *written) {
     uint64_t offset, length, size;
     map_file(exe, &runtime);
     /* Re-bundling an already bundled runtime keeps only the program part. */
-    size = bundle_find(runtime.data, runtime.size, &offset, &length) ? offset : runtime.size;
+    if (bundle_find(runtime.data, runtime.size, &offset, &length)) size = offset;
+    else if (sm_failed()) die("%s", sm_last_error());
+    else size = runtime.size;
     write_bytes(f, runtime.data, (size_t)size);
     *written = size;
     unmap_file(&runtime);
