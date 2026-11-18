@@ -21,10 +21,58 @@
 #  define SM_PRINTF(f, a)
 #endif
 
+/* Recoverable failures of the library (load, parse, forward, sample, tokenize).
+ * SM_OK is the only zero value, so a status is also a C truth test for failure.
+ * The library records a status and returns it to the caller. die() is only for
+ * the CLI and the other top-level programs: it prints "smolmoe: " and exits. */
+typedef enum sm_status {
+    SM_OK = 0,
+    SM_ERR = 1,         /* unspecified; the message has the detail */
+    SM_ERR_IO = 2,      /* a file could not be opened or read */
+    SM_ERR_FORMAT = 3,  /* a model, config or tokenizer is not valid */
+    SM_ERR_RANGE = 4,   /* a size, context, id or seed is out of range */
+    SM_ERR_NUMERIC = 5, /* a non-finite weight or activation */
+    SM_ERR_NOMEM = 6,   /* the heap budget or the allocator refused */
+    SM_ERR_STATE = 7    /* the call does not fit the engine's current state */
+} sm_status;
+
+#define SM_MESSAGE_BYTES 1024
+
+typedef struct SmError {
+    sm_status status;
+    char message[SM_MESSAGE_BYTES];
+} SmError;
+
+/* The error from the latest library call on this thread. The pointer is valid
+ * until the next call on the same thread; copy it to keep it. Empty when the
+ * status is SM_OK. */
+sm_status sm_last_status(void);
+const char *sm_last_error(void);
+/* Copies that error into *err (SM_OK and an empty message when err is NULL). */
+void sm_error_get(SmError *err);
+
+/* Records a status and its message. Does not exit. SM_OK clears the message. */
+sm_status sm_set(sm_status status, const char *fmt, ...) SM_PRINTF(2, 3);
+
+/* True when this thread's latest library call failed. */
+static inline int sm_failed(void) { return sm_last_status() != SM_OK; }
+
+/* Records the error and returns from the current function. That function must
+ * return void; functions that return a value use sm_set() and return 0 or NULL.
+ * Callers check sm_failed() (or the status) and stop. */
+#define sm_fail(...) do { sm_set(__VA_ARGS__); return; } while (0)
+
+/* Runs fn(ctx) and returns the status it recorded. A failure does not exit. */
+typedef void (*SmProtectedFn)(void *ctx);
+sm_status sm_protect(SmProtectedFn fn, void *ctx);
+
+/* Top-level programs: die() with the stored message when status is not SM_OK. */
+void sm_check(sm_status status);
+
 SM_NORETURN void die(const char *fmt, ...) SM_PRINTF(1, 2);
-/* Called by die() with the message, after printing it and before exiting. It
- * may also never return: the desktop chat parks the failing thread and shows
- * the message in its window. NULL (the default): nothing. */
+/* Called by die() with the message, after printing it and before exiting.
+ * NULL (the default): nothing. The GUI uses this to record the message; it
+ * does not keep the process alive. */
 void die_set_handler(void (*handler)(const char *message));
 
 /* Counted heap. Every runtime allocation (tokenizer, activations, KV cache,
@@ -78,7 +126,7 @@ static inline int br_read(ByteReader *r, void *out, size_t n) {
 static inline int br_at_end(const ByteReader *r) { return r->pos == r->size; }
 
 /* Reads one line (with its newline) as a C string. Returns 1, 0 at end of
- * input, and dies on a line longer than cap-1 bytes or an embedded NUL. */
+ * input, and -1 (with a status) on a line longer than cap-1 bytes or a NUL. */
 int br_line(ByteReader *r, char *line, size_t cap, const char *what);
 
 uint64_t mix64(uint64_t x);

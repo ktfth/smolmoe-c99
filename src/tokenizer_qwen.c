@@ -49,7 +49,7 @@ struct QwenTokenizer {
 };
 
 static void read_exact(ByteReader *r, void *buf, size_t n, const char *what) {
-    if (!br_read(r, buf, n)) die("truncated SMQBP1 tokenizer: %s", what);
+    if (!br_read(r, buf, n)) sm_fail(SM_ERR_FORMAT, "truncated SMQBP1 tokenizer: %s", what);
 }
 
 static void insert_merge(QwenTokenizer *q, uint32_t i) {
@@ -57,7 +57,7 @@ static void insert_merge(QwenTokenizer *q, uint32_t i) {
     uint32_t slot = (uint32_t)mix64(((uint64_t)m->a << 32) | m->b) & (q->hash_size - 1);
     while (q->hash[slot]) {
         const QwenMerge *old = &q->merge[q->hash[slot] - 1];
-        if (old->a == m->a && old->b == m->b) die("duplicate SMQBP1 merge");
+        if (old->a == m->a && old->b == m->b) sm_fail(SM_ERR_FORMAT, "duplicate SMQBP1 merge");
         slot = (slot + 1) & (q->hash_size - 1);
     }
     q->hash[slot] = i + 1;
@@ -70,7 +70,7 @@ static void validate_merge(const QwenTokenizer *q, const QwenMerge *m) {
         q->length[m->a] + q->length[m->b] != q->length[m->out] ||
         memcmp(q->piece[m->out], q->piece[m->a], q->length[m->a]) ||
         memcmp(q->piece[m->out] + q->length[m->a], q->piece[m->b], q->length[m->b]))
-        die("invalid SMQBP1 merge");
+        sm_fail(SM_ERR_FORMAT, "invalid SMQBP1 merge");
 }
 
 static int piece_is(const QwenTokenizer *q, uint32_t id, const char *text) {
@@ -87,7 +87,7 @@ static uint32_t find_special(const QwenTokenizer *q, const char *text) {
 
 static uint32_t require_special(const QwenTokenizer *q, const char *text) {
     uint32_t id = find_special(q, text);
-    if (id == UINT32_MAX) die("SMQBP1 chat template needs a %s token", text);
+    if (id == UINT32_MAX) return sm_set(SM_ERR_FORMAT, "SMQBP1 chat template needs a %s token", text);
     return id;
 }
 
@@ -95,10 +95,10 @@ static uint32_t require_special(const QwenTokenizer *q, const char *text) {
 static uint32_t read_header(QwenTokenizer *q, ByteReader *f, uint32_t vocab) {
     unsigned char h[32];
     uint32_t version, total;
-    if (!br_read(f, h, 8) || memcmp(h, "SMQBP1\0", 7) || (h[7] != 1 && h[7] != 2)) die("invalid SMQBP1 tokenizer header");
+    if (!br_read(f, h, 8) || memcmp(h, "SMQBP1\0", 7) || (h[7] != 1 && h[7] != 2)) return sm_set(SM_ERR_FORMAT, "invalid SMQBP1 tokenizer header");
     version = h[7];
     if (!br_read(f, h + 8, version == 1 ? 16 : 24) || rd_u32(h + 8) != vocab || vocab < 258)
-        die("invalid SMQBP1 tokenizer header");
+        return sm_set(SM_ERR_FORMAT, "invalid SMQBP1 tokenizer header");
     q->nmerge = rd_u32(h + 12);
     total = rd_u32(h + 16);
     if (version == 1) {
@@ -111,13 +111,13 @@ static uint32_t read_header(QwenTokenizer *q, ByteReader *f, uint32_t vocab) {
         q->pretok = rd_u32(h + 24);
         q->chat = rd_u32(h + 28);
         q->im_start = UINT32_MAX;
-        if (q->normalizer > QBP_NORM_NFC) die("unsupported SMQBP1 normalizer %u", q->normalizer);
+        if (q->normalizer > QBP_NORM_NFC) return sm_set(SM_ERR_FORMAT, "unsupported SMQBP1 normalizer %u", q->normalizer);
         if (q->pretok < QBP_PRETOK_QWEN2 || q->pretok > QBP_PRETOK_LLAMA3)
-            die("unsupported SMQBP1 pre-tokenizer %u", q->pretok);
-        if (q->chat > QBP_CHAT_CHATML_BOS) die("unsupported SMQBP1 chat template %u", q->chat);
+            return sm_set(SM_ERR_FORMAT, "unsupported SMQBP1 pre-tokenizer %u", q->pretok);
+        if (q->chat > QBP_CHAT_CHATML_BOS) return sm_set(SM_ERR_FORMAT, "unsupported SMQBP1 chat template %u", q->chat);
     }
     if (q->nmerge > MAX_QBP_MERGES || total > MAX_PAYLOAD || (version == 1 && q->im_start >= vocab))
-        die("invalid SMQBP1 tokenizer dimensions");
+        return sm_set(SM_ERR_FORMAT, "invalid SMQBP1 tokenizer dimensions");
     return total;
 }
 
@@ -131,7 +131,7 @@ static void add_marker(QwenTokenizer *q, uint32_t idx, const char *text, const c
 /* BOS and EOS are control tokens; each template's markers are found by text. */
 static void resolve_template(QwenTokenizer *q) {
     uint32_t i;
-    if (!q->special[BOS_ID] || !q->special[EOS_ID]) die("SMQBP1 tokens 256 and 257 must be flagged special");
+    if (!q->special[BOS_ID] || !q->special[EOS_ID]) sm_fail(SM_ERR_FORMAT, "SMQBP1 tokens 256 and 257 must be flagged special");
     q->tool_open = q->tool_close = UINT32_MAX;
     for (i = 0; i < MAX_TRUSTED; ++i) {
         q->trusted[i].text = "";
@@ -140,17 +140,17 @@ static void resolve_template(QwenTokenizer *q) {
         q->trusted[i].id = UINT32_MAX;
     }
     if (q->chat == QBP_CHAT_CHATML || q->chat == QBP_CHAT_CHATML_BOS) {
-        if (!piece_is(q, EOS_ID, "<|im_end|>")) die("SMQBP1 token 257 must be <|im_end|> for ChatML");
+        if (!piece_is(q, EOS_ID, "<|im_end|>")) sm_fail(SM_ERR_FORMAT, "SMQBP1 token 257 must be <|im_end|> for ChatML");
         if (q->im_start == UINT32_MAX) q->im_start = require_special(q, "<|im_start|>");
         else if (!q->special[q->im_start] || !piece_is(q, q->im_start, "<|im_start|>"))
-            die("SMQBP1 im_start must be the <|im_start|> token");
+            sm_fail(SM_ERR_FORMAT, "SMQBP1 im_start must be the <|im_start|> token");
         add_marker(q, 0, "<tool_call>", "<tool_call>", 0);
         add_marker(q, 1, "</tool_call>", "</tool_call>", 0);
         q->tool_open = q->trusted[0].id;
         q->tool_close = q->trusted[1].id;
     } else if (q->chat == QBP_CHAT_PHI) {
-        if (!piece_is(q, BOS_ID, "<|endoftext|>")) die("SMQBP1 token 256 must be <|endoftext|> for the Phi template");
-        if (!piece_is(q, EOS_ID, "<|end|>")) die("SMQBP1 token 257 must be <|end|> for the Phi template");
+        if (!piece_is(q, BOS_ID, "<|endoftext|>")) sm_fail(SM_ERR_FORMAT, "SMQBP1 token 256 must be <|endoftext|> for the Phi template");
+        if (!piece_is(q, EOS_ID, "<|end|>")) sm_fail(SM_ERR_FORMAT, "SMQBP1 token 257 must be <|end|> for the Phi template");
         for (i = 0; i < PHI_ROLES; ++i) q->role[i] = require_special(q, PHI_ROLE_TOKENS[i]);
         add_marker(q, 0, "<|tool|>", "<|tool|>", 1);
         add_marker(q, 1, "<|/tool|>", "<|/tool|>", 1);
@@ -161,8 +161,8 @@ static void resolve_template(QwenTokenizer *q) {
         q->tool_open = q->trusted[2].id;
         q->tool_close = q->trusted[3].id;
     } else if (q->chat == QBP_CHAT_GEMMA) {
-        if (!piece_is(q, BOS_ID, "<bos>")) die("SMQBP1 token 256 must be <bos> for the Gemma template");
-        if (!piece_is(q, EOS_ID, "<end_of_turn>")) die("SMQBP1 token 257 must be <end_of_turn> for the Gemma template");
+        if (!piece_is(q, BOS_ID, "<bos>")) sm_fail(SM_ERR_FORMAT, "SMQBP1 token 256 must be <bos> for the Gemma template");
+        if (!piece_is(q, EOS_ID, "<end_of_turn>")) sm_fail(SM_ERR_FORMAT, "SMQBP1 token 257 must be <end_of_turn> for the Gemma template");
         q->im_start = require_special(q, "<start_of_turn>");
         add_marker(q, 0, "<tool_call>", "<tool_call>", 0);
         add_marker(q, 1, "</tool_call>", "</tool_call>", 0);
@@ -196,10 +196,11 @@ static void build_whole(QwenTokenizer *q, Memory *mem) {
     q->whole_size = 8;
     while (q->whole_size < count * 2) q->whole_size *= 2;
     q->whole = (uint32_t *)mem_alloc(mem, q->whole_size, sizeof(uint32_t));
+    if (!q->whole) return;
     for (i = 256; i < q->vocab; ++i) {
         uint32_t slot;
         if (q->special[i] || q->length[i] < 2) continue;
-        if (whole_piece(q, q->piece[i], q->length[i]) != UINT32_MAX) die("duplicate SMQBP1 piece");
+        if (whole_piece(q, q->piece[i], q->length[i]) != UINT32_MAX) sm_fail(SM_ERR_FORMAT, "duplicate SMQBP1 piece");
         slot = bytes_hash(q->piece[i], q->length[i]) & (q->whole_size - 1);
         while (q->whole[slot]) slot = (slot + 1) & (q->whole_size - 1);
         q->whole[slot] = i + 1;
@@ -207,10 +208,12 @@ static void build_whole(QwenTokenizer *q, Memory *mem) {
 }
 
 QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
-    unsigned char rec[12], *data;
+    unsigned char rec[12] = {0}, *data;
     uint32_t i, total, used = 0;
     QwenTokenizer *q = (QwenTokenizer *)mem_alloc(mem, 1, sizeof(*q));
+    if (!q) return NULL;
     total = read_header(q, f, vocab);
+    if (sm_failed()) return NULL;
     q->vocab = vocab;
     q->piece = (unsigned char **)mem_alloc(mem, vocab, sizeof(*q->piece));
     q->length = (uint32_t *)mem_alloc(mem, vocab, sizeof(uint32_t));
@@ -220,33 +223,53 @@ QwenTokenizer *qwen_load(ByteReader *f, uint32_t vocab, Memory *mem) {
     q->hash_size = 8;
     while (q->hash_size < q->nmerge * 2) q->hash_size *= 2;
     q->hash = (uint32_t *)mem_alloc(mem, q->hash_size, sizeof(uint32_t));
+    if (sm_failed()) return NULL;
     for (i = 0; i < vocab; ++i) {
         uint32_t n, flag;
         read_exact(f, rec, 8, "token record");
+        if (sm_failed()) return NULL;
         n = rd_u32(rec);
         flag = rd_u32(rec + 4);
-        if (!n || n > MAX_PIECE || n > total - used || flag > 1) die("invalid SMQBP1 piece");
+        if (!n || n > MAX_PIECE || n > total - used || flag > 1) {
+            sm_set(SM_ERR_FORMAT, "invalid SMQBP1 piece");
+            return NULL;
+        }
         q->piece[i] = data + used;
         q->length[i] = n;
         q->special[i] = (unsigned char)flag;
         used += n;
         if (n > q->max_piece) q->max_piece = n;
         read_exact(f, q->piece[i], n, "piece bytes");
-        if (i < 256 && (n != 1 || q->piece[i][0] != i || flag)) die("invalid SMQBP1 byte-token permutation");
+        if (sm_failed()) return NULL;
+        if (i < 256 && (n != 1 || q->piece[i][0] != i || flag)) {
+            sm_set(SM_ERR_FORMAT, "invalid SMQBP1 byte-token permutation");
+            return NULL;
+        }
     }
-    if (used != total) die("SMQBP1 piece byte count mismatch");
+    if (used != total) {
+        sm_set(SM_ERR_FORMAT, "SMQBP1 piece byte count mismatch");
+        return NULL;
+    }
     resolve_template(q);
+    if (sm_failed()) return NULL;
     if (q->pretok == QBP_PRETOK_LLAMA3) build_whole(q, mem);
+    if (sm_failed()) return NULL;
     for (i = 0; i < q->nmerge; ++i) {
         QwenMerge *m = &q->merge[i];
         read_exact(f, rec, 12, "merges");
+        if (sm_failed()) return NULL;
         m->a = rd_u32(rec);
         m->b = rd_u32(rec + 4);
         m->out = rd_u32(rec + 8);
         validate_merge(q, m);
+        if (sm_failed()) return NULL;
         insert_merge(q, i);
+        if (sm_failed()) return NULL;
     }
-    if (!br_at_end(f)) die("extra SMQBP1 tokenizer payload");
+    if (!br_at_end(f)) {
+        sm_set(SM_ERR_FORMAT, "extra SMQBP1 tokenizer payload");
+        return NULL;
+    }
     return q;
 }
 
@@ -275,7 +298,7 @@ static uint32_t merge_rank(const QwenTokenizer *q, uint32_t a, uint32_t b) {
 }
 
 static void push_id(uint32_t *ids, uint32_t *n, uint32_t cap, uint32_t id) {
-    if (*n >= cap) die("prompt workspace exceeded");
+    if (*n >= cap) sm_fail(SM_ERR_FORMAT, "prompt workspace exceeded");
     ids[(*n)++] = id;
 }
 
@@ -312,7 +335,7 @@ static void heap_sift_down(QwenBigram *h, uint32_t n, uint32_t i) {
 }
 
 static void heap_push(QwenBigram *h, uint32_t *n, uint32_t cap, QwenBigram b) {
-    if (*n >= cap) die("BPE merge heap exceeded");
+    if (*n >= cap) sm_fail(SM_ERR_FORMAT, "BPE merge heap exceeded");
     h[*n] = b;
     heap_sift_up(h, *n);
     *n += 1;
@@ -349,7 +372,7 @@ static void consider_pair(QwenTokenizer *q, uint32_t *heap_n, uint32_t left) {
  * symbols were already merged, or a token changed) fail the link or rank check. */
 static void merge_piece(QwenTokenizer *q, uint32_t start, uint32_t count, uint32_t *ids, uint32_t *n) {
     uint32_t k, heap_n = 0;
-    if (count > q->capacity) die("byte workspace exceeded");
+    if (count > q->capacity) sm_fail(SM_ERR_FORMAT, "byte workspace exceeded");
     if (!count) return;
     for (k = 0; k < count; ++k) {
         q->sym[k].id = q->normalized[start + k];
@@ -380,9 +403,10 @@ static void encode_text(QwenTokenizer *q, const unsigned char *s, uint32_t bytes
     uint32_t nc = q->normalizer == QBP_NORM_NFC ? normalize_nfc(s, bytes, q->cp, q->capacity)
                                                 : decode_utf8(s, bytes, q->cp, q->capacity);
     uint32_t i, j, total = 0;
+    if (sm_failed()) return;
     for (i = 0; i < nc; ++i) {
         q->offset[i] = total;
-        if (total + 4 > q->capacity * 4) die("byte workspace exceeded");
+        if (total + 4 > q->capacity * 4) sm_fail(SM_ERR_FORMAT, "byte workspace exceeded");
         total += write_utf8(q->cp[i], q->normalized + total);
         q->cls[i] = unicode_class_bits(q->cp[i]);
     }
@@ -393,12 +417,17 @@ static void encode_text(QwenTokenizer *q, const unsigned char *s, uint32_t bytes
           : q->pretok == QBP_PRETOK_GEMMA ? gemma_boundary(q->cp, q->cls, nc, i)
           : q->pretok == QBP_PRETOK_LLAMA3 ? llama3_boundary(q->cp, q->cls, nc, i)
                                            : qwen2_boundary(q->cp, q->cls, nc, i);
+        if (sm_failed() || j <= i) {
+            if (!sm_failed()) sm_set(SM_ERR_FORMAT, "pre-tokenizer made no progress");
+            return;
+        }
         start = q->offset[i];
         count = q->offset[j] - start;
         if (q->whole && count > 1 && (id = whole_piece(q, q->normalized + start, count)) != UINT32_MAX)
             push_id(ids, n, q->capacity, id);
         else
             merge_piece(q, start, count, ids, n);
+        if (sm_failed()) return;
     }
 }
 
@@ -479,7 +508,7 @@ static void phi_message(QwenTokenizer *q, const char *role, const unsigned char 
                         int open_assistant, uint32_t *ids, uint32_t *n) {
     uint32_t r, skip;
     for (r = 0; r < PHI_ROLES && strcmp(role, PHI_ROLE_NAMES[r]); ++r) {}
-    if (r == PHI_ROLES) die("the Phi chat template has no role %s", role);
+    if (r == PHI_ROLES) sm_fail(SM_ERR_FORMAT, "the Phi chat template has no role %s", role);
     push_id(ids, n, q->capacity, q->role[r]);
     skip = leading_space(text, bytes);
     encode_content(q, role, text + skip, bytes - skip, ids, n);
@@ -493,7 +522,7 @@ static void gemma_message(QwenTokenizer *q, const char *role, const unsigned cha
                           int open_assistant, uint32_t *ids, uint32_t *n) {
     const char *gemma_role = !strcmp(role, "assistant") ? "model" : !strcmp(role, "system") ? "user" : role;
     if (strcmp(role, "system") && strcmp(role, "user") && strcmp(role, "assistant") && strcmp(role, "model"))
-        die("the Gemma chat template has no role %s", role);
+        sm_fail(SM_ERR_FORMAT, "the Gemma chat template has no role %s", role);
     if (!strcmp(role, "system") && *n == 0) push_id(ids, n, q->capacity, BOS_ID);
     push_id(ids, n, q->capacity, q->im_start);
     encode_literal(q, gemma_role, ids, n);
@@ -511,8 +540,9 @@ static void chat_message(QwenTokenizer *q, const char *role, const unsigned char
                          int open_assistant, uint32_t *ids, uint32_t *n) {
     if (q->chat == QBP_CHAT_PHI) phi_message(q, role, text, bytes, open_assistant, ids, n);
     else if (q->chat == QBP_CHAT_GEMMA) gemma_message(q, role, text, bytes, open_assistant, ids, n);
-    else if (q->chat == QBP_CHAT_CHATML || q->chat == QBP_CHAT_CHATML_BOS) chatml_message(q, role, text, bytes, open_assistant, ids, n);
-    else die("this tokenizer has no chat template");
+    else if (q->chat == QBP_CHAT_CHATML || q->chat == QBP_CHAT_CHATML_BOS)
+        chatml_message(q, role, text, bytes, open_assistant, ids, n);
+    else sm_fail(SM_ERR_FORMAT, "this tokenizer has no chat template");
 }
 
 uint32_t qwen_encode(QwenTokenizer *q, const unsigned char *s, uint32_t bytes, uint32_t *ids,
@@ -538,14 +568,14 @@ uint32_t qwen_chat_turn(QwenTokenizer *q, const char *role, const unsigned char 
 
 uint32_t qwen_chat_close(QwenTokenizer *q, uint32_t *ids) {
     uint32_t n = 0;
-    if (q->chat == QBP_CHAT_NONE) die("this tokenizer has no chat template");
+    if (q->chat == QBP_CHAT_NONE) return sm_set(SM_ERR_FORMAT, "this tokenizer has no chat template");
     push_id(ids, &n, q->capacity, EOS_ID);
     if (q->chat == QBP_CHAT_CHATML || q->chat == QBP_CHAT_CHATML_BOS || q->chat == QBP_CHAT_GEMMA) encode_literal(q, "\n", ids, &n);
     return n;
 }
 
 uint32_t qwen_decode(const QwenTokenizer *q, uint32_t id, unsigned char *buf) {
-    if (id >= q->vocab) die("invalid SMQBP1 token ID %u", id);
+    if (id >= q->vocab) return sm_set(SM_ERR_FORMAT, "invalid SMQBP1 token ID %u", id);
     if (q->special[id]) return 0;
     memcpy(buf, q->piece[id], q->length[id]);
     return q->length[id];

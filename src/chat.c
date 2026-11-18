@@ -153,7 +153,7 @@ void chat_run(const ChatContext *c) {
     e->sink.text = reply_text;
     e->sink.reply_end = reply_end;
     e->sink.notice = notice;
-    engine_start(e);
+    sm_check(engine_start(e));
     if (c->terminal) {
         terminal_input_unbuffered();
         bracketed_paste_start();
@@ -183,7 +183,7 @@ void chat_run(const ChatContext *c) {
             follow_paste = 0;
             continue;
         }
-        engine_send(e, c->line, (uint32_t)len);
+        if (engine_send(e, c->line, (uint32_t)len) < 0) die("%s", sm_last_error());
         follow_paste = !message_after_bracket;
     }
 }

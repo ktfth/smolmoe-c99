@@ -16,6 +16,7 @@ struct Pool {
 Pool *pool_create(uint32_t threads, Memory *mem) {
     Pool *p = (Pool *)mem_alloc(mem, 1, sizeof(*p));
     (void)threads;
+    if (!p) return NULL;
     p->threads = 1;
     return p;
 }
@@ -148,9 +149,10 @@ static uint32_t thread_limit(uint32_t threads) {
     return threads < most ? threads : most;
 }
 
-static void start_worker(Pool *p, uint32_t i) {
+static int start_worker(Pool *p, uint32_t i) {
     sm_store_u32(&worker_slots[i - 1], (uint32_t)(uintptr_t)&p->workers[i], SM_ATOMIC_RELEASE);
     wake_all(&worker_slots[i - 1]);
+    return 1;
 }
 
 /* The worker clears its slot when it leaves the pool. */
@@ -243,12 +245,12 @@ static void *thread_main(void *arg) {
 }
 #endif
 
-static void start_worker(Pool *p, uint32_t i) {
+static int start_worker(Pool *p, uint32_t i) {
 #if defined(_WIN32)
     p->handles[i] = (HANDLE)_beginthreadex(NULL, 0, thread_main, &p->workers[i], 0, NULL);
-    if (!p->handles[i]) die("cannot create worker thread");
+    return p->handles[i] != NULL;
 #else
-    if (pthread_create(&p->handles[i], NULL, thread_main, &p->workers[i])) die("cannot create worker thread");
+    return pthread_create(&p->handles[i], NULL, thread_main, &p->workers[i]) == 0;
 #endif
 }
 
@@ -266,16 +268,24 @@ static void join_worker(Pool *p, uint32_t i) {
 Pool *pool_create(uint32_t threads, Memory *mem) {
     Pool *p = (Pool *)mem_alloc(mem, 1, sizeof(*p));
     uint32_t i;
+    if (!p) return NULL;
     if (!threads) threads = 1;
     threads = thread_limit(threads);
     p->threads = threads;
     pool_init_sync(p);
     p->handles = (Thread *)mem_alloc(mem, threads, sizeof(*p->handles));
     p->workers = (Worker *)mem_alloc(mem, threads, sizeof(*p->workers));
+    if (!p->handles || !p->workers) return NULL;
     for (i = 1; i < threads; ++i) {
         p->workers[i].pool = p;
         p->workers[i].index = i;
-        start_worker(p, i);
+        if (!start_worker(p, i)) {
+            /* Join the workers that did start (1 .. i-1). Slot i never ran. */
+            p->threads = i;
+            pool_destroy(p);
+            sm_set(SM_ERR_STATE, "cannot create worker thread");
+            return NULL;
+        }
     }
     return p;
 }

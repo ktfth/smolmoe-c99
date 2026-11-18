@@ -73,19 +73,19 @@ typedef struct Model {
 const char *model_phase_name(ModelPhase p);
 
 /* logit_rows: 1 for normal generation, or the batch size when every prompt
- * token's logits are needed (--trace, --hash-logits). */
-/* kv_f16 stores keys and values in float16. Default 0 keeps the f32 cache,
- * which is the bit-exact path the logit goldens are measured on. */
-void model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
-                uint32_t logit_rows, Pool *pool, Memory *mem, int kv_f16);
+ * token's logits are needed (--trace, --hash-logits). kv_f16 stores keys and
+ * values in float16; 0 keeps the f32 cache, the bit-exact path the logit
+ * goldens are measured on. SM_OK, or the reason in sm_last_error(). */
+sm_status model_init(Model *m, const Config *c, const ModelFile *f, uint32_t context, uint32_t batch,
+                     uint32_t logit_rows, Pool *pool, Memory *mem, int kv_f16);
 
 /* Runs tokens[0..n) at positions pos0..pos0+n-1. LOGITS_LAST writes the last
  * token's logits to m->logits; LOGITS_ALL writes n rows of vocab_size. */
-void model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode);
+sm_status model_forward(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, LogitsMode mode);
 
 /* Runs n tokens in batch-sized chunks; with last_logits, m->logits holds the
  * last token's logits afterwards. */
-void model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits);
+sm_status model_prefill(Model *m, const uint32_t *tokens, uint32_t n, uint32_t pos0, int last_logits);
 
 size_t model_kv_bytes(const Model *m);
 

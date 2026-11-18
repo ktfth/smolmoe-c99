@@ -64,12 +64,18 @@ static void notice_call(Notice *n, const Calls *calls, uint32_t k) {
 
 static void say(const Engine *e, const char *line) { e->sink.notice(e->sink.ctx, line); }
 
+static uint32_t next_token(Sampler *s, const float *logits) {
+    uint32_t token = 0;
+    if (sampler_next(s, logits, &token) != SM_OK) return 0;
+    return token;
+}
+
 /* The turn log is the token ids after the system prompt. Replaying it from
  * system_len rebuilds the KV cache with RoPE at the new positions; the system
  * prompt itself stays where engine_start put it. */
 static void remember(Engine *e, const uint32_t *ids, uint32_t n) {
     if (!n) return;
-    if (e->hist_len + n > e->hist_cap) die("internal error: history overflow");
+    if (e->hist_len + n > e->hist_cap) sm_fail(SM_ERR_STATE, "internal error: history overflow");
     memcpy(e->hist + e->hist_len, ids, n * sizeof(uint32_t));
     e->hist_len += n;
 }
@@ -82,19 +88,19 @@ static uint32_t committed(const Engine *e) {
 
 static void close_turn(Engine *e) {
     uint32_t done = committed(e);
-    if (e->hist_len < done || e->nturns >= e->hist_cap) die("internal error: turn log");
+    if (e->hist_len < done || e->nturns >= e->hist_cap) sm_fail(SM_ERR_STATE, "internal error: turn log");
     e->turns[e->nturns++] = e->hist_len - done;
 }
 
 /* keep is a turn boundary: the prefix of turns that sums to it. */
 static void trim_hist(Engine *e, uint32_t keep) {
     uint32_t n = 0, i;
-    if (keep > e->hist_len) die("internal error: trim past the history");
+    if (keep > e->hist_len) sm_fail(SM_ERR_STATE, "internal error: trim past the history");
     for (i = 0; i < e->nturns; ++i) {
         if (n + e->turns[i] > keep) break;
         n += e->turns[i];
     }
-    if (n != keep) die("internal error: trim is not on a turn boundary");
+    if (n != keep) sm_fail(SM_ERR_STATE, "internal error: trim is not on a turn boundary");
     e->nturns = i;
     e->hist_len = keep;
     e->pos = e->system_len + keep;
@@ -162,7 +168,8 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
         e->banned[EOS_ID] = (unsigned char)(i == 0);
         token = (i == 0 && prefix_len >= 2 && prefix[prefix_len - 1] == '}' && prefix[prefix_len - 2] == '}')
               ? e->tool_close
-              : sampler_next(e->sampler, m->logits);
+              : next_token(e->sampler, m->logits);
+        if (sm_failed()) return generated;
         if (i == 0 && !prefix && e->tools) {
             if (!e->banned[e->tool_open] && token != e->tool_open && chosen_tool(e->message)) {
                 aborted = 1;
@@ -175,7 +182,10 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
                        (e->piece[0] == '{' || e->piece[0] == '[' || e->piece[0] == '<' || e->piece[0] == '`')) {
                     banned_toks[nb++] = token;
                     e->banned[token] = 1;
-                    token = sampler_next(e->sampler, m->logits);
+                    if (sampler_next(e->sampler, m->logits, &token) != SM_OK) {
+                        for (k = 0; k < nb; ++k) e->banned[banned_toks[k]] = 0;
+                        return generated;
+                    }
                 }
                 for (k = 0; k < nb; ++k) e->banned[banned_toks[k]] = 0;
             }
@@ -185,13 +195,15 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
         if (e->tools && token == e->tool_open) open_call(calls);
         else if (e->tools && token == e->tool_close) calls->open = 0;
         else shown += emit(e, calls, token, &last);
+        if (sm_failed()) return generated;
         if (prefix && calls->open && !calls->truncated[0] && calls->len[0] > prefix_len &&
             calls->text[0][calls->len[0] - 1] == '}' &&
             tool_call_grounded(calls->text[0], calls->len[0], e->message)) {
             calls->open = 0;
         }
-        model_forward(m, &token, 1, e->pos, LOGITS_LAST);
+        if (model_forward(m, &token, 1, e->pos, LOGITS_LAST) != SM_OK) return generated;
         remember(e, &token, 1);
+        if (sm_failed()) return generated;
         ++e->pos;
         ++generated;
         if (prefix && !calls->open) break;
@@ -208,17 +220,21 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
 /* Prefills `n` tokens already in e->ids, streams the reply and closes it. */
 static void assistant_turn(Engine *e, uint32_t n, Calls *calls, const char *prefix, uint32_t prefix_len) {
     double t0 = now_seconds(), t1;
-    model_prefill(e->model, e->ids, n, e->pos, 1);
+    if (model_prefill(e->model, e->ids, n, e->pos, 1) != SM_OK) return;
     remember(e, e->ids, n);
+    if (sm_failed()) return;
     e->pos += n;
     t1 = now_seconds();
     e->stats.generated += reply(e, t0, calls, prefix, prefix_len);
+    if (sm_failed()) return;
     e->stats.prefill_seconds += t1 - t0;
     e->stats.decode_seconds += now_seconds() - t1;
     e->stats.prompt_tokens += n;
     n = tokenizer_chat_close(e->tok, e->ids);
-    model_prefill(e->model, e->ids, n, e->pos, 0);
+    if (sm_failed()) return;
+    if (model_prefill(e->model, e->ids, n, e->pos, 0) != SM_OK) return;
     remember(e, e->ids, n);
+    if (sm_failed()) return;
     e->pos += n;
     close_turn(e);
 }
@@ -229,10 +245,11 @@ static uint32_t tool_results(Engine *e, const Calls *calls) {
     char response[RESPONSE_BYTES], name[TOOL_NAME_MAX], result[TOOL_RESULT_MAX];
     ToolClock now = e->fixed_clock ? *e->fixed_clock : tool_clock_now();
     size_t used = 0;
+    if (sm_failed()) return 0;
     uint32_t k;
     if (e->model->c.gemma3) {
         int w = snprintf(response, sizeof(response), "%s", e->message);
-        if (w < 0 || (size_t)w >= sizeof(response)) die("internal error: tool response overflow");
+        if (w < 0 || (size_t)w >= sizeof(response)) return sm_set(SM_ERR_STATE, "internal error: tool response overflow");
         used = (size_t)w;
     }
     for (k = 0; k < calls->count; ++k) {
@@ -258,7 +275,7 @@ static uint32_t tool_results(Engine *e, const Calls *calls) {
             w = snprintf(response + used, sizeof(response) - used, "%s<tool_response>\n%s\n</tool_response>",
                          k ? "\n" : "", result);
         }
-        if (w < 0 || (size_t)w >= sizeof(response) - used) die("internal error: tool response overflow");
+        if (w < 0 || (size_t)w >= sizeof(response) - used) return sm_set(SM_ERR_STATE, "internal error: tool response overflow");
         used += (size_t)w;
         ++e->stats.tool_calls;
     }
@@ -307,7 +324,7 @@ static void replay(Engine *e) {
     double t0 = now_seconds();
     e->pos = e->system_len;
     if (e->hist_len) {
-        model_prefill(e->model, e->hist, e->hist_len, e->pos, 0);
+        if (model_prefill(e->model, e->hist, e->hist_len, e->pos, 0) != SM_OK) return;
         e->pos += e->hist_len;
     }
     e->stats.prefill_seconds += now_seconds() - t0;
@@ -316,9 +333,15 @@ static void replay(Engine *e) {
 
 static int ensure_room(Engine *e, uint32_t n) {
     uint32_t drop = 0, skip = 0;
-    if (e->pos != e->system_len + e->hist_len) die("internal error: history and KV diverged");
+    if (e->pos != e->system_len + e->hist_len) {
+        sm_set(SM_ERR_STATE, "internal error: history and KV diverged");
+        return 0;
+    }
     if (fits_at(e, e->pos, n)) return 1;
-    if (e->anchor > e->hist_len) die("internal error: anchor past the history");
+    if (e->anchor > e->hist_len) {
+        sm_set(SM_ERR_STATE, "internal error: anchor past the history");
+        return 0;
+    }
     while (drop < e->nturns && skip + e->turns[drop] <= e->anchor &&
            !fits_at(e, e->system_len + (e->hist_len - skip), n)) {
         skip += e->turns[drop++];
@@ -346,9 +369,10 @@ static int forced_reply(Engine *e, Calls *calls, uint32_t len) {
     uint32_t n, plen;
     if (!tool || !(plen = (uint32_t)tools_call_prefix(tool, prefix, sizeof(prefix)))) return 0;
     n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)e->message, len, 1, e->ids);
+    if (sm_failed()) return 0;
     e->ids[n++] = e->tool_open;
     n += tokenizer_encode(e->tok, (const unsigned char *)prefix, plen, e->ids + n, 0, NULL);
-    if (!ensure_room(e, n)) return 0;
+    if (sm_failed() || !ensure_room(e, n)) return 0;
     note.len = 0;
     notice_put(&note, "(chamada refeita com ");
     notice_name(&note, tool);
@@ -376,6 +400,7 @@ static void drop_stopped_call(Engine *e, Calls *calls) {
 static void first_reply(Engine *e, Calls *calls, uint32_t len) {
     const unsigned char *text = (const unsigned char *)e->message;
     uint32_t n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
+    if (sm_failed()) return;
     offer_tools(e, e->tools && tools_relevant(e->message));
     assistant_turn(e, n, calls, NULL, 0);
     if (e->stopped) {
@@ -394,6 +419,7 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
     }
     offer_tools(e, 0);
     n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
+    if (sm_failed()) return;
     assistant_turn(e, n, calls, NULL, 0);
 }
 
@@ -404,7 +430,7 @@ static int tool_round(Engine *e, Calls *calls) {
     if (!calls->count) return 1;
     if (e->model->c.gemma3) trim_hist(e, e->anchor);
     n = tool_results(e, calls);
-    if (!ensure_room(e, n)) return 0;
+    if (sm_failed() || !ensure_room(e, n)) return 0;
     offer_tools(e, 0);
     assistant_turn(e, n, calls, NULL, 0);
     return 1;
@@ -416,7 +442,7 @@ static int tool_round(Engine *e, Calls *calls) {
 static void answer(Engine *e, uint32_t len) {
     Calls calls;
     first_reply(e, &calls, len);
-    if (e->stopped || tool_round(e, &calls)) return;
+    if (sm_failed() || e->stopped || tool_round(e, &calls)) return;
     trim_hist(e, e->anchor);
     say(e, "(o resultado da ferramenta não cabe no contexto; aumente --context)");
 }
@@ -429,8 +455,13 @@ const char *engine_tools_prompt(Tokenizer *tok, const char *system, uint32_t con
     *needed = 0;
     if (!tokenizer_tool_markers(tok, tool_open, tool_close)) return NULL;
     text = (char *)mem_alloc(mem, cap, 1);
-    if (!tools_system_prompt(system, text, cap)) die("internal error: tool declarations do not fit");
+    if (!text) return NULL;
+    if (!tools_system_prompt(system, text, cap)) {
+        sm_set(SM_ERR_STATE, "internal error: tool declarations do not fit");
+        return NULL;
+    }
     n = tokenizer_chat_turn(tok, "system", (const unsigned char *)text, (uint32_t)strlen(text), 0, ids);
+    if (sm_failed()) return NULL;
     if (n > context / 2) {
         *needed = 2 * n;
         return NULL;
@@ -621,7 +652,7 @@ static void save_system_kv(Engine *e, const char *dir, const unsigned char key[3
     if (!replace_file(tmp, final_path)) remove(tmp);
 }
 
-void engine_start(Engine *e) {
+static void engine_start_body(Engine *e) {
     const char *tools_hdr = e->model->c.gemma3 ? strstr(e->system, "\n\n# Tools") : NULL;
     uint32_t sys_len = tools_hdr ? (uint32_t)(tools_hdr - e->system) : (uint32_t)strlen(e->system);
     uint32_t n = tokenizer_chat_turn(e->tok, "system", (const unsigned char *)e->system, sys_len, 0, e->ids);
@@ -630,15 +661,17 @@ void engine_start(Engine *e) {
     int cached = kv_directory(dir, sizeof(dir));
     int keyed = 0;
     double t0;
-    if (!e->mem) die("internal error: engine has no heap");
+    if (!e->mem) sm_fail(SM_ERR_STATE, "internal error: engine has no heap");
     memset(&e->stats, 0, sizeof(e->stats));
+    if (sm_failed()) return;
     if (!e->hist) {
         e->hist_cap = e->model->context;
         e->hist = (uint32_t *)mem_alloc(e->mem, e->hist_cap, sizeof(uint32_t));
         e->turns = (uint32_t *)mem_alloc(e->mem, e->hist_cap, sizeof(uint32_t));
+        if (sm_failed()) return;
     }
     e->hist_len = e->nturns = e->anchor = 0;
-    if (n + CLOSE_RESERVE + 16 > e->model->context) die("the system prompt does not fit in --context");
+    if (n + CLOSE_RESERVE + 16 > e->model->context) sm_fail(SM_ERR_RANGE, "the system prompt does not fit in --context");
     keyed = cached && system_kv_key(e, e->ids, n, key);
     if (keyed) {
         char path[CACHE_PATH], hex[65];
@@ -649,7 +682,7 @@ void engine_start(Engine *e) {
     }
     if (e->stats.system_kv != 2) {
         t0 = now_seconds();
-        model_prefill(e->model, e->ids, n, 0, 0);
+        if (model_prefill(e->model, e->ids, n, 0, 0) != SM_OK) return;
         e->stats.prefill_seconds = now_seconds() - t0;
         e->stats.prompt_tokens = n;
         if (keyed) {
@@ -661,7 +694,19 @@ void engine_start(Engine *e) {
     e->message = NULL;
 }
 
-int engine_send(Engine *e, const char *text, uint32_t len) {
+typedef struct EngineStartArgs {
+    Engine *e;
+} EngineStartArgs;
+
+static void engine_start_protected(void *ctx) { engine_start_body(((EngineStartArgs *)ctx)->e); }
+
+sm_status engine_start(Engine *e) {
+    EngineStartArgs a;
+    a.e = e;
+    return sm_protect(engine_start_protected, &a);
+}
+
+static int engine_send_body(Engine *e, const char *text, uint32_t len) {
     uint32_t n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)text, len, 1, e->ids);
     e->stopped = 0;
     /* Anything already committed may leave; the message about to be added may not. */
@@ -675,6 +720,34 @@ int engine_send(Engine *e, const char *text, uint32_t len) {
     e->message = NULL;
     ++e->stats.turns;
     return 1;
+}
+
+typedef struct EngineSendArgs {
+    Engine *e;
+    const char *text;
+    uint32_t len;
+    int rc;
+} EngineSendArgs;
+
+static void engine_send_protected(void *ctx) {
+    EngineSendArgs *a = (EngineSendArgs *)ctx;
+    a->rc = engine_send_body(a->e, a->text, a->len);
+}
+
+int engine_send(Engine *e, const char *text, uint32_t len) {
+    EngineSendArgs a;
+    sm_status st;
+    a.e = e;
+    a.text = text;
+    a.len = len;
+    a.rc = -1;
+    st = sm_protect(engine_send_protected, &a);
+    if (st != SM_OK) {
+        e->pos = e->system_len;
+        e->stopped = 1;
+        return -1;
+    }
+    return a.rc;
 }
 
 void engine_reset(Engine *e) {

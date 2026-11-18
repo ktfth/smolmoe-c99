@@ -6,11 +6,10 @@
  * (smolmoe-bundle), or from <stem>.smoe beside that executable when the
  * weights do not fit in a Windows executable.
  *
- * Any thread may call these functions, one call at a time. Expected problems
- * (a missing file, a file that is not a model, a model without chat) come back
- * as messages; anything else goes through die(), so a window installs a die
- * handler (util.h) to show it. This header needs no other runtime header, so
- * C++ includes it directly. */
+ * Any thread may call these functions, one call at a time. A file that is not a
+ * chat model, a weight that is not finite, or a failure while answering comes
+ * back as a message (sm_last_error() for desktop_send's -1). This header needs
+ * no other runtime header, so C++ includes it directly. */
 #ifndef SMOLMOE_DESKTOP_H
 #define SMOLMOE_DESKTOP_H
 
@@ -57,11 +56,13 @@ typedef struct Desktop Desktop;
 int desktop_has_bundle(void);
 
 /* Opens a model and processes the system prompt. Returns NULL with a message
- * in Portuguese in err when the file cannot be a chat model. */
+ * in err when the file cannot be a chat model (Portuguese for a file that is
+ * not a .smoe; the engine's own sentence otherwise). Does not exit. */
 Desktop *desktop_open(const DesktopOptions *o, char err[DESKTOP_ERROR_BYTES]);
 
 /* Answers one message (UTF-8, len bytes). Returns 0, with a notice, when it
- * does not fit in the context. */
+ * does not fit in the context, and -1 when the reply failed (sm_last_error();
+ * the conversation is back at the system prompt). */
 int desktop_send(Desktop *d, const char *text, size_t len);
 
 /* Starts a new conversation, keeping the processed system prompt. */
