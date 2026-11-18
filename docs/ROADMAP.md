@@ -103,15 +103,17 @@ duplo clique ou executar. O caminho é incremental, e cada etapa entrega valor s
   idêntico ao da execução com três arquivos, e a partida é igual ou mais rápida.
 - **Chat multi-turno**, que é o que torna o duplo clique útil: o cache KV é reaproveitado entre turnos, com
   `/limpar` e `/sair`. No Windows a entrada é lida em UTF-16 e convertida, para os acentos chegarem intactos.
-- **Pendentes desta trilha:**
-  - Assinatura de código no CI (Authenticode depois do bundle; no macOS, notarização com o payload numa seção Mach-O).
-  - Fallback para `<nome>.smoe` ao lado do executável, para modelos acima de 4 GiB no Windows.
+- **Feito:** fallback para `<nome>.smoe` ao lado do executável quando o conjunto passaria de 4 GiB no Windows.
+  `make phi` e `make phi-gui` gravam o runtime sem o modelo e o `.smoe` com o mesmo nome; o programa carrega esse
+  vizinho quando não há trailer.
+- **Pendente desta trilha:** assinatura de código no CI (Authenticode depois do bundle; no macOS, notarização com o payload numa seção Mach-O).
 
 ### Etapa 3: um binário para todos os sistemas (opcional)
 
 O llamafile usa a [Cosmopolitan libc](https://github.com/jart/cosmopolitan) (formato APE): um mesmo arquivo roda em
-Windows, Linux, macOS e BSDs, em x86-64 e ARM64. Como o runtime é C99 puro com a plataforma isolada em dois arquivos, a
-porta para o `cosmocc` é viável. As duas peças que exigem cuidado:
+Windows, Linux, macOS e BSDs, em x86-64 e ARM64. O runtime é C99 com as extensões de compilador isoladas em
+`src/compat.h`, e a plataforma fica em poucos arquivos, então a porta para o `cosmocc` continua viável. As duas peças
+que exigem cuidado:
 
 - `src/platform.c`: o Cosmopolitan expõe POSIX mesmo no Windows, então o ramo POSIX deve servir quase sem mudança.
 - Seleção de kernel em tempo de execução: o binário "fat" x86-64 + ARM64 precisa compilar AVX2 e NEON em fatias

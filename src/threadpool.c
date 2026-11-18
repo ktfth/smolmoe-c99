@@ -3,6 +3,7 @@
 #endif
 
 #include "threadpool.h"
+#include "compat.h"
 
 /* WebAssembly without threads (the single-thread WASI build): the caller does
  * all the work. Results are the same for any thread count. */
@@ -123,7 +124,7 @@ static unsigned char worker_stacks[WASM_WORKERS][WASM_WORKER_STACK] __attribute_
 __attribute__((import_module("smolmoe"), import_name("workers"))) uint32_t host_workers(void);
 
 static void wait_while(uint32_t *word, uint32_t value) {
-    while (__atomic_load_n(word, __ATOMIC_ACQUIRE) == value)
+    while (sm_load_u32(word, SM_ATOMIC_ACQUIRE) == value)
         __builtin_wasm_memory_atomic_wait32((int32_t *)(void *)word, (int32_t)value, -1);
 }
 
@@ -137,7 +138,7 @@ static void pool_free_sync(Pool *p) { (void)p; }
 static void pool_sleep(Pool *p, uint32_t seen) { wait_while(&p->generation, seen); }
 
 static void pool_wake(Pool *p) {
-    __atomic_add_fetch(&p->generation, 1, __ATOMIC_RELEASE);
+    sm_add_fetch_u32(&p->generation, 1, SM_ATOMIC_RELEASE);
     wake_all(&p->generation);
 }
 
@@ -148,7 +149,7 @@ static uint32_t thread_limit(uint32_t threads) {
 }
 
 static void start_worker(Pool *p, uint32_t i) {
-    __atomic_store_n(&worker_slots[i - 1], (uint32_t)(uintptr_t)&p->workers[i], __ATOMIC_RELEASE);
+    sm_store_u32(&worker_slots[i - 1], (uint32_t)(uintptr_t)&p->workers[i], SM_ATOMIC_RELEASE);
     wake_all(&worker_slots[i - 1]);
 }
 
@@ -156,7 +157,7 @@ static void start_worker(Pool *p, uint32_t i) {
 static void join_worker(Pool *p, uint32_t i) {
     uint32_t w;
     (void)p;
-    while ((w = __atomic_load_n(&worker_slots[i - 1], __ATOMIC_ACQUIRE)) != 0)
+    while ((w = sm_load_u32(&worker_slots[i - 1], SM_ATOMIC_ACQUIRE)) != 0)
         __builtin_wasm_memory_atomic_wait32((int32_t *)(void *)&worker_slots[i - 1], (int32_t)w, -1);
 }
 
@@ -174,13 +175,13 @@ static void pool_free_sync(Pool *p) {
 
 static void pool_sleep(Pool *p, uint32_t seen) {
     mutex_lock(&p->lock);
-    while (__atomic_load_n(&p->generation, __ATOMIC_ACQUIRE) == seen) cond_wait(&p->wake, &p->lock);
+    while (sm_load_u32(&p->generation, SM_ATOMIC_ACQUIRE) == seen) cond_wait(&p->wake, &p->lock);
     mutex_unlock(&p->lock);
 }
 
 static void pool_wake(Pool *p) {
     mutex_lock(&p->lock);
-    __atomic_add_fetch(&p->generation, 1, __ATOMIC_RELEASE);
+    sm_add_fetch_u32(&p->generation, 1, SM_ATOMIC_RELEASE);
     cond_broadcast(&p->wake);
     mutex_unlock(&p->lock);
 }
@@ -194,7 +195,7 @@ static void worker_loop(Worker *w) {
     uint32_t seen = 0;
     for (;;) {
         uint32_t generation, spins = 0;
-        while ((generation = __atomic_load_n(&p->generation, __ATOMIC_ACQUIRE)) == seen) {
+        while ((generation = sm_load_u32(&p->generation, SM_ATOMIC_ACQUIRE)) == seen) {
             if (++spins < SPIN_LIMIT) {
                 cpu_relax();
                 continue;
@@ -202,9 +203,9 @@ static void worker_loop(Worker *w) {
             pool_sleep(p, seen);
         }
         seen = generation;
-        if (__atomic_load_n(&p->stop, __ATOMIC_ACQUIRE)) return;
+        if (sm_load_u32(&p->stop, SM_ATOMIC_ACQUIRE)) return;
         p->task(p->ctx, w->index, p->threads);
-        __atomic_add_fetch(&p->done, 1, __ATOMIC_ACQ_REL);
+        sm_add_fetch_u32(&p->done, 1, SM_ATOMIC_ACQ_REL);
     }
 }
 
@@ -222,8 +223,8 @@ __attribute__((export_name("sm_worker_main"))) void sm_worker_main(uint32_t slot
     if (slot >= WASM_WORKERS) return;
     for (;;) {
         wait_while(&worker_slots[slot], 0);
-        worker_loop((Worker *)(uintptr_t)__atomic_load_n(&worker_slots[slot], __ATOMIC_ACQUIRE));
-        __atomic_store_n(&worker_slots[slot], 0, __ATOMIC_RELEASE);
+        worker_loop((Worker *)(uintptr_t)sm_load_u32(&worker_slots[slot], SM_ATOMIC_ACQUIRE));
+        sm_store_u32(&worker_slots[slot], 0, SM_ATOMIC_RELEASE);
         wake_all(&worker_slots[slot]);
     }
 }
@@ -287,10 +288,10 @@ void pool_run(Pool *p, PoolTask task, void *ctx) {
     }
     p->task = task;
     p->ctx = ctx;
-    __atomic_store_n(&p->done, 0, __ATOMIC_RELAXED);
+    sm_store_u32(&p->done, 0, SM_ATOMIC_RELAXED);
     pool_wake(p);
     task(ctx, 0, p->threads);
-    for (spins = 0; __atomic_load_n(&p->done, __ATOMIC_ACQUIRE) != p->threads - 1; ++spins) {
+    for (spins = 0; sm_load_u32(&p->done, SM_ATOMIC_ACQUIRE) != p->threads - 1; ++spins) {
         /* Yield once spinning stops paying off (e.g. more threads than cores). */
         if (spins < SPIN_LIMIT) cpu_relax();
         else thread_yield();
@@ -305,7 +306,7 @@ void pool_destroy(Pool *p) {
     uint32_t i;
     if (!p) return;
     if (p->threads > 1) {
-        __atomic_store_n(&p->stop, 1, __ATOMIC_RELEASE);
+        sm_store_u32(&p->stop, 1, SM_ATOMIC_RELEASE);
         pool_wake(p);
         for (i = 1; i < p->threads; ++i) join_worker(p, i);
     }

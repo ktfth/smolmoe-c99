@@ -1,6 +1,8 @@
 /* Operating-system layer: Linux/macOS (POSIX), Windows (Win32) and WebAssembly
  * (POSIX through WASI or Emscripten, without processes or a terminal).
- * Everything outside platform.c, process.c and threadpool.c is portable C99. */
+ * Compiler extensions used elsewhere (__atomic_*, the AVX2 probe, per-function
+ * target attributes) are isolated in compat.h. The sources are C99 plus those
+ * GCC/Clang extensions, not strict C99, and they are not built with MSVC. */
 #ifndef SMOLMOE_PLATFORM_H
 #define SMOLMOE_PLATFORM_H
 

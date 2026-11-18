@@ -4,6 +4,7 @@
  * kernel, including a weight of -128 (abs as an unsigned byte, activation
  * flipped). */
 #include "kernels.h"
+#include "compat.h"
 #include "f16.h"
 #include "util.h"
 
@@ -14,22 +15,22 @@
 
 #  define SM_LOAD(p) _mm256_loadu_si256((const __m256i *)(const void *)(p))
 
-__attribute__((always_inline, target("avx2,f16c")))
+SM_TARGET_AVX2_INLINE
 static inline __m256 sm_zero(void) { return _mm256_setzero_ps(); }
 
-__attribute__((always_inline, target("avx2,f16c")))
+SM_TARGET_AVX2_INLINE
 static inline __m256 sm_acc(__m256 acc, float scale, __m256i prod) {
     return _mm256_add_ps(acc, _mm256_mul_ps(_mm256_set1_ps(scale), _mm256_cvtepi32_ps(prod)));
 }
 
-__attribute__((always_inline, target("avx2,f16c")))
+SM_TARGET_AVX2_INLINE
 static inline float sm_reduce8(__m256 acc) {
     __m128 s = _mm_add_ps(_mm256_castps256_ps128(acc), _mm256_extractf128_ps(acc, 1));
     __m128 t = _mm_add_ps(s, _mm_movehl_ps(s, s));
     return _mm_cvtss_f32(_mm_add_ss(t, _mm_shuffle_ps(t, t, 1)));
 }
 
-__attribute__((always_inline, target("avx2,f16c,fma")))
+SM_TARGET_AVX2_FMA_INLINE
 static inline __m256 sm_fma(__m256 acc, float scale, __m256i prod) {
     return _mm256_fmadd_ps(_mm256_set1_ps(scale), _mm256_cvtepi32_ps(prod), acc);
 }
@@ -59,7 +60,7 @@ static void sm_interleave2(const unsigned char *a, const unsigned char *b, unsig
 }
 
 /* Same high-bit expansion as the AVX2 Q5 dot. */
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static __m256i sm_unpack_q5(const unsigned char *body) {
     const __m256i v = _mm256_broadcastsi128_si256(_mm_loadu_si128((const __m128i *)(const void *)(body + 4)));
     const __m256i low = _mm256_and_si256(_mm256_blend_epi32(v, _mm256_srli_epi16(v, 4), 0xF0), _mm256_set1_epi8(15));
@@ -71,7 +72,7 @@ static __m256i sm_unpack_q5(const unsigned char *body) {
     return _mm256_sub_epi8(_mm256_or_si256(low, _mm256_and_si256(bits, _mm256_set1_epi8(16))), _mm256_set1_epi8(16));
 }
 
-__attribute__((target("avx2,f16c")))
+SM_TARGET_AVX2
 static void sm_q5_interleave2(const unsigned char *a, const unsigned char *b, unsigned char *dst, uint32_t nb) {
     uint32_t i;
     for (i = 0; i < nb; ++i, a += Q5_BLOCK_BYTES, b += Q5_BLOCK_BYTES, dst += 2 * Q8_BLOCK_BYTES) {

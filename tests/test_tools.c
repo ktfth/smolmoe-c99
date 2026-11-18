@@ -443,7 +443,7 @@ static void test_fuzz_calls(void) {
         size_t len = strlen(seed), m, muts = fuzz_rnd(8);
         char *call;
         const char *user;
-        int ran, neutral_msg = fuzz_rnd(2);
+        int ran, neutral_msg = (int)fuzz_rnd(2);
         memcpy(work, seed, len);
         if (!fuzz_rnd(10)) { /* pure noise */
             len = fuzz_rnd(200);

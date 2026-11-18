@@ -464,7 +464,7 @@ static void put_bytes(const char *rel, const char *data, size_t n, unsigned mode
     }
     fwrite(data, 1, n, f);
     fclose(f);
-    chmod(p, mode);
+    chmod(p, (mode_t)mode);
 }
 
 static void put(const char *rel, const char *text, unsigned mode) { put_bytes(rel, text, strlen(text), mode); }
@@ -473,7 +473,7 @@ static void dir(const char *rel, unsigned mode) {
     char p[512];
     snprintf(p, sizeof(p), "%s%s", root, rel);
     mkdir(p, 0755);
-    chmod(p, mode);
+    chmod(p, (mode_t)mode);
 }
 
 static void link_to(const char *target, const char *rel) {

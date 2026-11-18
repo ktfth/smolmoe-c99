@@ -171,8 +171,8 @@ build/smolmoe-gui models/qwen2.5-0.5b-instruct/model.smoe
 | `make qwen-q5-gui` | `qwen-pt-q5-gui` | A janela com o Qwen Q5 |
 | `make gemma` | `gemma-3-1b` | Terminal com o Gemma 3 1B; baixa e converte na primeira vez (requer `HF_TOKEN` e aceite dos termos) |
 | `make gemma-gui` | `gemma-3-1b-gui` | A janela com o Gemma 3 1B |
-| `make phi` | `phi-4-mini` | Terminal com o Phi-4-mini (4,4 GB). Os pesos vêm de `make phi-weights`: 7,7 GB de download e ~13 GB de disco. |
-| `make phi-gui` | `phi-4-mini-gui` | A janela com o Phi-4-mini |
+| `make phi` | `phi-4-mini` | Terminal com o Phi-4-mini (4,4 GB). Os pesos vêm de `make phi-weights`: 7,7 GB de download e ~13 GB de disco. No Windows o programa e o `.smoe` ficam lado a lado, porque o executável passaria de 4 GiB. |
+| `make phi-gui` | `phi-4-mini-gui` | A janela com o Phi-4-mini. No Windows, o mesmo par programa + `.smoe`. |
 | `make stories` | `tinystories` | Historinhas em inglês, para testar se roda |
 | `make all-models` | todos acima | O Phi entra só quando os pesos já estão em `models/` |
 

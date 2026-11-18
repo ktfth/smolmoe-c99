@@ -111,6 +111,25 @@ describe("self-contained executable", () => {
     expect(r.stderr).toContain("usage:");
   });
 
+  test("a sibling .smoe is loaded when the executable has no trailer", () => {
+    const reference = threeFiles();
+    const exe = join(work.path, `side${EXE_SUFFIX}`);
+    copyFileSync(BINARY, exe);
+    copyFileSync(single, join(work.path, "side.smoe"));
+    const bundled = runOk([...PROMPT], exe);
+    expect(bundled.stats.logits_hash).toBe(reference.stats.logits_hash);
+    expect(bundled.stdout.equals(reference.stdout)).toBe(true);
+  });
+
+  test("a sibling stem drops a .EXE suffix in any case", () => {
+    const reference = threeFiles();
+    const exe = join(work.path, "Side.EXE");
+    copyFileSync(BINARY, exe);
+    copyFileSync(single, join(work.path, "Side.smoe"));
+    const bundled = runOk([...PROMPT], exe);
+    expect(bundled.stats.logits_hash).toBe(reference.stats.logits_hash);
+  });
+
   test("chat mode explains that a plain-text model cannot chat", () => {
     expect(runFails([], app)).toMatch(/chat needs a chat model/);
   });
