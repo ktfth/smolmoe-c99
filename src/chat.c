@@ -7,8 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#define PASTE_MS 100u        /* lines closer than this were pasted together: nobody types that fast */
-#define LINE_ROOM 16u        /* the least room worth reading another pasted line into */
+#define PASTE_MS 100u         /* lines closer than this were pasted together: nobody types that fast */
+#define PASTE_FOLLOW_MS 1000u /* a later piece of that paste; longer than PASTE_MS because the reply may already be done */
+#define LINE_ROOM 16u         /* the least room worth reading another pasted line into */
 #define PASTE_START "\033[200~" /* bracketed paste markers (POSIX terminals, process.h) */
 #define PASTE_END "\033[201~"
 #define MARKER_LEN 6
@@ -17,6 +18,13 @@
  * one yet. The end can come after the newline of the last pasted line, so the
  * state carries over to the next read. One chat per process. */
 static int in_paste;
+/* This line's own text follows a paste-end marker (the marker started the line). */
+static int after_bracket;
+/* The message just read started that way; the next line is a new action. */
+static int message_after_bracket;
+/* The previous message may still be receiving pieces (not a finished bracketed paste). */
+static int follow_paste;
+static double last_line_s;
 
 static int is_blank(const char *s) {
     for (; *s; ++s)
@@ -32,12 +40,16 @@ static int is_command(const char *line, const char *a, const char *b) {
  * pasted: text read inside the markers, or a line that starts or ends a paste. */
 static int strip_paste_markers(char *line, int *len) {
     int r = 0, w = 0, pasted = in_paste;
+    after_bracket = 0;
     while (r < *len) {
         if (!strncmp(line + r, PASTE_START, MARKER_LEN)) {
             in_paste = pasted = 1;
             r += MARKER_LEN;
         } else if (!strncmp(line + r, PASTE_END, MARKER_LEN)) {
-            if (!w) pasted = 0; /* the end of a paste that came before this line's own text */
+            if (!w) { /* the end of a paste that came before this line's own text */
+                pasted = 0;
+                after_bracket = 1;
+            }
             in_paste = 0;
             r += MARKER_LEN;
         } else {
@@ -61,13 +73,22 @@ static int read_line(char *buf, size_t cap, int *cut, int *pasted) {
  *  - the terminal's paste markers, where there are any (bracketed paste);
  *  - lines arriving within PASTE_MS of each other: nobody types that fast;
  *  - text already waiting when the prompt shows, so not typed in answer to it
- *    (the rest of a paste that came in pieces, or typing ahead).
+ *    (the rest of a paste that came in pieces, or typing ahead);
+ *  - a line that follows the previous message within PASTE_FOLLOW_MS, when that
+ *    message was not a finished bracketed paste. A fast reply shows the prompt
+ *    again before the next piece arrives; a person does not type a new command
+ *    that soon. A line that begins at the paste-end marker is a new action.
  * Piped input stays one message per line. */
 static int read_message(const ChatContext *c, int *truncated, int *pasted) {
-    int len;
+    int len, resumed;
     *pasted = c->terminal && input_pending(0);
     len = read_line(c->line, c->line_cap, truncated, pasted);
+    message_after_bracket = 0;
     if (len < 0 || !c->terminal) return len;
+    resumed = after_bracket;
+    message_after_bracket = resumed;
+    if (!*pasted && follow_paste && !resumed && (now_seconds() - last_line_s) * 1000.0 < PASTE_FOLLOW_MS)
+        *pasted = 1;
     while (input_pending(PASTE_MS)) {
         size_t room = c->line_cap - (size_t)len;
         char spill[256];
@@ -87,6 +108,7 @@ static int read_message(const ChatContext *c, int *truncated, int *pasted) {
         len += 1 + more;
         *truncated |= cut;
     }
+    last_line_s = now_seconds();
     return len;
 }
 
@@ -145,15 +167,23 @@ void chat_run(const ChatContext *c) {
         fflush(stderr);
         len = read_message(c, &truncated, &pasted);
         if (len < 0 || is_command(c->line, "/sair", "/exit")) break;
-        if (is_blank(c->line)) continue;
+        if (is_blank(c->line)) {
+            if (message_after_bracket) follow_paste = 0; /* a paste-end marker on its own line */
+            continue;
+        }
         if (truncated)
             fprintf(stderr, "(mensagem cortada em %d bytes; aumente --context para mensagens maiores)\n", len);
         if (is_command(c->line, "/limpar", "/reset")) {
             engine_reset(e);
+            follow_paste = 0;
             fputs("(conversa reiniciada)\n", stderr);
             continue;
         }
-        if (command_line(c, truncated, pasted)) continue;
+        if (command_line(c, truncated, pasted)) {
+            follow_paste = 0;
+            continue;
+        }
         engine_send(e, c->line, (uint32_t)len);
+        follow_paste = !message_after_bracket;
     }
 }

@@ -140,8 +140,8 @@ describe.skipIf(!qwen || !WINDOWS)("!comando in a Windows console", () => {
   }, SLOW);
 
   test("a paste that arrives in two pieces does not run its second piece", () => {
-    /* The second piece comes 300 ms later, past the paste window but while the model answers the first:
-     * it is already waiting when the prompt shows, so it was not typed in answer to it. */
+    /* 300 ms is past the 100 ms same-read window. The reply may already be done; the second
+     * piece is still the same paste because it follows the first line inside the follow window. */
     const dir = folder("console-gap");
     const steps = [`?${READY}`, "texto copiado\n", "+300", "!echo x > lacuna.txt\n", "+6000", "/sair\n"];
     const r = Bun.spawnSync([CONSOLE_INPUT_BINARY, ...steps, "--", BINARY,
@@ -191,7 +191,8 @@ describe.skipIf(!qwen || process.platform !== "linux" || !Bun.which("script"))("
   }, SLOW);
 
   test("a paste that arrives in two pieces does not run its second piece", () => {
-    /* The second piece comes 300 ms later, while the model answers the first. */
+    /* 300 ms is past the 100 ms same-read window. The reply may already be on
+     * screen; the second piece still belongs to the paste (PASTE_FOLLOW_MS). */
     const dir = folder("pty-gap");
     const input = `${prompts(1)}; printf 'texto\\n'; sleep 0.3; printf '!echo x > lacuna.txt\\n'; ${prompts(3)}; ` +
       "printf '/sair\\n'";
