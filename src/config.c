@@ -1,4 +1,5 @@
 #include "config.h"
+#include "finite.h"
 #include "platform.h"
 #include "util.h"
 
@@ -33,7 +34,7 @@ static void rope_defaults(Config *c, unsigned seen) {
         sm_fail(SM_ERR_FORMAT, "invalid rope_attention_factor: must be in (0, %g]", MAX_ROPE_FACTOR);
     if ((seen & (1u << KEY_SLIDING_WINDOW)) && (!c->sliding_window || c->sliding_window > c->max_context))
         sm_fail(SM_ERR_FORMAT, "invalid sliding_window %u: must be in 1..%u", c->sliding_window, c->max_context);
-    if (!(c->local_theta > 1) || !isfinite(c->local_theta))
+    if (!(c->local_theta > 1) || !sm_finite(c->local_theta))
         sm_fail(SM_ERR_FORMAT, "invalid rope_local_theta: must be finite and > 1");
     if ((seen & LLAMA3_KEYS) && (seen & LLAMA3_KEYS) != LLAMA3_KEYS)
         sm_fail(SM_ERR_FORMAT, "llama3 RoPE scaling needs all of rope_llama3_factor, rope_llama3_low_freq_factor, "
@@ -41,7 +42,7 @@ static void rope_defaults(Config *c, unsigned seen) {
     c->llama3_rope = (seen & LLAMA3_KEYS) != 0;
     if (c->llama3_rope &&
         (!(c->llama3_factor >= 1 && c->llama3_factor <= MAX_ROPE_FACTOR) || !(c->llama3_low > 0) ||
-         !(c->llama3_high > c->llama3_low) || !isfinite(c->llama3_high) || !c->llama3_original))
+         !(c->llama3_high > c->llama3_low) || !sm_finite(c->llama3_high) || !c->llama3_original))
         sm_fail(SM_ERR_FORMAT, "invalid llama3 RoPE scaling: needs factor in [1, %g], 0 < low_freq_factor < high_freq_factor "
                 "and original_context > 0", MAX_ROPE_FACTOR);
 }
@@ -123,7 +124,7 @@ static void config_parse_body(const unsigned char *text, size_t size, Config *ou
         !c.kv_heads || c.heads % c.kv_heads || !c.experts || c.experts > 4096 ||
         !c.top_k || c.top_k > c.experts || c.shared > 16 || c.vocab < 258 || c.vocab > 258 + MAX_MERGES ||
         !c.max_context || c.max_context > MAX_CONTEXT || c.bos != BOS_ID || c.eos != EOS_ID ||
-        !(c.eps > 0 && c.eps < 1) || !(c.theta > 1) || !isfinite(c.theta))
+        !(c.eps > 0 && c.eps < 1) || !(c.theta > 1) || !sm_finite(c.theta))
         sm_fail(SM_ERR_FORMAT, "invalid config dimensions or special token IDs");
     rope_defaults(&c, seen);
     if (sm_failed()) return;

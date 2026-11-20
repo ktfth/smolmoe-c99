@@ -1,4 +1,5 @@
 #include "kernels.h"
+#include "finite.h"
 #include "compat.h"
 #include "f16.h"
 #include "util.h"
@@ -1093,7 +1094,7 @@ void quantize_q5_row(const float *x, uint32_t cols, unsigned char *out) {
                 uint16_t h = f32_to_f16(vmax / -(14.5f + 0.1f * (float)k));
                 float d = f16_to_f32(h);
                 double err;
-                if (d == 0 || !isfinite(d)) continue;
+                if (d == 0 || !sm_finite(d)) continue;
                 err = q5_error(x, n, d);
                 if (best < 0 || err < best) { best = err; best_d = d; half = h; }
             }

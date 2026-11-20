@@ -1,4 +1,5 @@
 #include "calc.h"
+#include "finite.h"
 #include "textfold.h"
 
 #include <math.h>
@@ -117,7 +118,7 @@ static int parse_number(Parser *ps, double *out) {
     return 1;
 }
 
-static int finite_or_fail(Parser *ps, double v) { return isfinite(v) ? 1 : fail(ps, "resultado grande demais"); }
+static int finite_or_fail(Parser *ps, double v) { return sm_finite(v) ? 1 : fail(ps, "resultado grande demais"); }
 
 /* Like take(), for an operator written as a word: "de" must not match "desconto". */
 static int take_word(Parser *ps, const char *word) {
@@ -236,7 +237,7 @@ static int evaluate(Parser *ps, const char *expr, const char *context, double *o
     skip_spaces(ps);
     if (*ps->p == ')') return fail(ps, "parêntese sem abertura");
     if (*ps->p) return fail(ps, "expressão inválida perto de '%.*s'", quote_len(ps->p, 12), ps->p);
-    if (!isfinite(*out)) return fail(ps, "resultado grande demais");
+    if (!sm_finite(*out)) return fail(ps, "resultado grande demais");
     return 1;
 }
 
@@ -255,7 +256,7 @@ void calc_format(double v, char *out, size_t cap) {
     int decimals;
     double a = fabs(v);
     if (!cap) return;
-    if (!isfinite(v) || a >= 1e15 || (a > 0 && a < 1e-9)) { /* "0" would be false for 1e-14 */
+    if (!sm_finite(v) || a >= 1e15 || (a > 0 && a < 1e-9)) { /* "0" would be false for 1e-14 */
         snprintf(out, cap, "%g", v);
         for (dot = out; *dot; ++dot)
             if (*dot == '.') *dot = ',';

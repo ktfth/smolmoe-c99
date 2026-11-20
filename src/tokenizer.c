@@ -1,4 +1,5 @@
 #include "tokenizer.h"
+#include "finite.h"
 #include "config.h"
 #include "platform.h"
 #include "tokenizer_qwen.h"
@@ -75,7 +76,7 @@ static void score_load(Tokenizer *t, ByteReader *f, Memory *mem) {
         if (!br_read(f, rec, 8)) sm_fail(SM_ERR_FORMAT, "truncated score-BPE record");
         t->scores[i] = rd_f32(rec);
         n = rd_u32(rec + 4);
-        if (!isfinite(t->scores[i]) || !n || n > t->max_piece || n > total - used) sm_fail(SM_ERR_FORMAT, "invalid score-BPE record");
+        if (!sm_finite(t->scores[i]) || !n || n > t->max_piece || n > total - used) sm_fail(SM_ERR_FORMAT, "invalid score-BPE record");
         t->pieces[i] = data + used;
         t->lengths[i] = n;
         used += n;

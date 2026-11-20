@@ -1,4 +1,5 @@
 #include "modelfile.h"
+#include "finite.h"
 #include "compat.h"
 #include "f16.h"
 #include "kernels.h"
@@ -143,17 +144,17 @@ static int verify_units(const Tensor *t, uint64_t begin, uint64_t end) {
     if (t->dtype == DTYPE_Q8) {
         for (u = begin; u < end; ++u) {
             float s = rd_f32(t->data + u * Q8_BLOCK_BYTES);
-            if (!isfinite(s) || s < 0) return 0;
+            if (!sm_finite(s) || s < 0) return 0;
         }
     } else if (t->dtype == DTYPE_Q5) {
         /* Q5 scales are signed: the extreme value maps to the -8 side. */
         for (u = begin; u < end; ++u) {
             const unsigned char *p = t->data + u * Q5_BLOCK_BYTES;
-            if (!isfinite(f16_to_f32((uint16_t)(p[0] | p[1] << 8)))) return 0;
+            if (!sm_finite(f16_to_f32((uint16_t)(p[0] | p[1] << 8)))) return 0;
         }
     } else {
         for (u = begin; u < end; ++u)
-            if (!isfinite(rd_f32(t->data + u * 4))) return 0;
+            if (!sm_finite(rd_f32(t->data + u * 4))) return 0;
     }
     return 1;
 }

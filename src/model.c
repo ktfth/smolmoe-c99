@@ -1,4 +1,5 @@
 #include "model.h"
+#include "finite.h"
 #include "compat.h"
 #include "kernels.h"
 #include "platform.h"
@@ -259,7 +260,7 @@ static int mat_rows(const MatTask *t, const MatItem *it, uint32_t r0, uint32_t r
         for (r = r0; r < r1; ++r) {
             float *cell = &it->y[(size_t)k * w->rows + r];
             if (it->bias) *cell += it->bias[r];
-            ok &= isfinite(*cell);
+            ok &= sm_finite(*cell);
         }
     return ok;
 }
@@ -335,7 +336,7 @@ static int rmsnorm(const float *x, const float *w, float *y, uint32_t n, float e
     uint32_t i;
     for (i = 0; i < n; ++i) sq += x[i] * x[i];
     inv = 1.0f / sqrtf(sq / (float)n + eps);
-    if (!isfinite(sq) || !isfinite(inv)) return -1;
+    if (!sm_finite(sq) || !sm_finite(inv)) return -1;
     for (i = 0; i < n; ++i) y[i] = x[i] * inv * w[i];
     return 0;
 }
@@ -580,7 +581,7 @@ static void route_tokens(Model *m, uint32_t n) {
             w[k] = 1.0f / (1.0f + exp_det(-r[best]));
             total += w[k];
         }
-        if (!(total > 0) || !isfinite(total)) sm_fail(SM_ERR_NUMERIC, "router underflow/overflow");
+        if (!(total > 0) || !sm_finite(total)) sm_fail(SM_ERR_NUMERIC, "router underflow/overflow");
         for (k = 0; k < c->top_k; ++k) w[k] /= total;
     }
 }
