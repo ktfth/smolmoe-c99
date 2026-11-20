@@ -948,6 +948,128 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
   Resultado: **sem ferramentas**. Mesmo só com o `data_atual`, a seção de ferramentas do template do Qwen, escrita em
   inglês, puxava as respostas para o inglês. Os 4 pilotos estão marcados como piloto e não entram na decisão. O
   runtime ganhou `--tools LISTA` nesse caminho e o mantém.
+## Iteração 13: conferência dos comandos das respostas
+
+**Motivo:** o Dolphin 3.0 (Llama 3.2 1B) inventa cmdlets, parâmetros e opções, e o comando sai errado. Ele não tem
+`<tool_call>` no vocabulário, então não pode pedir uma busca: quem confere é o runtime.
+
+**Etapa 1, a conferência depois da resposta (entrou):** PowerShell (o próprio analisador e `Get-Command`, num processo
+que fica aberto: ~14 ms por resposta, ~90–190 ms com nome inventado) e bash/sh (separador em C, `command -v` e o
+manual da máquina, com um índice embutido do Ubuntu 24.04 para máquinas sem manual). Nada da resposta roda. O aviso
+nunca diz "certo": diz o que conferiu e que não sabe se o comando faz o que foi pedido.
+
+**Etapa 2, a documentação no prompt antes da resposta (medida, ainda sem código no runtime):** 40 perguntas de
+manutenção (20 PowerShell, 20 bash), congeladas em `b139e9c` antes da primeira rodada, Dolphin Q8 guloso, 220 tokens.
+Nota de cada resposta: "útil e sem nada inventado" (contém um comando que resolve e a conferência não acha nome,
+parâmetro, opção ou subcomando inventado). `scripts/cmdcheck/eval-docs.ts`.
+
+| Braço | O que vai no prompt | Útil e sem nada inventado | Inventado | Tokens de prompt | Segundos por resposta |
+|---|---|---|---|---|---|
+| A | só a pergunta | 26/40 (PS 10, bash 16) | 6 | 57 | 11,0 |
+| B (teto) | a sintaxe real dos comandos certos | **37/40** (PS 19, bash 18) | 1 | 334 | 22,3 |
+| C | A; se a conferência achou algo, de novo com as achadas e a sintaxe do que elas citam | 28/40 | 3 | 88 | 12,5 |
+
+- **B contra A:** 13 ganhos, 2 perdas, p = 0,0074 (sinal exato). Uma das perdas é erro da métrica congelada:
+  `systemctl is-active nginx` responde certo, e a expressão só aceitava `systemctl status`.
+- **C contra A:** 2 ganhos, 0 perdas, p = 0,50. Não mostrou ganho.
+- **Por quê:** a maior parte das falhas de A não é nome inventado, é **comando errado mas real** (`Get-NetAdapter` com
+  uma propriedade que não existe, `cron` para tempo ligado). A conferência não vê isso, então C quase nunca refaz, e
+  quando refaz documenta os comandos errados. O ganho de B vem de **saber qual comando usar**, e a documentação que
+  B leva nomeia esse comando.
+- **Custo:** a documentação de B dobra o tempo por resposta no Dolphin (+277 tokens de prompt, +11 s); a ajuda do bash
+  (40 linhas de `--help`) pesa mais que a sintaxe do PowerShell (480 contra 188 tokens).
+
+**Decisão:** C não entra. A etapa 2 só vale com uma **busca da pergunta para o comando** antes da resposta, medida
+contra A e contra o teto B, com documentação mais curta. Até lá, nada no runtime.
+
+**Etapa 2, o livro de comandos (no 1º teste não entrou; passou no 2º e está no runtime, abaixo):** 62 tarefas de manutenção em português, cada uma ligada a
+comandos reais de PowerShell e bash com um comentário curto (`scripts/cmdcheck/livro.json`). Uma busca por palavras
+em comum (pesadas pela raridade, com um radical tosco, tudo fácil em C) põe no prompt até duas tarefas, cerca de 80
+tokens (braço D). O livro foi congelado em `c42b497` **antes** de ler o conjunto de teste: os 42 pedidos de comando
+(20 PowerShell, 22 apt) do conjunto do adversário de 2026-11-10, copiados sem editar (`tests/evals/livro`), cada um
+com a sua rubrica (obrigatórios e proibidos nos blocos de código).
+
+| Conjunto | A (só a pergunta) | D (com o livro) | D contra A | Tokens de prompt | Segundos por resposta |
+|---|---|---|---|---|---|
+| teste (42, nunca visto) | 8/42 (PS 2, apt 6) | 13/42 (PS 6, apt 7) | 7 ganhos, 2 perdas, p = 0,18 | 76 → 158 | 8,6 → 9,9 |
+| antigo (40, a busca foi ajustada nele) | 26/40 | 31/40 | 7 ganhos, 2 perdas, p = 0,18 | 57 → 139 | 11,0 → 10,4 |
+
+- **A direção é boa, mas não há prova:** nem no conjunto em que a busca foi ajustada o ganho é significativo.
+  - Quatro vitórias são de conteúdo: `Restart-Service`, `-Recurse -Descending`, `LastBootUpTime` e `Checkpoint-Computer`
+    no lugar de um cmdlet inventado.
+  - Uma vitória é cópia do exemplo do livro: `docker logs`.
+  - As outras duas vitórias e as duas derrotas são de formato: o comando certo veio entre crases, fora de bloco, e a
+    rubrica exige bloco.
+  - Aceitando também código entre crases (leitura feita depois de ver os dados, só como sensibilidade), fica A 13,
+    D 15, com 5 ganhos e 3 perdas.
+- **O limite é o modelo, não a busca.** A busca achou alguma tarefa em 41 das 42 perguntas, e só os exemplos do livro já
+  cumpririam a rubrica de 21. Mesmo assim, o Dolphin acerta 13. Ele raramente adapta o exemplo à pergunta (o pacote
+  `htop`, `-First 10`, `--tail 100`) e às vezes troca o bloco por prosa.
+- **Custo:** +82 tokens e +1,3 s por resposta no conjunto de teste, cerca de um nono do tempo extra da documentação de B (+11 s).
+- **Achados de passagem (entraram):** conferir os exemplos do livro revelou falsos positivos na conferência do bash, que
+  as respostas do modelo também sofreriam (`5724cab`):
+  - as opções do `apt` ficam no manual do `apt-get`;
+  - os manuais em mdoc (`ssh-keygen -t`);
+  - os manuais próprios de subcomando (`docker-ps`);
+  - os builtins do bash (`history`);
+  - o mesmo aviso repetido por linha.
+  Também revelou um erro meu no livro: `icacls` com parênteses sem aspas no PowerShell.
+
+**Decisão:** o livro não entra no runtime por enquanto: a regra era entrar só com ganho medido. Para decidir com
+poder estatístico, o próximo passo é um conjunto de teste maior (cerca de 120 pedidos, escrito por quem não viu o
+livro), e não mais ajuste da busca.
+
+**Regra do próximo teste (fixada em 2026-11-13, antes de o conjunto existir):** o livro, a busca e o prompt ficam como
+em `c42b497`; o dev só copia o conjunto, sem editar, e roda A e D uma vez, com o mesmo binário e os mesmos parâmetros.
+- **Entra no runtime** se D ganhar de A no teste do sinal pareado, bilateral, com p < 0,05 nos itens novos, e se em
+  nenhuma das duas famílias (PowerShell, apt) D tiver mais perdas que ganhos.
+- **Não entra** em qualquer outro caso, inclusive com p entre 0,05 e 0,10. Leituras alternativas (código entre crases,
+  rubrica corrigida) aparecem só como sensibilidade e não mudam a decisão.
+- Poder: com a proporção vista aqui (7 ganhos para 2 perdas, um em cada cinco itens discordando), 120 itens dão
+  uns 26 discordantes, e o esperado (20 contra 6) tem p ≈ 0,01. Se o efeito real for metade disso, o teste
+  provavelmente não o pega, e o livro fica de fora.
+
+**Resultado do próximo teste (2026-11-13): passou nas duas condições, o livro entra.** O conjunto
+(`tests/evals/livro-2`, sha do `perguntas.json` `ebaa6468…4424`) foi escrito por um subagente adversário que não leu o
+livro, a busca nem os resultados: 120 pedidos, 60 PowerShell e 60 apt, metade em palavras do dia a dia. Cada item tem uma
+resposta certa e uma errada, conferidas pela nota do eval (120 e 120). Binário `build/dev` sha `32e3514f…8c19`, o mesmo
+da rodada anterior; o livro e a busca não mudaram desde `c42b497`.
+
+| Recorte | A | D | D contra A |
+|---|---|---|---|
+| todas (a regra) | 42/120 | 58/120 | 23 ganhos, 7 perdas, **p = 0,005** |
+| PowerShell | 13/60 | 26/60 | 14 ganhos, 1 perda, p = 0,001 |
+| apt | 29/60 | 32/60 | 9 ganhos, 6 perdas, p = 0,61 |
+| dia a dia (sensibilidade) | 22/60 | 35/60 | 15 ganhos, 2 perdas |
+| técnico (sensibilidade) | 20/60 | 23/60 | 8 ganhos, 5 perdas |
+| sem os 2 itens que repetem tarefas das 90 dúvidas | 42/118 | 58/118 | 23 ganhos, 7 perdas |
+| aceitando código entre crases | 46/120 | 62/120 | 24 ganhos, 8 perdas, p = 0,007 |
+
+- **O ganho está no PowerShell e nas perguntas do dia a dia.** No apt o modelo já sabia bastante sozinho, e o livro
+  quase empata.
+- **As 7 perdas têm duas causas:**
+  - três são de formato: o comando veio em prosa, fora de bloco;
+  - três são de tarefa errada copiada: `cat /etc/os-release` para a versão do kernel, `pkill firefox` para o OOM
+    killer, `ntpdate` para conferir o NTP. Um parâmetro inventado no `New-LocalUser` completa as sete.
+
+  A segunda causa é o risco a cuidar ao portar: com a tarefa errada no prompt, o modelo copia o exemplo errado.
+- **Custo:** +81 tokens de prompt e +2,2 s por resposta, quase tudo no PowerShell (13,4 → 18,3 s).
+
+**No runtime (2026-11-13):** a busca foi portada para C sem mudança (`src/book.c`). O livro, as palavras vazias, as
+constantes e os pesos vêm do `livro.ts` por `scripts/cmdcheck/gen-book.ts` (`src/book_data.inc`), então C e TypeScript
+somam os mesmos doubles na mesma ordem.
+- **Mesma busca:** o C escolhe as mesmas tarefas que o TypeScript em 1.064 casos (as perguntas dos três conjuntos e
+  cada frase do livro, nos dois shells; `tests/goldens/livro-busca.tsv`, `tests/test_book.c`).
+- **Mesmo prompt:** com `--chat --book`, o binário monta byte a byte o prompt do braço D nas 162 perguntas dos dois
+  conjuntos de teste (`tests/book.test.ts`).
+- **Mesmo resultado:** o braço D do conjunto 2 rodado de novo pelo binário deu as 120 respostas idênticas: 58/120,
+  23 ganhos, 7 perdas.
+- **Onde liga:** no chat interativo, por padrão, com os exemplos do shell que a conferência usa; `--no-book` desliga.
+  Com `--chat --prompt`, só com `--book`, para não mudar as medições e os goldens que usam esse caminho.
+- **As ferramentas decidem pelas palavras do usuário** (`engine_send_prefixed`): um exemplo do livro com data ou
+  número não pode pedir uma ferramenta. Essa parte não foi medida, porque o eval roda com `--no-tools`.
+- **Fica de fora por enquanto:** a janela (GUI) e a página web, que chamam o motor direto. Diminuir as tarefas erradas
+  copiadas fica para outra rodada, com conjunto novo: mexer na busca invalida esta medição.
 
 ## O que sustenta o projeto (o "pó" que ficou)
 

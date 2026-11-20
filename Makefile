@@ -41,7 +41,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell recipes sha256 prefixcache papel regex engine chat main
+SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell cmdcheck cmdcheck_sh book recipes sha256 prefixcache papel regex engine chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -69,6 +69,8 @@ TEST_TOK   := $(BUILD)/test-tokenizer$(EXE)
 TEST_CALC  := $(BUILD)/test-calc$(EXE)
 TEST_SHELL := $(BUILD)/test-shell$(EXE)
 TEST_RECIPES := $(BUILD)/test-recipes$(EXE)
+TEST_CMDCHECK := $(BUILD)/test-cmdcheck$(EXE)
+TEST_BOOK  := $(BUILD)/test-book$(EXE)
 TEST_DESKTOP := $(BUILD)/test-desktop$(EXE)
 TEST_ERR   := $(BUILD)/test-errors$(EXE)
 TEST_PAPEL := $(BUILD)/test-papel$(EXE)
@@ -145,6 +147,12 @@ $(TEST_SHELL): $(BUILD)/tests/test_shell.o $(OBJ_LIB)
 $(TEST_RECIPES): $(BUILD)/tests/test_recipes.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+$(TEST_CMDCHECK): $(BUILD)/tests/test_cmdcheck.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+$(TEST_BOOK): $(BUILD)/tests/test_book.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 $(TEST_DESKTOP): $(BUILD)/tests/test_desktop.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
@@ -168,13 +176,15 @@ $(Q8PACK): tools/q8pack.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) -std=c99 -Wall -Wextra -Werror $(FPFLAGS) $< -o $@ -lm
 
-test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_RECIPES) $(TEST_DESKTOP) $(TEST_ERR)
+test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(TEST_RECIPES) $(TEST_CMDCHECK) $(TEST_BOOK) $(TEST_DESKTOP) $(TEST_ERR)
 	$(TEST_KERN)
 	$(TEST_TOOLS)
 	$(TEST_TOK)
 	$(TEST_CALC)
 	$(TEST_SHELL)
 	$(TEST_RECIPES)
+	$(TEST_CMDCHECK)
+	$(TEST_BOOK)
 	$(TEST_DESKTOP)
 	$(TEST_ERR)
 

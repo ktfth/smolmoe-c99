@@ -1,0 +1,1442 @@
+{
+  "descricao": "Conjunto de teste novo do livro de comandos (liv2), escrito pelo adversário em 2026-11-13 sem ler o livro, o código dele, os testes dele nem a subseção da etapa 2 em docs/DECISIONS.md. 120 pedidos de comando: 60 PowerShell (Windows 11, 5.1 ou 7) e 60 posix da família apt (Debian e Ubuntu 24.04), metade em palavras do dia a dia e metade técnica. Para ser copiado sem editar. Nota: 'obrigatorios' casam todos, e 'proibidos' nenhum, com os blocos de código da resposta ('alvo: comando'); as regex são lidas como new RegExp(t, \"iu\"); sem bloco de código, um item 'comando' está errado. As referências (uma certa e uma errada por item) ficam em referencias.json, que nunca vai ao modelo.",
+  "origem": {
+    "autor": "adversario",
+    "data": "2026-11-13"
+  },
+  "perguntas": [
+    {
+      "id": "liv2-001",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O PC tá lento. Quero ver, no PowerShell, quais programas estão gastando mais processador agora. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-Process|gps|ps)\\b",
+        "\\b(Sort-Object|sort)\\b[^\\n]*\\bCPU\\b"
+      ],
+      "proibidos": [
+        "\\bps\\s+(aux|-[a-z])"
+      ]
+    },
+    {
+      "id": "liv2-002",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, mude a política de execução para RemoteSigned só para o usuário atual, sem precisar de administrador. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bSet-ExecutionPolicy\\b",
+        "\\bRemoteSigned\\b",
+        "\\bCurrentUser\\b"
+      ],
+      "proibidos": [
+        "\\bchmod\\b"
+      ]
+    },
+    {
+      "id": "liv2-003",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O HD tá cheio. Quero saber, pelo PowerShell, quanto espaço ocupa a pasta Downloads do meu usuário, somando as subpastas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-ChildItem|gci|dir|ls)\\b",
+        "-r(ec\\w*)?\\b",
+        "\\b(Measure-Object|measure)\\b",
+        "\\bLength\\b",
+        "\\bSum\\b",
+        "Downloads"
+      ],
+      "proibidos": [
+        "\\bdu\\s+-"
+      ]
+    },
+    {
+      "id": "liv2-004",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, descubra qual processo está escutando na porta TCP 3389. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "3389",
+        "\\bGet-NetTCPConnection\\b|\\bnetstat\\b[^\\n]*-\\w*[ob]"
+      ],
+      "proibidos": [
+        "\\b(ss|lsof)\\s+-"
+      ]
+    },
+    {
+      "id": "liv2-005",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "A internet caiu no notebook. Quero soltar o IP atual e pedir um novo ao roteador, pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bipconfig(\\.exe)?\\s+[/-]renew\\b"
+      ],
+      "proibidos": [
+        "\\bdhclient\\b"
+      ]
+    },
+    {
+      "id": "liv2-006",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, liste os eventos de desligamento inesperado (Kernel-Power, ID 41) do log System. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-WinEvent|Get-EventLog)\\b",
+        "\\b41\\b",
+        "System"
+      ],
+      "proibidos": [
+        "\\bjournalctl\\b"
+      ]
+    },
+    {
+      "id": "liv2-007",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Agendei o desligamento do PC sem querer. Como cancelo isso pelo PowerShell? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bshutdown(\\.exe)?\\s+[/-]a\\b"
+      ],
+      "proibidos": [
+        "\\bshutdown\\s+-c\\b"
+      ]
+    },
+    {
+      "id": "liv2-008",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, crie um usuário local chamado suporte, com a senha digitada na hora (sem deixar a senha escrita no comando). Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bNew-LocalUser\\b[^\\n]*\\bsuporte\\b|\\bnet\\s+user\\s+suporte\\s+\\*[^\\n]*/add\\b"
+      ],
+      "proibidos": [
+        "\\b(useradd|adduser)\\b"
+      ]
+    },
+    {
+      "id": "liv2-009",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "A impressora parou e a fila de impressão travou. Apague pelo PowerShell todos os trabalhos da impressora chamada HP. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bRemove-PrintJob\\b|spool\\\\PRINTERS"
+      ],
+      "proibidos": [
+        "\\blprm\\b|\\bcancel\\s+-a\\b"
+      ]
+    },
+    {
+      "id": "liv2-010",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, ponha o usuário local suporte no grupo de administradores. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bAdd-LocalGroupMember\\b|\\bnet\\s+localgroup\\b[^\\n]*/add\\b",
+        "Administra(dores|tors)|S-1-5-32-544",
+        "\\bsuporte\\b"
+      ],
+      "proibidos": [
+        "\\busermod\\b"
+      ]
+    },
+    {
+      "id": "liv2-011",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Esqueci a senha do Wi-Fi de casa. O notebook já conecta na rede CasaAna; como vejo a senha dela pela linha de comando? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bnetsh\\s+wlan\\s+show\\s+profiles?\\b",
+        "key\\s*=\\s*clear"
+      ],
+      "proibidos": [
+        "\\bnmcli\\b"
+      ]
+    },
+    {
+      "id": "liv2-012",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O sfc não conseguiu reparar tudo. No PowerShell como administrador, qual comando do DISM repara a imagem do Windows em execução? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/Cleanup-Image\\b[^\\n]*/RestoreHealth\\b|\\bRepair-WindowsImage\\b[^\\n]*-RestoreHealth\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-013",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Vou mandar o notebook para a garantia. Como vejo o número de série dele pelo PowerShell? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Win32_BIOS|Win32_SystemEnclosure|Win32_ComputerSystemProduct|Get-ComputerInfo)\\b"
+      ],
+      "proibidos": [
+        "\\bdmidecode\\b"
+      ]
+    },
+    {
+      "id": "liv2-014",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, exporte todos os drivers de terceiros instalados para a pasta C:\\Drivers, como backup. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bExport-WindowsDriver\\b|\\bpnputil(\\.exe)?\\s+[/-]export-driver\\b|/export-driver\\b",
+        "C:\\\\Drivers"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-015",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "A bateria do notebook tá durando pouco. Gere aquele relatório de bateria do Windows pela linha de comando. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpowercfg(\\.exe)?\\s+[/-]batteryreport\\b"
+      ],
+      "proibidos": [
+        "\\bupower\\b"
+      ]
+    },
+    {
+      "id": "liv2-016",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, agende uma verificação do disco C: com correção de erros para o próximo boot. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(chkdsk|Repair-Volume)\\b",
+        "\\bC:|-DriveLetter\\s+['\"]?C\\b",
+        "/[fr]\\b|-OfflineScanAndFix\\b|-SpotFix\\b"
+      ],
+      "proibidos": [
+        "\\bfsck\\b"
+      ]
+    },
+    {
+      "id": "liv2-017",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O PC fica acordando sozinho de madrugada. Qual comando mostra o que acordou o Windows da última vez? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpowercfg(\\.exe)?\\s+[/-](lastwake|waketimers|devicequery\\s+wake_armed)\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-018",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, mude o perfil de rede da interface Ethernet de Pública para Privada. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bSet-NetConnectionProfile\\b",
+        "-NetworkCategory\\s+['\"]?Private\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-019",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Perdi uma planilha do Excel. Procure pelo PowerShell todos os arquivos .xlsx dentro da minha pasta de usuário, incluindo as subpastas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-ChildItem|gci|dir|ls)\\b",
+        "-r(ec\\w*)?\\b",
+        "\\.xlsx"
+      ],
+      "proibidos": [
+        "\\bfind\\s+[~/.]"
+      ]
+    },
+    {
+      "id": "liv2-020",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, configure os servidores DNS do adaptador Wi-Fi para 1.1.1.1 e 8.8.8.8. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bSet-DnsClientServerAddress\\b|\\bnetsh\\s+interface\\s+ip(v4)?\\s+(set|add)\\s+dns(servers?)?\\b",
+        "1\\.1\\.1\\.1",
+        "8\\.8\\.8\\.8"
+      ],
+      "proibidos": [
+        "resolv\\.conf"
+      ]
+    },
+    {
+      "id": "liv2-021",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Quero saber quanta memória RAM o PC tem no total. Como vejo isso pelo PowerShell? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "TotalPhysicalMemory|\\bWin32_PhysicalMemory\\b|\\bsysteminfo\\b|TotalVisibleMemorySize|\\bGet-ComputerInfo\\b"
+      ],
+      "proibidos": [
+        "\\bfree\\s+-"
+      ]
+    },
+    {
+      "id": "liv2-022",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, liste os adaptadores de rede com o estado de cada um (Up, Disconnected) e a velocidade do link. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-NetAdapter\\b"
+      ],
+      "proibidos": [
+        "\\bifconfig\\b|\\bip\\s+link\\b"
+      ]
+    },
+    {
+      "id": "liv2-023",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O mouse sem fio parou de funcionar. Liste pelo PowerShell os dispositivos que o Windows marca com problema. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-PnpDevice\\b|\\bWin32_PnPEntity\\b",
+        "\\b(Error|Degraded|Unknown|OK|ConfigManagerErrorCode|Problem\\w*)\\b"
+      ],
+      "proibidos": [
+        "\\blsusb\\b"
+      ]
+    },
+    {
+      "id": "liv2-024",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, crie uma regra no firewall do Windows liberando a entrada na porta TCP 8080. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bNew-NetFirewallRule\\b|\\bnetsh\\s+advfirewall\\s+firewall\\s+add\\s+rule\\b",
+        "8080",
+        "\\bTCP\\b"
+      ],
+      "proibidos": [
+        "\\b(ufw|iptables|firewall-cmd)\\b"
+      ]
+    },
+    {
+      "id": "liv2-025",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O Windows deu aviso de problema no disco. Como vejo pelo PowerShell se o SSD está saudável? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-PhysicalDisk\\b|\\bGet-StorageReliabilityCounter\\b|MSStorageDriver_FailurePredictStatus|\\bGet-Disk\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-026",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, liste os recursos opcionais do Windows que estão habilitados. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-WindowsOptionalFeature\\b[^\\n]*-Online\\b|/Online\\b[^\\n]*/Get-Features\\b|/Get-Features\\b[^\\n]*/Online\\b"
+      ],
+      "proibidos": [
+        "\\bdpkg\\b"
+      ]
+    },
+    {
+      "id": "liv2-027",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Baixei um instalador e quero conferir se o arquivo setup.exe não veio corrompido, calculando o SHA256 dele no PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-FileHash\\b|\\bcertutil(\\.exe)?\\s+-hashfile\\b",
+        "setup\\.exe",
+        "\\bGet-FileHash\\b|SHA256"
+      ],
+      "proibidos": [
+        "\\bsha256sum\\b"
+      ]
+    },
+    {
+      "id": "liv2-028",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, instale o Subsistema do Windows para Linux (WSL). Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwsl(\\.exe)?\\s+--install\\b|Microsoft-Windows-Subsystem-Linux"
+      ],
+      "proibidos": [
+        "\\bapt(-get)?\\s+install\\b"
+      ]
+    },
+    {
+      "id": "liv2-029",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Quero saber qual versão e edição do Windows está instalada no PC. Qual comando do PowerShell mostra isso? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(winver|systeminfo|Get-ComputerInfo|Win32_OperatingSystem)\\b|OSVersion\\b"
+      ],
+      "proibidos": [
+        "PSVersionTable",
+        "\\blsb_release\\b|/etc/os-release"
+      ]
+    },
+    {
+      "id": "liv2-030",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, troque o plano de energia ativo para Alto desempenho usando o powercfg. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpowercfg(\\.exe)?\\s+[/-](setactive|s)\\b",
+        "SCHEME_MIN|8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-031",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O disco C: tá quase cheio. Abra a Limpeza de Disco do Windows pela linha de comando, já no disco C:. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bcleanmgr(\\.exe)?\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-032",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, desative a hibernação para apagar o arquivo hiberfil.sys. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpowercfg(\\.exe)?\\s+[/-](h|hibernate)\\s+off\\b"
+      ],
+      "proibidos": [
+        "\\b(Remove-Item|del|rm|erase)\\b[^\\n]*hiberfil"
+      ]
+    },
+    {
+      "id": "liv2-033",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O site google.com não abre, mas a rede parece ligada. Teste pelo PowerShell se o PC consegue traduzir o nome google.com em IP. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Resolve-DnsName|nslookup|ping|Test-Connection|Test-NetConnection)\\b[^\\n]*google\\.com"
+      ],
+      "proibidos": [
+        "\\bdig\\b",
+        "\\bhost\\s+google"
+      ]
+    },
+    {
+      "id": "liv2-034",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, limpe com o DISM os componentes antigos do Windows Update guardados na pasta WinSxS. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/StartComponentCleanup\\b|-StartComponentCleanup\\b"
+      ],
+      "proibidos": [
+        "\\b(Remove-Item|del|rd|rmdir|rm)\\b[^\\n]*WinSxS"
+      ]
+    },
+    {
+      "id": "liv2-035",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "A internet tá lenta. Quero ver em qual ponto do caminho até 8.8.8.8 a conexão está demorando, pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(tracert|pathping)\\b|-TraceRoute\\b",
+        "8\\.8\\.8\\.8"
+      ],
+      "proibidos": [
+        "(?<![-\\w])traceroute\\b",
+        "\\bmtr\\b"
+      ]
+    },
+    {
+      "id": "liv2-036",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, pare o serviço do Windows Update, apague o conteúdo da pasta C:\\Windows\\SoftwareDistribution\\Download e inicie o serviço de novo. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Stop-Service|spsv|net\\s+stop)\\b[^\\n]*\\bwuauserv\\b",
+        "\\b(Remove-Item|ri|rm|del|erase|rd|rmdir)\\b[^\\n]*SoftwareDistribution\\\\Download",
+        "\\b(Start-Service|sasv|net\\s+start)\\b[^\\n]*\\bwuauserv\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ]
+    },
+    {
+      "id": "liv2-037",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Instalei o Spotify e não quero mais. Desinstale pelo winget. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwinget\\s+(uninstall|remove|rm)\\b[^\\n]*spotify"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-038",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, mostre o histórico de comandos das sessões anteriores, guardado pelo PSReadLine. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "HistorySavePath|ConsoleHost_history"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-039",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Quero saber se o Windows deste PC está ativado. Qual comando mostra isso no PowerShell? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bslmgr(\\.vbs)?\\s+[/-](xpr|dli|dlv)\\b|SoftwareLicensingProduct"
+      ],
+      "proibidos": [
+        "[/-](upk|cpky|rearm|ipk)\\b"
+      ]
+    },
+    {
+      "id": "liv2-040",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, liste as pastas que este computador compartilha na rede. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-SmbShare\\b|\\bnet\\s+share\\b"
+      ],
+      "proibidos": [
+        "\\bsmbstatus\\b|\\btestparm\\b"
+      ]
+    },
+    {
+      "id": "liv2-041",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O relógio do PC tá errado. No PowerShell como administrador, force a sincronização da hora com o servidor de horário. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bw32tm(\\.exe)?\\s+[/-]resync\\b"
+      ],
+      "proibidos": [
+        "\\b(ntpdate|timedatectl|chronyc)\\b"
+      ]
+    },
+    {
+      "id": "liv2-042",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, compartilhe a pasta D:\\Publico na rede com o nome Publico, com leitura para Todos. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bNew-SmbShare\\b|\\bnet\\s+share\\b",
+        "D:\\\\Publico"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-043",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Desconfio que algum programa está usando a internet escondido. Quero ver, pelo PowerShell, as conexões abertas agora e qual programa é dono de cada uma. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-NetTCPConnection\\b|\\bnetstat\\s+-\\w*[ob]"
+      ],
+      "proibidos": [
+        "\\bss\\s+-\\w*p|\\blsof\\b"
+      ]
+    },
+    {
+      "id": "liv2-044",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, adicione a pasta C:\\Tools ao PATH do meu usuário de forma permanente. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "C:\\\\Tools",
+        "SetEnvironmentVariable|\\bsetx\\b|\\b(Set|New)-ItemProperty\\b[^\\n]*Environment"
+      ],
+      "proibidos": [
+        "\\bexport\\s+PATH\\b"
+      ]
+    },
+    {
+      "id": "liv2-045",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Fiz besteira no PC e quero voltar atrás. Liste os pontos de restauração que existem, no Windows PowerShell 5.1. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-ComputerRestorePoint\\b|\\bvssadmin(\\.exe)?\\s+list\\s+shadows\\b|\\bSystemRestore\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-046",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Liste pelo winget os programas que têm atualização disponível, sem instalar nada ainda. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwinget\\s+(upgrade|update)\\b|\\bwinget\\s+list\\b[^\\n]*--upgrade-available\\b"
+      ],
+      "proibidos": [
+        "--all\\b",
+        "\\bwinget\\s+(upgrade|update)\\s+(--id|-e\\b|--exact|[a-z])"
+      ]
+    },
+    {
+      "id": "liv2-047",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Quero que a pasta compartilhada \\\\servidor\\fotos apareça no Explorador de Arquivos como o disco Z:. Como faço pelo PowerShell? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\\\\\\\servidor\\\\fotos",
+        "\\bnet\\s+use\\s+Z:|\\bNew-PSDrive\\b[^\\n]*-Persist|\\bNew-SmbMapping\\b[^\\n]*Z:"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-048",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, mostre o modelo do processador, o número de núcleos e de processadores lógicos. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bWin32_Processor\\b|\\bGet-ComputerInfo\\b"
+      ],
+      "proibidos": [
+        "/proc/cpuinfo|\\blscpu\\b"
+      ]
+    },
+    {
+      "id": "liv2-049",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "O Wi-Fi do notebook fica caindo. Como vejo pela linha de comando a força do sinal e o estado da conexão Wi-Fi atual? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bnetsh\\s+wlan\\s+show\\s+interfaces?\\b"
+      ],
+      "proibidos": [
+        "\\b(iwconfig|nmcli)\\b"
+      ]
+    },
+    {
+      "id": "liv2-050",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, mostre só as linhas do arquivo C:\\logs\\app.log que contêm a palavra ERROR. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Select-String|sls|findstr)\\b",
+        "ERROR",
+        "app\\.log"
+      ],
+      "proibidos": [
+        "\\bgrep\\b"
+      ]
+    },
+    {
+      "id": "liv2-051",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Quero trocar o nome deste PC para ESCRITORIO-02. Como faço pelo PowerShell? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bRename-Computer\\b[^\\n]*ESCRITORIO-02"
+      ],
+      "proibidos": [
+        "\\bhostnamectl\\b"
+      ]
+    },
+    {
+      "id": "liv2-052",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, liste os usuários que estão com sessão aberta neste computador agora. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(quser|query\\s+user|qwinsta|query\\s+session)\\b|\\bWin32_ComputerSystem\\b[^\\n]*UserName"
+      ],
+      "proibidos": [
+        "(^|\\n)\\s*(who|w)\\s*($|\\n)"
+      ]
+    },
+    {
+      "id": "liv2-053",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Pluguei um HD externo e ele não aparece no Explorador de Arquivos. Liste pelo PowerShell os discos que o Windows está vendo. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-Disk\\b|\\bGet-PhysicalDisk\\b|\\blist\\s+disk\\b"
+      ],
+      "proibidos": [
+        "\\blsblk\\b|\\bfdisk\\s+-l\\b"
+      ]
+    },
+    {
+      "id": "liv2-054",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, crie uma tarefa agendada que rode o script C:\\scripts\\backup.ps1 todo dia às 2h da manhã. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "backup\\.ps1",
+        "\\bschtasks(\\.exe)?\\s+/create\\b|\\bRegister-ScheduledTask\\b",
+        "\\bdaily\\b"
+      ],
+      "proibidos": [
+        "\\bcrontab\\b"
+      ]
+    },
+    {
+      "id": "liv2-055",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Toda semana eu copio a pasta Documentos para o HD externo E:. Quero um comando que copie só o que mudou desde a última vez, com as subpastas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\brobocopy\\b",
+        "\\bE:",
+        "/(e|mir|s)\\b"
+      ],
+      "proibidos": [
+        "\\brsync\\b"
+      ]
+    },
+    {
+      "id": "liv2-056",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, descompacte o arquivo C:\\temp\\fotos.zip na pasta C:\\temp\\fotos. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bExpand-Archive\\b|\\btar(\\.exe)?\\s+-?\\w*x",
+        "fotos\\.zip"
+      ],
+      "proibidos": [
+        "\\bunzip\\b"
+      ]
+    },
+    {
+      "id": "liv2-057",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Apareceu um aviso de vírus. Rode uma verificação rápida do Microsoft Defender pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bStart-MpScan\\b|MpCmdRun(\\.exe)?\\b[^\\n]*-Scan\\b"
+      ],
+      "proibidos": [
+        "\\bclamscan\\b"
+      ]
+    },
+    {
+      "id": "liv2-058",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell como administrador, desative e reative o adaptador de rede chamado Ethernet. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "Ethernet",
+        "\\bRestart-NetAdapter\\b|\\bDisable-NetAdapter\\b[\\s\\S]*\\bEnable-NetAdapter\\b|\\bnetsh\\s+interface\\s+set\\s+interface\\b[^\\n]*\\bdisabled?\\b[\\s\\S]*\\benabled?\\b"
+      ],
+      "proibidos": [
+        "\\bifdown\\b|\\bip\\s+link\\s+set\\b"
+      ]
+    },
+    {
+      "id": "liv2-059",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Atualize as definições de vírus do Microsoft Defender pelo PowerShell, antes de rodar uma verificação. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bUpdate-MpSignature\\b|MpCmdRun(\\.exe)?\\b[^\\n]*-SignatureUpdate\\b"
+      ],
+      "proibidos": [
+        "\\bfreshclam\\b"
+      ]
+    },
+    {
+      "id": "liv2-060",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, descubra a data em que o Windows foi instalado neste computador. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bInstallDate\\b|\\bOsInstallDate\\b|\\bsysteminfo\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-061",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "O servidor Debian tá lento. Quero ver quais processos estão gastando mais processador agora. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bps\\b[^\\n]*--sort[= ]-?(%cpu|pcpu|cpu)\\b|\\bps\\b[^\\n]*%cpu[^\\n]*\\|\\s*sort\\b|\\bh?top\\b|\\batop\\b|\\bpidstat\\b"
+      ],
+      "proibidos": [
+        "\\bGet-Process\\b"
+      ]
+    },
+    {
+      "id": "liv2-062",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, liste as tentativas de login SSH que falharam. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\b|/var/log/auth\\.log|\\blastb\\b",
+        "fail|invalid|\\blastb\\b"
+      ],
+      "proibidos": [
+        "Get-WinEvent|Get-EventLog"
+      ]
+    },
+    {
+      "id": "liv2-063",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "O disco do Debian encheu. Limpe os pacotes .deb baixados que o apt guarda no cache. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(auto)?clean\\b"
+      ],
+      "proibidos": [
+        "\\brm\\s+-\\w*r\\w*\\s+/var/lib/(apt|dpkg)\\b"
+      ]
+    },
+    {
+      "id": "liv2-064",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, crie o usuário joao com pasta pessoal. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\badduser\\b[^\\n]*\\bjoao\\b|\\buseradd\\b(?=[^\\n]*(\\s-\\w*m\\b|--create-home))[^\\n]*\\bjoao\\b"
+      ],
+      "proibidos": [
+        "\\bNew-LocalUser\\b|\\bnet\\s+user\\b"
+      ]
+    },
+    {
+      "id": "liv2-065",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, nenhum site abre, mas o ping para 8.8.8.8 funciona. Teste se o sistema consegue resolver o nome debian.org. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(getent|host|nslookup|dig|resolvectl|drill|ping)\\b[^\\n]*debian\\.org"
+      ],
+      "proibidos": [
+        "Resolve-DnsName"
+      ]
+    },
+    {
+      "id": "liv2-066",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, dê ao usuário joao permissão de usar sudo, pondo ele no grupo certo. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjoao\\b",
+        "\\busermod\\b(?=[^\\n]*\\s-\\w*a)(?=[^\\n]*-\\w*G\\s*sudo\\b)|\\busermod\\b(?=[^\\n]*--append)(?=[^\\n]*--groups[= ]sudo\\b)|\\b(adduser|addgroup)\\s+joao\\s+sudo\\b|\\bgpasswd\\s+(-a|--add)\\s+joao\\s+sudo\\b"
+      ],
+      "proibidos": [
+        "\\bwheel\\b",
+        "\\busermod\\b(?![^\\n]*(\\s-\\w*a|--append))[^\\n]*\\s-G\\b"
+      ]
+    },
+    {
+      "id": "liv2-067",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Atualizei o Ubuntu agora. Como sei se preciso reiniciar a máquina? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/(var/)?run/reboot-required|\\bneedrestart\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-068",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, liste os pacotes que foram instalados manualmente (não como dependência). Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt-mark\\s+showmanual\\b|\\bapt\\s+list\\b[^\\n]*--manual-installed\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-069",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Reinicie agora o servidor Debian pela linha de comando. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\breboot\\b|\\bshutdown\\s+(-\\w*r|--reboot)\\b"
+      ],
+      "proibidos": [
+        "Restart-Computer|shutdown\\s+/r"
+      ]
+    },
+    {
+      "id": "liv2-070",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, mostre qual versão do nginx o apt vai instalar e de qual repositório ela vem. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-cache)?\\s+(policy|show)\\b[^\\n]*\\bnginx\\b|\\bapt-cache\\s+madison\\b[^\\n]*\\bnginx\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-071",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Quero saber quem está conectado no servidor Ubuntu agora. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "(^|\\n|[;&|]\\s*)\\s*(sudo\\s+)?(who|w|users)\\b|\\bloginctl\\b"
+      ],
+      "proibidos": [
+        "\\bquser\\b"
+      ]
+    },
+    {
+      "id": "liv2-072",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, remova o apache2 junto com os arquivos de configuração dele. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(purge|remove\\s+--purge|--purge\\s+remove)\\b[^\\n]*\\bapache2\\b|\\bdpkg\\s+(-P|--purge)\\s+apache2\\b"
+      ],
+      "proibidos": [
+        "\\brm\\s+-\\w*r\\w*\\s+/etc\\b"
+      ]
+    },
+    {
+      "id": "liv2-073",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "A usuária maria esqueceu a senha do Debian. Eu sou root; como troco a senha dela? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpasswd\\s+maria\\b|\\bchpasswd\\b"
+      ],
+      "proibidos": [
+        "\\bnet\\s+user\\b"
+      ]
+    },
+    {
+      "id": "liv2-074",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, reinstale o pacote openssh-server sem removê-lo antes. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "(--reinstall\\b|\\breinstall\\b)[^\\n]*openssh-server|openssh-server[^\\n]*--reinstall\\b"
+      ],
+      "proibidos": [
+        "\\b(remove|purge)\\b"
+      ]
+    },
+    {
+      "id": "liv2-075",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Quero instalar um leitor de PDF no Ubuntu, mas não sei o nome do pacote. Como procuro no apt? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-cache)?\\s+search\\b[^\\n]*pdf"
+      ],
+      "proibidos": [
+        "\\bwinget\\b"
+      ]
+    },
+    {
+      "id": "liv2-076",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, liste as unidades do systemd que falharam. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsystemctl\\b[^\\n]*(--failed\\b|--state[= ]failed\\b)"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-077",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Baixei o arquivo google-chrome-stable_current_amd64.deb na pasta atual. Como instalo no Ubuntu? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+install\\s+(-\\S+\\s+)*(\\.|~)?/\\S*google-chrome|\\bdpkg\\s+(-i|--install)\\b[^\\n]*google-chrome|\\bgdebi\\b[^\\n]*google-chrome"
+      ],
+      "proibidos": [
+        "\\bsnap\\s+install\\b|\\bwinget\\b"
+      ]
+    },
+    {
+      "id": "liv2-078",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, faça o serviço ssh iniciar automaticamente no boot. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsystemctl\\s+(--now\\s+)?enable\\b[^\\n]*\\bsshd?\\b|\\bupdate-rc\\.d\\s+ssh\\s+(defaults|enable)\\b"
+      ],
+      "proibidos": [
+        "Set-Service"
+      ]
+    },
+    {
+      "id": "liv2-079",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "O relógio do servidor Ubuntu está 3 horas adiantado. Ponha o fuso horário de Brasília. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\btimedatectl\\s+set-timezone\\s+['\"]?America/Sao_Paulo\\b|\\bdpkg-reconfigure\\s+tzdata\\b|/usr/share/zoneinfo/America/Sao_Paulo"
+      ],
+      "proibidos": [
+        "\\btzutil\\b|Set-TimeZone\\s+-(Id|Name)\\b"
+      ]
+    },
+    {
+      "id": "liv2-080",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, pare o serviço cups agora e impeça que ele volte a iniciar no boot. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsystemctl\\b[^\\n]*\\b(disable|mask)\\b[^\\n]*\\bcups\\b",
+        "--now\\b|\\bstop\\b"
+      ],
+      "proibidos": [
+        "\\bapt(-get)?\\s+(remove|purge)\\b"
+      ]
+    },
+    {
+      "id": "liv2-081",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Pluguei um pendrive no Debian e ele apareceu como /dev/sdb1. Monte ele na pasta /mnt/pendrive. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bmount\\s+(-\\S+\\s+(\\S+\\s+)?)*\\/dev\\/sdb1\\s+\\/mnt\\/pendrive\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-082",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, mude o nome da máquina para servidor2 de forma permanente. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bhostnamectl\\s+(set-)?hostname\\b|/etc/hostname",
+        "servidor2"
+      ],
+      "proibidos": [
+        "Rename-Computer"
+      ]
+    },
+    {
+      "id": "liv2-083",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Coloquei um HD novo no Ubuntu. Como vejo todos os discos e partições que o sistema reconhece? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(lsblk|blkid)\\b|\\b(fdisk|sfdisk|parted)\\s+(-\\w*l|--list)\\b"
+      ],
+      "proibidos": [
+        "\\bGet-Disk\\b"
+      ]
+    },
+    {
+      "id": "liv2-084",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, verifique se o relógio do sistema está sincronizado por NTP. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\btimedatectl\\b(?!\\s+set-)|\\bchronyc\\s+(tracking|sources)\\b|\\bntpq\\s+-p\\b"
+      ],
+      "proibidos": [
+        "\\bw32tm\\b"
+      ]
+    },
+    {
+      "id": "liv2-085",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Terminei de copiar os arquivos para o pendrive montado em /mnt/pendrive no Debian. Como desmonto com segurança antes de tirar? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bumount\\b|\\budisksctl\\s+(unmount|power-off)\\b|\\beject\\b"
+      ],
+      "proibidos": [
+        "(^|\\n|[;&|]\\s*)\\s*(sudo\\s+)?unmount\\b"
+      ]
+    },
+    {
+      "id": "liv2-086",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, libere a porta 80 no firewall ufw. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bufw\\s+allow\\s+(in\\s+)?(80|http)\\b|\\bufw\\s+allow\\b[^\\n]*\\bport\\s+80\\b"
+      ],
+      "proibidos": [
+        "New-NetFirewallRule"
+      ]
+    },
+    {
+      "id": "liv2-087",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Acho que o HD do servidor Debian está morrendo. Como vejo a saúde dele pelo SMART? O disco é /dev/sda. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsmartctl\\b[^\\n]*(\\s-[aHx]\\b|--(all|health|xall)\\b)",
+        "/dev/sda"
+      ],
+      "proibidos": [
+        "Get-PhysicalDisk"
+      ]
+    },
+    {
+      "id": "liv2-088",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, mostre a versão do kernel Linux em uso. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\buname\\s+(-\\w*[ra]\\w*|--(kernel-release|all))\\b|/proc/version|\\bhostnamectl\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-089",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Quero saber qual processador o servidor Ubuntu tem e quantos núcleos. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\blscpu\\b|/proc/cpuinfo|\\binxi\\b|\\blshw\\b[^\\n]*-c(lass)?\\s+(cpu|processor)"
+      ],
+      "proibidos": [
+        "Win32_Processor"
+      ]
+    },
+    {
+      "id": "liv2-090",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, liste as versões de kernel (pacotes linux-image) instaladas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "(\\bdpkg(-query)?\\s+(-l|--list|-W|--show|--get-selections)\\b|\\bapt\\s+list\\b[^\\n]*--installed\\b)[\\s\\S]*linux-image|linux-image[\\s\\S]*(\\bdpkg\\b|\\bapt\\s+list\\b)|/boot/vmlinuz"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-091",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Os logs encheram o disco do Debian. Quanto espaço o journal do systemd está ocupando? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\s+--disk-usage\\b|\\bdu\\b[^\\n]*/var/log/journal"
+      ],
+      "proibidos": [
+        "--vacuum"
+      ]
+    },
+    {
+      "id": "liv2-092",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, gere um par de chaves SSH do tipo ed25519. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bssh-keygen\\b[^\\n]*-t\\s*ed25519\\b"
+      ],
+      "proibidos": [
+        "\\bputtygen\\b"
+      ]
+    },
+    {
+      "id": "liv2-093",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Perdi um arquivo chamado relatorio.pdf em algum lugar da minha pasta pessoal no Ubuntu. Como acho? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bfind\\b[^\\n]*-i?name\\s+['\"]?\\*?relatorio(\\.pdf|\\*)|\\b(p?locate|mlocate)\\b[^\\n]*relatorio"
+      ],
+      "proibidos": [
+        "Get-ChildItem"
+      ]
+    },
+    {
+      "id": "liv2-094",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, copie a sua chave pública SSH para o servidor 192.168.0.10, no usuário admin, para entrar sem senha. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bssh-copy-id\\b[^\\n]*admin@192\\.168\\.0\\.10|\\.ssh/id_\\w+\\.pub[^\\n]*\\|\\s*ssh\\b[^\\n]*admin@192\\.168\\.0\\.10[^\\n]*authorized_keys"
+      ],
+      "proibidos": [
+        "\\.ssh/id_(rsa|ed25519|ecdsa|dsa)(?!\\.pub|\\w)"
+      ]
+    },
+    {
+      "id": "liv2-095",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No notebook com Ubuntu, liste as redes Wi-Fi que estão por perto. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bnmcli\\s+(-\\S+\\s+(\\S+\\s+)?)*d(ev(ice)?)?\\s+wifi\\b|\\biw(list)?\\b[^\\n]*\\bscan\\b"
+      ],
+      "proibidos": [
+        "\\bnetsh\\b"
+      ]
+    },
+    {
+      "id": "liv2-096",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, veja o histórico do que o apt instalou, atualizou e removeu. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/var/log/apt/history\\.log|/var/log/dpkg\\.log"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-097",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Conecte o notebook com Ubuntu na rede Wi-Fi CasaAna, que tem a senha 12345678. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bnmcli\\b[^\\n]*\\bconnect\\s+['\"]?CasaAna\\b",
+        "password\\s+['\"]?12345678\\b"
+      ],
+      "proibidos": [
+        "\\bnetsh\\b"
+      ]
+    },
+    {
+      "id": "liv2-098",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, descubra o UUID da partição /dev/sdb1 para usar no /etc/fstab. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bblkid\\b|\\blsblk\\b[^\\n]*(-\\w*f\\b|UUID)|/dev/disk/by-uuid"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-099",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Recebi um backup chamado backup.tar.gz. Como extraio ele na pasta atual, no Debian? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\btar\\s+(-?\\w*x\\w*|--extract)\\b",
+        "backup\\.tar\\.gz"
+      ],
+      "proibidos": [
+        "Expand-Archive|\\bunzip\\b"
+      ]
+    },
+    {
+      "id": "liv2-100",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu 24.04, mostre quais repositórios o apt está usando. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/etc/apt/sources\\.list|\\bapt(-cache)?\\s+policy\\b|\\bgrep\\b[^\\n]*/etc/apt"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-101",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, tento apagar o arquivo /srv/dados/relatorio.txt e dá 'Permission denied'. Como vejo o dono e as permissões dele? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(ls\\s+(-\\S+\\s+)*-\\w*l\\w*|stat|namei)\\b",
+        "relatorio\\.txt|/srv/dados"
+      ],
+      "proibidos": [
+        "\\bchmod\\s+(-R\\s+)?777\\b"
+      ]
+    },
+    {
+      "id": "liv2-102",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, procure nos logs do kernel se algum processo foi morto por falta de memória (OOM killer). Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(dmesg|journalctl)\\b|/var/log/(kern\\.log|syslog|messages)",
+        "oom|killed\\s+process|out\\s+of\\s+memory"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-103",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, atualize os programas instalados pela loja Snap. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsnap\\s+refresh\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-104",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu Server 24.04, editei o arquivo do netplan em /etc/netplan. Aplique a nova configuração de rede. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bnetplan\\s+(apply|try)\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-105",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "A impressora não imprime no Ubuntu e a fila encheu. Cancele todos os trabalhos de impressão. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bcancel\\s+(-\\w*a\\w*)\\b|\\blprm\\s+-(?=\\s|$)"
+      ],
+      "proibidos": [
+        "Remove-PrintJob|Get-PrintJob"
+      ]
+    },
+    {
+      "id": "liv2-106",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, mostre a rota padrão (o gateway) da máquina. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bip\\s+(-\\S+\\s+)*r(o(u(t(e)?)?)?)?\\b|\\broute\\s+-n\\b|\\bnetstat\\s+-\\w*r"
+      ],
+      "proibidos": [
+        "\\bipconfig\\b|\\broute\\s+print\\b"
+      ]
+    },
+    {
+      "id": "liv2-107",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No notebook com Ubuntu, quero ver quanto de bateria resta e a saúde dela. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bupower\\b|\\bacpi\\b|/sys/class/power_supply/"
+      ],
+      "proibidos": [
+        "powercfg|Win32_Battery"
+      ]
+    },
+    {
+      "id": "liv2-108",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, qual linha eu ponho no crontab para rodar o script /opt/backup.sh todo dia às 2h da manhã? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b0?0\\s+0?2\\s+\\*\\s+\\*\\s+\\*\\s+[^\\n]*/opt/backup\\.sh"
+      ],
+      "proibidos": [
+        "schtasks|Register-ScheduledTask"
+      ]
+    },
+    {
+      "id": "liv2-109",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "O notebook com Debian tá esquentando muito. Como vejo a temperatura do processador? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsensors\\b|/sys/class/thermal/|/sys/class/hwmon/|\\bacpi\\s+-\\w*t"
+      ],
+      "proibidos": [
+        "MSAcpi_ThermalZoneTemperature"
+      ]
+    },
+    {
+      "id": "liv2-110",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, faça a atualização completa dos pacotes, permitindo que o apt instale ou remova pacotes para resolver dependências novas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt\\s+(full-upgrade|dist-upgrade)\\b|\\bapt-get\\s+(dist-upgrade|full-upgrade)\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-111",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "O Debian tá demorando muito para ligar. Como vejo o que está atrasando o boot? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsystemd-analyze\\s+(blame|critical-chain|plot)\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-112",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, mostre as mensagens de erro de todo o sistema registradas na última hora. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\b",
+        "(-p|--priority)[= ]?\\s*(err|crit|alert|emerg|[0-3])\\b",
+        "(--since|-S)[= ]\\s*['\"]?(-?1\\s*h(our)?|-?60\\s*min(utes?)?)"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-113",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Quero saber qual placa de Wi-Fi o notebook com Ubuntu tem. Como descubro o modelo? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\blspci\\b|\\blsusb\\b|\\blshw\\b|\\binxi\\b|\\bhwinfo\\b"
+      ],
+      "proibidos": [
+        "Get-NetAdapter|Win32_"
+      ]
+    },
+    {
+      "id": "liv2-114",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, o sistema diz 'No space left on device', mas o df -h mostra espaço livre. Veja o uso de inodes de cada sistema de arquivos. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdf\\s+(-\\S+\\s+)*-\\w*i\\w*\\b|\\bdf\\b[^\\n]*--inodes\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-115",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Não uso o LibreOffice no Ubuntu e quero tirar ele para liberar espaço. Como desinstalo? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(remove|purge|autoremove)\\b[^\\n]*libreoffice|\\bsnap\\s+remove\\s+libreoffice\\b"
+      ],
+      "proibidos": [
+        "\\brm\\s+-\\w*r\\w*\\s+/usr\\b"
+      ]
+    },
+    {
+      "id": "liv2-116",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, editei o /etc/default/grub. Qual comando aplica a mudança na configuração do GRUB? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bupdate-grub2?\\b|\\bgrub-mkconfig\\s+-o\\s+/boot/grub/grub\\.cfg\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-117",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, o comando ifconfig não existe. Descubra qual pacote fornece esse comando. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt-file\\s+(search|find)\\b[^\\n]*ifconfig|\\bnet-tools\\b"
+      ],
+      "proibidos": [
+        "\\bdpkg\\s+(-S|--search)\\b"
+      ]
+    },
+    {
+      "id": "liv2-118",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, o df mostra o disco cheio, mas o du não acha os arquivos. Liste os arquivos apagados que ainda estão abertos por algum processo. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\blsof\\b|/proc/\\S*fd",
+        "\\+L\\s*1\\b|deleted"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "liv2-119",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "As coisas do Docker encheram o disco do servidor Ubuntu. Limpe os containers parados, as imagens sem uso e o cache de build. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdocker\\s+system\\s+prune\\b|\\bdocker\\s+(container|image|builder)\\s+prune\\b"
+      ],
+      "proibidos": [
+        "\\brm\\s+-\\w*r\\w*\\s+/var/lib/docker\\b"
+      ]
+    },
+    {
+      "id": "liv2-120",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, acabei de editar o /etc/fstab. Teste se as entradas montam sem precisar reiniciar. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bmount\\s+(-\\w*a\\w*|--all)\\b|\\bfindmnt\\s+(--verify|-x)\\b"
+      ],
+      "proibidos": []
+    }
+  ]
+}

@@ -39,7 +39,8 @@ function chatRun(args: readonly string[], input: string, env: Record<string, str
     env: { ...process.env, SMOLMOE_KV_CACHE: "0", ...env },
   });
   const stderr = proc.stderr.toString();
-  const line = stderr.split("\n").map((l) => l.replace(/^> /, "")).filter((l) => l.startsWith("{")).at(-1) ?? "";
+  /* The stats follow the last prompt on its line; the prompt carries the machine's role ("[dev] > "). */
+  const line = stderr.split("\n").map((l) => l.slice(Math.max(0, l.indexOf('{"version"')))).filter((l) => l.startsWith('{"version"')).at(-1) ?? "";
   if (proc.exitCode !== 0) throw new Error(`chat failed (${proc.exitCode}): ${stderr}`);
   return { stdout: Buffer.from(proc.stdout).toString(), stderr, stats: JSON.parse(line) as { system_kv: string } };
 }

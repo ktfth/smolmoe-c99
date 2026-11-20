@@ -196,6 +196,63 @@ fica em `src/recipes.c`; todas as receitas só leem.
 > [!NOTE]
 > **Proteção contra colagem maliciosa (pastejacking):** blocos de texto colados no terminal são enviados inteiros como mensagem ao modelo — linhas com `!` coladas nunca são executadas como comandos.
 
+### Conferência dos comandos das respostas
+
+Modelos pequenos inventam comandos, opções e parâmetros. Depois de cada resposta, o chat procura os comandos dela na própria máquina, no tipo de shell do chat: PowerShell no Windows (ou quando o chat roda nele) e `sh` no Linux, no macOS e no Git Bash. Nada da resposta é executado. O PowerShell só analisa o texto, e o `sh` só usa `command -v`, `man -w` e lê a página do manual (nunca roda o programa, nem com `--help`):
+
+```text
+> Como listo os arquivos com o tamanho?
+...
+Get-ChildItem -Path C:\Temp | ForEach-Object { (Get-ItemProperty -Path $_.FullName -Property Length).Count }
+...
+Conferência no PowerShell 7 desta máquina:
+  - Get-ItemProperty não tem o parâmetro -Property.
+Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.
+```
+
+No bash, o mesmo tipo de aviso:
+
+```text
+Conferência no sh desta máquina:
+  - ls: o manual desta máquina não cita a opção --recursive-all.
+  - systemctl: o manual desta máquina não cita o subcomando restat.
+  - netstatx: não está no PATH desta máquina (se o comando é para outra máquina, ignore este aviso).
+  - rm muda o sistema: confira o alvo antes de rodar.
+Isso confere só se os nomes existem aqui; não diz se o comando faz o que você pediu.
+```
+
+O aviso aponta:
+- **PowerShell:** um cmdlet que não existe aqui, com nomes parecidos que existem (`Get-NetAdapterInfo` → `Get-NetAdapter`); um parâmetro que o cmdlet não tem, com os parecidos (`-Recursive` → `-Recurse`); e um cmdlet real que **muda o sistema** (os que aceitam `-WhatIf`, como `Remove-Item` e `Stop-Process`), mesmo escrito certo.
+- **bash/sh:** um programa que não está no PATH; uma opção ou um subcomando (`systemctl`, `apt`, `docker`, `git`...) que o manual não cita; e um comando que **muda o sistema**, por uma tabela (`rm`, `dd`, `mkfs`, `systemctl restart`, `apt install`, `pacman -S`, `sed -i`, `find -delete`, `docker rm`...). O separador entende pipes, `&&`, `sudo`, `VAR=valor`, redirecionamentos, here-documents e o prompt `$ ` copiado de um terminal.
+
+**Sem manual na máquina** (containers e instalações mínimas costumam vir sem): o smolmoe leva um **índice embutido** com as opções e os subcomandos que os manuais do Ubuntu 24.04 citam para 178 programas de manutenção. Só os nomes, nunca o texto, ~60 KB no binário. O aviso diz quando a conferência veio dessa lista. Um programa fora dela e sem manual fica com "as opções não foram conferidas". O índice é refeito com `scripts/cmdcheck/index-man.sh` (num Linux com manuais) e `scripts/cmdcheck/gen-index.ts`.
+
+> [!IMPORTANT]
+> **Nenhum aviso não quer dizer "comando certo".** A conferência não pega um comando real que faz a coisa errada (parar um serviço quando você pediu para reiniciar, apagar a pasta errada). Ela vale só para esta máquina: o que falta aqui pode existir na máquina que você vai consertar, e o contrário. A lista embutida é a do Ubuntu 24.04; outra versão pode ter outras opções. Blocos do outro tipo de shell (`bash` no PowerShell, `powershell` no sh, e `cmd`) são citados como "não conferidos", nunca como inexistentes.
+
+- Liga sozinha no terminal; com entrada por pipe, só com `--command-check`. `--no-command-check` desliga. Se não houver shell para conferir, o chat avisa ao abrir.
+- O PowerShell abre em segundo plano depois do prompt de sistema e se aquece enquanto você digita. Medido no i7-10610U: ~14 ms por resposta com comandos que existem, ~90–190 ms quando há um nome inventado. O `sh` abre a cada resposta: ~0,1–0,2 s no Ubuntu (WSL), ~0,4–0,6 s no Git Bash.
+- `smolmoe --check-commands ARQUIVO` confere um texto qualquer (uma resposta, um script) sem carregar modelo; `--shell` escolhe o PowerShell ou o sh.
+- `tests/goldens/cmdcheck-casos.json` tem as respostas sintéticas que testam as duas conferências.
+
+### Livro de comandos
+
+A conferência pega o nome inventado depois da resposta; o livro tenta evitá-lo antes. O binário leva 62 tarefas de manutenção em português (espaço em disco, serviço que caiu, porta presa, firewall, pacotes, usuários...), cada uma com comandos reais de PowerShell e de bash e um comentário curto. Quando a mensagem tem palavras em comum com uma tarefa, até duas tarefas vão antes dela, e o chat diz quais:
+
+```text
+> Como vejo o espaço livre do disco?
+(livro de comandos: espaco-disco)
+O espaço livre do disco pode ser visto com o comando `df -h` ...
+```
+
+- **Medido antes de entrar:** em 120 pedidos de comando escritos por quem não viu o livro, o Dolphin 1B acertou 58 com o livro e 42 sem ele (23 melhoraram, 7 pioraram, p = 0,005). O ganho está no PowerShell e nas perguntas do dia a dia; no apt quase empata. Detalhes em `docs/DECISIONS.md`.
+- **Custo:** cerca de 80 tokens a mais por pergunta que casa, uns 2 s no notebook de referência. Mensagens sem nada de manutenção vão sem o livro.
+- **Quais exemplos:** os do shell que o chat confere (PowerShell no Windows, bash no Linux, no macOS e no Git Bash); `--shell` escolhe.
+- **O risco:** quando a busca escolhe a tarefa errada, o modelo pode copiar o exemplo errado (a versão do sistema no lugar da do kernel). O aviso com o nome da tarefa existe para você perceber isso.
+- Liga sozinho no chat; `--no-book` desliga. Com `--chat --prompt`, só com `--book`.
+- As ferramentas (data, cálculo) decidem só pelas suas palavras, nunca pelos exemplos do livro.
+- O livro é `scripts/cmdcheck/livro.json`. Depois de mudá-lo, `bun scripts/cmdcheck/gen-book.ts inc > src/book_data.inc` e `bun scripts/cmdcheck/gen-book.ts golden > tests/goldens/livro-busca.tsv`. Mudar o livro ou a busca pede uma nova medição, como diz o `docs/DECISIONS.md`.
+
 ---
 
 ## Principais Opções da CLI (`smolmoe`)
@@ -214,6 +271,8 @@ fica em `src/recipes.c`; todas as receitas só leem.
 | `--prefix-cache ARQUIVO` | desligado | Guarda o prompt de sistema processado; os chats seguintes pulam o prefill dele |
 | `--now AAAA-MM-DDTHH:MM` | relógio local | Fixa data/hora para as ferramentas |
 | `--shell NOME\|CAMINHO` | shell pai | Define o shell usado por `!comando` (`pwsh`, `bash`, `cmd`...) |
+| `--no-command-check` / `--command-check` | ligado no terminal | Desliga a conferência dos comandos das respostas / liga também com entrada por pipe |
+| `--check-commands ARQUIVO` | — | Confere os comandos de um texto nesta máquina (PowerShell ou sh), sem modelo |
 | `--tokens N` | `64` (`512` no chat) | Máximo de novos tokens gerados |
 | `--context N` | `min(modelo, 2048)` | Tamanho do cache KV em tokens |
 | `--threads N` | núcleos físicos | Número de threads de trabalho |

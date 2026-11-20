@@ -139,8 +139,8 @@ static uint32_t emit(const Engine *e, Calls *calls, uint32_t token, unsigned cha
 }
 
 static const char *chosen_tool(const Engine *e) {
-    const char *tool = tools_forced_choice(e->message, e->pasted);
-    return tool ? tool : tools_date_choice(e->message, e->pasted);
+    const char *tool = tools_forced_choice(e->words, e->pasted);
+    return tool ? tool : tools_date_choice(e->words, e->pasted);
 }
 
 /* Streams one reply; every generated token is fed back, it is history. With a
@@ -199,7 +199,7 @@ static uint32_t reply(Engine *e, double turn_start, Calls *calls, const char *pr
         if (sm_failed()) return generated;
         if (prefix && calls->open && !calls->truncated[0] && calls->len[0] > prefix_len &&
             calls->text[0][calls->len[0] - 1] == '}' &&
-            tool_call_grounded(calls->text[0], calls->len[0], e->message)) {
+            tool_call_grounded(calls->text[0], calls->len[0], e->words)) {
             calls->open = 0;
         }
         if (model_forward(m, &token, 1, e->pos, LOGITS_LAST) != SM_OK) return generated;
@@ -249,14 +249,14 @@ static uint32_t tool_results(Engine *e, const Calls *calls) {
     if (sm_failed()) return 0;
     uint32_t k;
     if (e->model->c.gemma3) {
-        int w = snprintf(response, sizeof(response), "%s", e->message);
+        int w = snprintf(response, sizeof(response), "%s", e->words);
         if (w < 0 || (size_t)w >= sizeof(response)) return sm_set(SM_ERR_STATE, "internal error: tool response overflow");
         used = (size_t)w;
     }
     for (k = 0; k < calls->count; ++k) {
         Notice n;
         int w;
-        tool_run(calls->text[k], calls->truncated[k] ? 0 : calls->len[k], e->message, &now, name, result);
+        tool_run(calls->text[k], calls->truncated[k] ? 0 : calls->len[k], e->words, &now, name, result);
         n.len = 0;
         notice_put(&n, "[ferramenta] ");
         notice_name(&n, name);
@@ -303,7 +303,7 @@ static int all_grounded(const Engine *e, const Calls *calls) {
     int grounded = 1;
     for (k = 0; k < calls->count; ++k) {
         Notice n;
-        if (!calls->truncated[k] && tool_call_grounded(calls->text[k], calls->len[k], e->message)) continue;
+        if (!calls->truncated[k] && tool_call_grounded(calls->text[k], calls->len[k], e->words)) continue;
         n.len = 0;
         notice_put(&n, "(chamada de ferramenta descartada: ");
         notice_call(&n, calls, k);
@@ -402,7 +402,7 @@ static void first_reply(Engine *e, Calls *calls, uint32_t len) {
     const unsigned char *text = (const unsigned char *)e->message;
     uint32_t n = tokenizer_chat_turn(e->tok, "user", text, len, 1, e->ids);
     if (sm_failed()) return;
-    offer_tools(e, e->tools && tools_relevant(e->message));
+    offer_tools(e, e->tools && tools_relevant(e->words));
     assistant_turn(e, n, calls, NULL, 0);
     if (e->stopped) {
         drop_stopped_call(e, calls);
@@ -712,7 +712,7 @@ static void engine_start_body(Engine *e) {
     else auto_system_kv(e, n);
     if (sm_failed()) return;
     e->system_len = e->pos = n;
-    e->message = NULL;
+    e->message = e->words = NULL;
 }
 
 typedef struct EngineStartArgs {
@@ -727,7 +727,7 @@ sm_status engine_start(Engine *e) {
     return sm_protect(engine_start_protected, &a);
 }
 
-static int engine_send_body(Engine *e, const char *text, uint32_t len) {
+static int engine_send_body(Engine *e, const char *text, uint32_t len, uint32_t prefix_len) {
     uint32_t n = tokenizer_chat_turn(e->tok, "user", (const unsigned char *)text, len, 1, e->ids);
     e->stopped = 0;
     /* Anything already committed may leave; the message about to be added may not. */
@@ -737,8 +737,9 @@ static int engine_send_body(Engine *e, const char *text, uint32_t len) {
         return 0;
     }
     e->message = text;
+    e->words = text + prefix_len;
     answer(e, len);
-    e->message = NULL;
+    e->message = e->words = NULL;
     ++e->stats.turns;
     return 1;
 }
@@ -746,25 +747,29 @@ static int engine_send_body(Engine *e, const char *text, uint32_t len) {
 typedef struct EngineSendArgs {
     Engine *e;
     const char *text;
-    uint32_t len;
+    uint32_t len, prefix_len;
     int rc;
 } EngineSendArgs;
 
 static void engine_send_protected(void *ctx) {
     EngineSendArgs *a = (EngineSendArgs *)ctx;
-    a->rc = engine_send_body(a->e, a->text, a->len);
+    a->rc = engine_send_body(a->e, a->text, a->len, a->prefix_len);
 }
 
-int engine_send(Engine *e, const char *text, uint32_t len) {
+int engine_send(Engine *e, const char *text, uint32_t len) { return engine_send_prefixed(e, text, len, 0); }
+
+int engine_send_prefixed(Engine *e, const char *text, uint32_t len, uint32_t prefix_len) {
     EngineSendArgs a;
     sm_status st;
     a.e = e;
     a.text = text;
     a.len = len;
+    a.prefix_len = prefix_len;
     a.rc = -1;
     st = sm_protect(engine_send_protected, &a);
     e->pasted = 0; /* holds for one message, whatever the outcome */
     if (st != SM_OK) {
+        e->message = e->words = NULL;
         e->pos = e->system_len;
         e->stopped = 1;
         return -1;

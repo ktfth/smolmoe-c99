@@ -33,6 +33,54 @@
 extern char **environ;
 #endif
 
+/* ---- a program kept running behind pipes (child_start) ----------------- */
+
+#define CHILD_BUF 8192
+#define CHILD_PIPE 65536u     /* a whole request fits: writing never waits for the child to read */
+#define CHILD_GRACE_MS 200u   /* how long a stopped child gets to leave on its own */
+
+struct Child {
+#if defined(_WIN32)
+    HANDLE process, in, out;
+#elif !defined(__wasm__)
+    pid_t pid;
+    int in, out;
+#endif
+    char buf[CHILD_BUF]; /* read but not yet taken */
+    size_t len;
+};
+
+#if !defined(__wasm__)
+/* Takes the complete lines in c->buf, appending them to out (a "\r\n" ending
+ * becomes "\n") until one equals `end`, which is consumed but not copied.
+ * Returns 1 when it came. A line longer than the buffer is dropped. */
+static int take_lines(Child *c, const char *end, char *out, size_t cap, size_t *used) {
+    size_t end_len = strlen(end);
+    for (;;) {
+        char *nl = (char *)memchr(c->buf, '\n', c->len);
+        size_t n, line;
+        int found;
+        if (!nl) {
+            if (c->len == sizeof(c->buf)) c->len = 0;
+            return 0;
+        }
+        n = (size_t)(nl - c->buf) + 1;
+        line = n - 1;
+        if (line && c->buf[line - 1] == '\r') --line;
+        found = line == end_len && !memcmp(c->buf, end, line);
+        if (!found && cap && *used + line + 1 < cap) {
+            memcpy(out + *used, c->buf, line);
+            *used += line;
+            out[(*used)++] = '\n';
+            out[*used] = 0;
+        }
+        memmove(c->buf, c->buf + n, c->len - n);
+        c->len -= n;
+        if (found) return 1;
+    }
+}
+#endif
+
 #if defined(_WIN32)
 
 #define WIDE_PATH 32768
@@ -382,6 +430,107 @@ int run_program(const char *const *argv, const char *command_line, const char *e
     return ok != 0;
 }
 
+/* No console (CREATE_NO_WINDOW): no window flashes, the chat's console modes
+ * stay untouched, and Ctrl+C in the chat never reaches it. */
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen) {
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HANDLE in_r = NULL, in_w = NULL, out_r = NULL, out_w = NULL, null_err;
+    wchar_t *cmd = to_wide(command_line), *saved_wslenv = NULL;
+    Child *c = (Child *)calloc(1, sizeof(*c));
+    BOOL ok;
+    (void)argv;
+    if (!cmd || !c) {
+        snprintf(err, errlen, cmd ? "sem memória" : "o comando não é UTF-8 válido");
+        free(cmd);
+        free(c);
+        return NULL;
+    }
+    if (env_name && !set_child_env(env_name, env_value, &saved_wslenv)) {
+        last_error("não consegui preparar o ambiente do programa", err, errlen);
+        free(cmd);
+        free(c);
+        return NULL;
+    }
+    sa.nLength = sizeof(sa);
+    sa.lpSecurityDescriptor = NULL;
+    sa.bInheritHandle = TRUE;
+    null_err = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+    ok = CreatePipe(&in_r, &in_w, &sa, CHILD_PIPE) && CreatePipe(&out_r, &out_w, &sa, CHILD_PIPE) &&
+         SetHandleInformation(in_w, HANDLE_FLAG_INHERIT, 0) && SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
+    if (ok) {
+        memset(&si, 0, sizeof(si));
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput = in_r;
+        si.hStdOutput = out_w;
+        si.hStdError = null_err == INVALID_HANDLE_VALUE ? NULL : null_err;
+        ok = CreateProcessW(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    }
+    if (!ok) last_error("não consegui iniciar o programa", err, errlen);
+    if (env_name) clear_child_env(env_name, saved_wslenv);
+    if (in_r) CloseHandle(in_r);
+    if (out_w) CloseHandle(out_w);
+    if (null_err != INVALID_HANDLE_VALUE) CloseHandle(null_err);
+    free(cmd);
+    if (!ok) {
+        if (in_w) CloseHandle(in_w);
+        if (out_r) CloseHandle(out_r);
+        free(c);
+        return NULL;
+    }
+    CloseHandle(pi.hThread);
+    c->process = pi.hProcess;
+    c->in = in_w;
+    c->out = out_r;
+    return c;
+}
+
+int child_write(Child *c, const char *data, size_t n) {
+    while (n) {
+        DWORD put = 0;
+        if (!WriteFile(c->in, data, n > 0x10000000u ? 0x10000000u : (DWORD)n, &put, NULL) || !put) return 0;
+        data += put;
+        n -= put;
+    }
+    return 1;
+}
+
+/* Anonymous pipes have no timed read: peek, and wait on the process (1 ms,
+ * about one scheduler tick here) while nothing is there. */
+int child_read_until(Child *c, const char *end, unsigned timeout_ms, char *out, size_t cap) {
+    double deadline = now_seconds() + timeout_ms / 1000.0;
+    size_t used = 0;
+    if (cap) out[0] = 0;
+    for (;;) {
+        DWORD avail = 0, got = 0, room;
+        if (take_lines(c, end, out, cap, &used)) return 1;
+        if (!PeekNamedPipe(c->out, NULL, 0, NULL, &avail, NULL)) return 0; /* the child left and it is all read */
+        if (avail) {
+            room = (DWORD)(sizeof(c->buf) - c->len);
+            if (!ReadFile(c->out, c->buf + c->len, avail < room ? avail : room, &got, NULL) || !got) return 0;
+            c->len += got;
+            continue;
+        }
+        if (now_seconds() >= deadline) return 0;
+        WaitForSingleObject(c->process, 1);
+    }
+}
+
+void child_stop(Child *c) {
+    if (!c) return;
+    CloseHandle(c->in);
+    if (WaitForSingleObject(c->process, CHILD_GRACE_MS) != WAIT_OBJECT_0) {
+        TerminateProcess(c->process, 1);
+        WaitForSingleObject(c->process, 1000);
+    }
+    CloseHandle(c->out);
+    CloseHandle(c->process);
+    free(c);
+}
+
 #else /* POSIX */
 
 int stdin_is_terminal(void) {
@@ -432,6 +581,32 @@ int run_program(const char *const *argv, const char *command_line, const char *e
     snprintf(err, errlen, "não consegui iniciar %s: o WebAssembly não cria processos", argv[0]);
     return 0;
 }
+
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen) {
+    (void)command_line;
+    (void)env_name;
+    (void)env_value;
+    snprintf(err, errlen, "não consegui iniciar %s: o WebAssembly não cria processos", argv[0]);
+    return NULL;
+}
+
+int child_write(Child *c, const char *data, size_t n) {
+    (void)c;
+    (void)data;
+    (void)n;
+    return 0;
+}
+
+int child_read_until(Child *c, const char *end, unsigned timeout_ms, char *out, size_t cap) {
+    (void)c;
+    (void)end;
+    (void)timeout_ms;
+    if (cap) out[0] = 0;
+    return 0;
+}
+
+void child_stop(Child *c) { free(c); }
 
 #else
 
@@ -599,6 +774,122 @@ int run_program(const char *const *argv, const char *command_line, const char *e
     }
     *status = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + WTERMSIG(st);
     return 1;
+}
+
+static void close_fd(int *fd) {
+    if (*fd >= 0) close(*fd);
+    *fd = -1;
+}
+
+/* In a process group of its own, so Ctrl+C in the chat never reaches it. Our
+ * pipe ends are close-on-exec: a "!comando" started later does not hold them. */
+Child *child_start(const char *const *argv, const char *command_line, const char *env_name, const char *env_value,
+                   char *err, size_t errlen) {
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attr;
+    int in[2] = {-1, -1}, out[2] = {-1, -1}, rc;
+    Child *c = (Child *)calloc(1, sizeof(*c));
+    pid_t pid;
+    (void)command_line;
+    (void)env_name;
+    (void)env_value;
+    if (!c || pipe(in) || pipe(out)) {
+        snprintf(err, errlen, c ? "não consegui criar os pipes: %s" : "sem memória", strerror(errno));
+        close_fd(&in[0]), close_fd(&in[1]), close_fd(&out[0]), close_fd(&out[1]);
+        free(c);
+        return NULL;
+    }
+    fcntl(in[1], F_SETFD, FD_CLOEXEC);
+    fcntl(out[0], F_SETFD, FD_CLOEXEC);
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, in[0], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, out[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addclose(&actions, in[0]);
+    posix_spawn_file_actions_addclose(&actions, out[1]);
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_setpgroup(&attr, 0);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+    rc = posix_spawnp(&pid, argv[0], &actions, &attr, (char *const *)argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attr);
+    close_fd(&in[0]);
+    close_fd(&out[1]);
+    if (rc) {
+        snprintf(err, errlen, "não consegui iniciar %s: %s", argv[0], strerror(rc));
+        close_fd(&in[1]);
+        close_fd(&out[0]);
+        free(c);
+        return NULL;
+    }
+    c->pid = pid;
+    c->in = in[1];
+    c->out = out[0];
+    return c;
+}
+
+/* SIGPIPE is ignored only during the write: a child that left makes it fail
+ * with EPIPE instead of ending the chat. */
+int child_write(Child *c, const char *data, size_t n) {
+    struct sigaction ignore, old;
+    int ok = 1;
+    memset(&ignore, 0, sizeof(ignore));
+    ignore.sa_handler = SIG_IGN;
+    sigemptyset(&ignore.sa_mask);
+    sigaction(SIGPIPE, &ignore, &old);
+    while (n) {
+        ssize_t put = write(c->in, data, n);
+        if (put < 0 && errno == EINTR) continue;
+        if (put <= 0) {
+            ok = 0;
+            break;
+        }
+        data += put;
+        n -= (size_t)put;
+    }
+    sigaction(SIGPIPE, &old, NULL);
+    return ok;
+}
+
+int child_read_until(Child *c, const char *end, unsigned timeout_ms, char *out, size_t cap) {
+    double deadline = now_seconds() + timeout_ms / 1000.0;
+    size_t used = 0;
+    if (cap) out[0] = 0;
+    for (;;) {
+        struct pollfd p;
+        double left;
+        ssize_t got;
+        int n;
+        if (take_lines(c, end, out, cap, &used)) return 1;
+        left = deadline - now_seconds();
+        if (left <= 0) return 0;
+        p.fd = c->out;
+        p.events = POLLIN;
+        p.revents = 0;
+        n = poll(&p, 1, (int)(left * 1000.0) + 1);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return 0;
+        got = read(c->out, c->buf + c->len, sizeof(c->buf) - c->len);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) return 0;
+        c->len += (size_t)got;
+    }
+}
+
+void child_stop(Child *c) {
+    int st, waited;
+    if (!c) return;
+    close_fd(&c->in);
+    for (waited = 0; waited < (int)CHILD_GRACE_MS; waited += 10) {
+        if (waitpid(c->pid, &st, WNOHANG) == c->pid) break;
+        poll(NULL, 0, 10);
+    }
+    if (waited >= (int)CHILD_GRACE_MS) {
+        kill(c->pid, SIGKILL);
+        while (waitpid(c->pid, &st, 0) < 0 && errno == EINTR) {}
+    }
+    close_fd(&c->out);
+    free(c);
 }
 #endif
 

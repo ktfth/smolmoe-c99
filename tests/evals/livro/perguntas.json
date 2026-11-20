@@ -1,0 +1,522 @@
+{
+  "descricao": "Conjunto de teste do livro de comandos (etapa 2, continuação): os itens 'comando' das famílias powershell e apt do conjunto de decisão escrito pelo adversário em 2026-11-10, copiados sem editar. O livro (scripts/cmdcheck/livro.json) foi congelado no commit c42b497 antes de este conjunto ser lido. Nota: 'obrigatorios' casam todos, e 'proibidos' nenhum, com os blocos de código da resposta ('alvo: comando') ou com a resposta inteira ('alvo: resposta'); sem bloco de código, um item 'comando' está errado.",
+  "origem": {
+    "ref": "feat/eval-manutencao",
+    "commit": "80a2c5188ed2fe673e07dc9f41a48b7d70b9ca63",
+    "arquivo": "tests/evals/manutencao/manutencao.json",
+    "sha256": "069c5cd2a3c0812e6975d83dd8ea4b541759554f20ac64446f9e77526032368c"
+  },
+  "perguntas": [
+    {
+      "id": "cmd-001",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No Windows, qual comando do PowerShell mostra o espaço livre de cada disco? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-PSDrive|Get-Volume|Win32_LogicalDisk)\\b"
+      ],
+      "proibidos": [
+        "\\bdf\\s+-h\\b"
+      ]
+    },
+    {
+      "id": "cmd-002",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Instale o 7-Zip pelo winget, no PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwinget\\s+install\\b[^\\n]*7[- ]?zip"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-003",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, como listo os serviços do Windows que estão parados mas têm inicialização automática? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-Service|Win32_Service)\\b",
+        "automatic|\\bauto\\b",
+        "\\bstopped\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ]
+    },
+    {
+      "id": "cmd-004",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Reinicie o serviço de spooler de impressão pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bspooler\\b",
+        "\\bRestart-Service\\b|\\bStop-Service\\b[\\s\\S]*\\bStart-Service\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ]
+    },
+    {
+      "id": "cmd-005",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Mostre os 10 processos que mais usam memória, no PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-Process\\b",
+        "\\b(Sort-Object|sort)\\b[^\\n]*\\b(WS|WorkingSet(64)?|PM|PrivateMemorySize(64)?|PagedMemorySize(64)?)\\b",
+        "-Descending|-desc\\b",
+        "-First\\s+10\\b"
+      ],
+      "proibidos": [
+        "\\b(ps|top)\\s+(aux|-o)\\b"
+      ]
+    },
+    {
+      "id": "cmd-006",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Qual comando verifica e repara os arquivos de sistema do Windows? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsfc(\\.exe)?\\s+/scannow\\b|\\bDISM(\\.exe)?\\s+/Online\\s+/Cleanup-Image\\s+/RestoreHealth\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-007",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, como vejo os últimos 20 erros do log System? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-WinEvent|Get-EventLog)\\b",
+        "\\bSystem\\b",
+        "Level\\s*=\\s*[\\d,\\s@()]*2|-EntryType\\s+Error\\b",
+        "-MaxEvents\\s+20\\b|-Newest\\s+20\\b"
+      ],
+      "proibidos": [
+        "\\bjournalctl\\b",
+        "-MaxEvents\\s+20\\b[^\\n]*\\|\\s*(Where-Object|where|\\?)"
+      ]
+    },
+    {
+      "id": "cmd-008",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, como descubro quais programas iniciam junto com o Windows? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "Win32_StartupCommand|CurrentVersion\\\\Run"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ]
+    },
+    {
+      "id": "cmd-009",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, teste se a porta 443 de example.com está acessível. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Test-NetConnection|tnc)\\b",
+        "\\b443\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-010",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Como limpo o cache de DNS no Windows? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bipconfig(\\.exe)?\\s+/flushdns\\b|\\bClear-DnsClientCache\\b"
+      ],
+      "proibidos": [
+        "systemd-resolve|resolvectl|dscacheutil"
+      ]
+    },
+    {
+      "id": "cmd-011",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No Windows, qual comando mostra a configuração de IP de todas as interfaces, incluindo os servidores DNS? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bipconfig(\\.exe)?\\s+/all\\b|\\bGet-NetIPConfiguration\\b"
+      ],
+      "proibidos": [
+        "\\bifconfig\\b|\\bip\\s+a(ddr)?\\b"
+      ]
+    },
+    {
+      "id": "cmd-012",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, liste as atualizações do Windows que estão instaladas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-HotFix\\b|Win32_QuickFixEngineering"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-013",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, como acho os 10 maiores arquivos dentro de C:\\Users\\Ana? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-ChildItem|gci|dir|ls)\\b",
+        "-Recurse\\b|-r\\b",
+        "\\b(Sort-Object|sort)\\b[^\\n]*\\bLength\\b",
+        "-Descending|-desc\\b",
+        "\\b10\\b"
+      ],
+      "proibidos": [
+        "\\bdu\\s+-"
+      ]
+    },
+    {
+      "id": "cmd-014",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Esvazie a Lixeira pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bClear-RecycleBin\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-015",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "No PowerShell, como vejo há quanto tempo o Windows está ligado? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "LastBootUpTime|\\bsysteminfo\\b|TickCount"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-016",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Crie um ponto de restauração do sistema pelo PowerShell antes de instalar um driver. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bCheckpoint-Computer\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-017",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Como apago pelo PowerShell os arquivos temporários da pasta TEMP do meu usuário? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bRemove-Item\\b|\\bdel\\b|\\brm\\b",
+        "\\$env:TEMP|%TEMP%|AppData\\\\Local\\\\Temp"
+      ],
+      "proibidos": [
+        "C:\\\\Windows\\\\System32"
+      ]
+    },
+    {
+      "id": "cmd-018",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Atualize todos os programas instalados pelo winget. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwinget\\s+upgrade\\b[^\\n]*(--all|-r\\b|--recurse)"
+      ],
+      "proibidos": [
+        "\\bchoco\\s+upgrade\\b"
+      ]
+    },
+    {
+      "id": "cmd-019",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Qual comando mostra se o BitLocker está ativado no disco C:? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bmanage-bde(\\.exe)?\\s+[-/]status\\b|\\bGet-BitLockerVolume\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-020",
+      "shell": "powershell",
+      "alvo": "comando",
+      "pergunta": "Como agendo o desligamento do Windows para daqui a 1 hora, pela linha de comando? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bshutdown(\\.exe)?\\s+([-/]\\w+\\s+)*[-/]s\\b",
+        "[-/]t\\s+3600\\b"
+      ],
+      "proibidos": [
+        "\\bshutdown\\s+-h\\s+\\+60\\b"
+      ]
+    },
+    {
+      "id": "cmd-035",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, instale o htop. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+install\\s+(-y\\s+)?htop\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s",
+        "\\b(dnf|yum|zypper|apk)\\s+(install|add|update|upgrade)\\b",
+        "\\b(brew|port)\\s+install\\b",
+        "\\bwinget\\b"
+      ]
+    },
+    {
+      "id": "cmd-036",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, atualize a lista de pacotes e depois os pacotes instalados. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+update\\b",
+        "\\bapt(-get)?\\s+(full-|dist-)?upgrade\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-037",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, qual comando mostra que processo está segurando o arquivo /var/lib/dpkg/lock-frontend? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(lsof|fuser)\\b[^\\n]*/var/lib/dpkg/lock-frontend"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*lock-frontend"
+      ]
+    },
+    {
+      "id": "cmd-038",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, uma instalação foi interrompida e o dpkg pede para terminar a configuração. Qual comando? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdpkg\\s+--configure\\s+-a\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-039",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, como corrijo dependências quebradas depois de instalar um .deb à mão? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(-f\\s+install|install\\s+-f|--fix-broken\\s+install|install\\s+--fix-broken)\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-040",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, descubra qual pacote instalou o arquivo /usr/bin/curl. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdpkg\\s+(-S|--search)\\s+/usr/bin/curl\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-041",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, remova os pacotes que foram instalados como dependência e não são mais necessários. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+autoremove\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-042",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, veja os logs do serviço ssh desde o último boot. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\b[^\\n]*-u\\s+ssh(d)?(\\.service)?\\b",
+        "(\\s|^)-b\\b|--boot\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-043",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, veja quais pastas ocupam mais espaço dentro de /var. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdu\\b[^\\n]*\\s/var\\b"
+      ],
+      "proibidos": [
+        "\\bGet-ChildItem\\b"
+      ]
+    },
+    {
+      "id": "cmd-044",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, apague os logs antigos do journal mantendo só os últimos 200 MB. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\s+--vacuum-size[= ]?200M\\b"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*/var/log/journal"
+      ]
+    },
+    {
+      "id": "cmd-045",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, liste os pacotes que têm atualização disponível. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt\\s+list\\s+--upgradable\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-046",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, reinicie o serviço nginx e depois mostre o estado dele. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsystemctl\\s+restart\\s+nginx\\b",
+        "\\bsystemctl\\s+status\\s+nginx\\b"
+      ],
+      "proibidos": [
+        "\\bRestart-Service\\b"
+      ]
+    },
+    {
+      "id": "cmd-047",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, impeça que o pacote linux-image-generic seja atualizado. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt-mark\\s+hold\\s+linux-image-generic\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ]
+    },
+    {
+      "id": "cmd-048",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, verifique o sistema de arquivos da partição /dev/sdb1, que já está desmontada. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(fsck(\\.ext[234])?|e2fsck)\\s+([-\\w]+\\s+)*/dev/sdb1\\b"
+      ],
+      "proibidos": [
+        "\\bmkfs\\b",
+        "\\bchkdsk\\b"
+      ]
+    },
+    {
+      "id": "cmd-049",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Ubuntu, mostre a versão da distribuição. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\blsb_release\\s+-a\\b|/etc/os-release\\b|\\bhostnamectl\\b"
+      ],
+      "proibidos": [
+        "\\bwinver\\b"
+      ]
+    },
+    {
+      "id": "cmd-050",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No Debian, crie um arquivo de swap de 2 GB e ative. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bfallocate\\s+-l\\s*2G\\b|\\bdd\\s+if=/dev/zero\\b[^\\n]*count=(2048|2k|2K)\\b",
+        "\\bmkswap\\b",
+        "\\bswapon\\b"
+      ],
+      "proibidos": [
+        "\\bmkswap\\s+/dev/sd"
+      ]
+    },
+    {
+      "id": "cmd-051",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Num container Debian sem systemd, como inicio o serviço ssh? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bservice\\s+ssh\\s+start\\b|/etc/init\\.d/ssh\\s+start\\b|/usr/sbin/sshd\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ]
+    },
+    {
+      "id": "cmd-052",
+      "shell": "posix",
+      "alvo": "resposta",
+      "pergunta": "Num container Ubuntu sem systemd, onde vejo os logs de erro do nginx?",
+      "obrigatorios": [
+        "/var/log/nginx/error\\.log|\\bdocker\\s+logs\\b"
+      ],
+      "proibidos": [
+        "\\bjournalctl\\b"
+      ]
+    },
+    {
+      "id": "cmd-053",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Dentro de um container Debian, como sei quanta memória o container pode usar (limite do cgroup v2)? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/sys/fs/cgroup/memory\\.max\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "cmd-054",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "Num container Ubuntu mínimo, o comando ping não existe. Como instalo? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+install\\s+(-y\\s+)?iputils-ping\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s",
+        "\\bapk\\s+add\\b"
+      ]
+    },
+    {
+      "id": "cmd-055",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No host, como abro um shell dentro do container chamado web, usando Docker? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdocker\\s+exec\\s+-(it|ti)\\s+web\\s+\\S*sh\\b"
+      ],
+      "proibidos": [
+        "\\bdocker\\s+attach\\b"
+      ]
+    },
+    {
+      "id": "cmd-056",
+      "shell": "posix",
+      "alvo": "comando",
+      "pergunta": "No host, mostre as últimas 100 linhas de log do container web, usando Docker. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdocker\\s+logs\\b",
+        "--tail[ =]100\\b|(\\s|^)-n\\s*100\\b",
+        "\\bweb\\b"
+      ],
+      "proibidos": []
+    }
+  ]
+}

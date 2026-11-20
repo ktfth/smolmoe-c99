@@ -1,0 +1,377 @@
+{
+  "descricao": "Livro de comandos: tarefas comuns de manutenção, em português, ligadas a comandos reais do PowerShell (Windows) e do bash (Debian/Ubuntu). A busca casa as palavras da pergunta com as 'frases' de cada tarefa; a tarefa achada vai no prompt antes da pergunta. Cada linha de comando é um exemplo que roda como está, e o comentário depois de '#' diz o que ele faz. tests/livro.test.ts confere que nenhum nome é inventado.",
+  "tarefas": [
+    {
+      "id": "espaco-disco",
+      "frases": ["espaço livre no disco", "disco cheio", "quanto espaço sobra em cada partição", "espaço em disco", "armazenamento livre"],
+      "powershell": ["Get-Volume  # espaço livre e tamanho de cada volume", "Get-PSDrive -PSProvider FileSystem  # usado e livre por unidade"],
+      "posix": ["df -h  # espaço livre por partição", "df -h /  # só a partição raiz"]
+    },
+    {
+      "id": "pasta-grande",
+      "frases": ["quais pastas ocupam mais espaço", "tamanho de uma pasta", "o que está enchendo o disco", "arquivos maiores", "pasta pesada", "hd lotado", "o que ocupa espaço"],
+      "powershell": ["Get-ChildItem C:\\Users -Directory | ForEach-Object { [pscustomobject]@{ Pasta = $_.FullName; GB = [math]::Round((Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB, 2) } } | Sort-Object GB -Descending  # tamanho de cada pasta", "Get-ChildItem C:\\ -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 20 FullName, Length  # 20 maiores arquivos"],
+      "posix": ["sudo du -xh --max-depth=1 / | sort -h  # tamanho de cada pasta da raiz", "sudo find / -xdev -type f -size +500M  # arquivos com mais de 500 MB"]
+    },
+    {
+      "id": "limpar-disco",
+      "frases": ["liberar espaço", "limpar arquivos temporários", "limpeza de disco", "apagar lixo do sistema", "limpar cache"],
+      "powershell": ["cleanmgr  # Limpeza de Disco do Windows", "Remove-Item \"$env:TEMP\\*\" -Recurse -Force -ErrorAction SilentlyContinue  # apaga os temporários do usuário (confira antes)", "Dism /Online /Cleanup-Image /StartComponentCleanup  # reduz a pasta WinSxS (como administrador)"],
+      "posix": ["sudo apt clean  # apaga os pacotes baixados do cache do apt", "sudo apt autoremove  # remove dependências que ninguém usa mais", "sudo journalctl --vacuum-size=200M  # encolhe os logs do systemd para 200 MB"]
+    },
+    {
+      "id": "memoria",
+      "frases": ["memória ram livre", "quanto de memória está em uso", "uso de memória", "ram disponível", "memória cheia"],
+      "powershell": ["Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize, FreePhysicalMemory  # memória total e livre, em KB", "Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 Name, Id, WorkingSet64  # processos que mais usam memória"],
+      "posix": ["free -h  # memória total, usada e disponível", "ps aux --sort=-%mem | head -n 11  # processos que mais usam memória"]
+    },
+    {
+      "id": "cpu-processos",
+      "frases": ["processo usando muita cpu", "computador lento", "o que está consumindo o processador", "processos que mais usam cpu", "uso de cpu alto", "pc lento", "máquina travando"],
+      "powershell": ["Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 Name, Id, CPU  # processos que mais usaram CPU", "Get-Counter '\\Processor(_Total)\\% Processor Time'  # uso atual da CPU"],
+      "posix": ["top  # processos em tempo real (q sai)", "ps aux --sort=-%cpu | head -n 11  # processos que mais usam CPU"]
+    },
+    {
+      "id": "listar-processos",
+      "frases": ["listar processos", "ver programas rodando", "processos abertos", "está rodando o processo", "achar o pid de um programa"],
+      "powershell": ["Get-Process  # todos os processos", "Get-Process -Name notepad  # um processo pelo nome"],
+      "posix": ["ps aux  # todos os processos", "pgrep -a nginx  # PID e linha de comando de um programa"]
+    },
+    {
+      "id": "matar-processo",
+      "frases": ["matar um processo", "encerrar programa travado", "fechar processo à força", "finalizar processo", "programa não responde", "kill"],
+      "powershell": ["Stop-Process -Name notepad  # encerra pelo nome", "Stop-Process -Id 1234 -Force  # encerra à força pelo PID"],
+      "posix": ["kill 1234  # pede para o processo 1234 sair", "kill -9 1234  # mata à força, sem deixar o processo limpar", "pkill firefox  # encerra pelo nome"]
+    },
+    {
+      "id": "servico-status",
+      "frases": ["ver se o serviço está rodando", "status do serviço", "serviço está ativo", "listar serviços", "estado de um serviço"],
+      "powershell": ["Get-Service -Name Spooler  # estado de um serviço", "Get-Service | Where-Object Status -eq 'Running'  # serviços rodando"],
+      "posix": ["systemctl status nginx  # estado e últimas linhas do log do serviço", "systemctl is-active nginx  # só responde active ou inactive", "systemctl list-units --type=service --state=running  # serviços rodando"]
+    },
+    {
+      "id": "servico-reiniciar",
+      "frases": ["reiniciar um serviço", "parar um serviço", "iniciar um serviço", "subir o serviço de novo", "restart do serviço", "serviço caiu", "subir o serviço"],
+      "powershell": ["Restart-Service -Name Spooler  # reinicia (como administrador)", "Stop-Service -Name Spooler  # para", "Start-Service -Name Spooler  # inicia"],
+      "posix": ["sudo systemctl restart nginx  # reinicia", "sudo systemctl stop nginx  # para", "sudo systemctl start nginx  # inicia", "sudo systemctl reload nginx  # relê a configuração sem derrubar"]
+    },
+    {
+      "id": "servico-boot",
+      "frases": ["serviço iniciar com o sistema", "habilitar serviço no boot", "desabilitar serviço na inicialização", "serviço automático", "não iniciar sozinho"],
+      "powershell": ["Set-Service -Name Spooler -StartupType Automatic  # inicia com o Windows", "Set-Service -Name Spooler -StartupType Disabled  # não inicia mais"],
+      "posix": ["sudo systemctl enable --now nginx  # liga agora e em todo boot", "sudo systemctl disable nginx  # não sobe mais no boot", "systemctl is-enabled nginx  # se sobe no boot"]
+    },
+    {
+      "id": "programas-inicializacao",
+      "frases": ["programas que abrem com o windows", "inicialização lenta", "programas na inicialização", "desativar programa que inicia sozinho", "startup"],
+      "powershell": ["Get-CimInstance Win32_StartupCommand | Select-Object Name, Command, Location  # o que abre no logon", "taskmgr  # Gerenciador de Tarefas, aba Inicializar, para desativar"],
+      "posix": ["systemctl list-unit-files --state=enabled  # serviços que sobem no boot", "systemd-analyze blame  # quanto cada serviço atrasou o boot"]
+    },
+    {
+      "id": "log-servico",
+      "frases": ["ver o log de um serviço", "logs do sistema", "por que o serviço falhou", "mensagens de erro do serviço", "registro de eventos"],
+      "powershell": ["Get-WinEvent -LogName System -MaxEvents 50  # 50 eventos mais recentes do log System", "Get-WinEvent -FilterHashtable @{ LogName = 'System'; Level = 2 } -MaxEvents 20  # só os erros"],
+      "posix": ["journalctl -u nginx -n 50  # 50 últimas linhas do log do serviço", "journalctl -u nginx -f  # acompanha o log ao vivo", "journalctl -p err -b  # erros desde o último boot"]
+    },
+    {
+      "id": "log-arquivo",
+      "frases": ["acompanhar um arquivo de log", "ver o final de um log", "log em tempo real", "últimas linhas de um arquivo", "tail"],
+      "powershell": ["Get-Content C:\\logs\\app.log -Tail 50  # 50 últimas linhas", "Get-Content C:\\logs\\app.log -Tail 20 -Wait  # acompanha ao vivo"],
+      "posix": ["tail -n 50 /var/log/syslog  # 50 últimas linhas", "tail -f /var/log/syslog  # acompanha ao vivo"]
+    },
+    {
+      "id": "procurar-texto",
+      "frases": ["procurar texto dentro de arquivos", "buscar palavra num arquivo", "filtrar linhas com erro", "grep", "achar uma string"],
+      "powershell": ["Select-String -Path C:\\logs\\*.log -Pattern 'erro'  # linhas com 'erro'", "Get-ChildItem C:\\projeto -Recurse -File | Select-String -Pattern 'senha'  # em todas as subpastas"],
+      "posix": ["grep -i erro /var/log/syslog  # linhas com 'erro', sem diferenciar maiúsculas", "grep -rn 'senha' /etc  # em todas as subpastas, com o número da linha"]
+    },
+    {
+      "id": "procurar-arquivo",
+      "frases": ["encontrar um arquivo pelo nome", "onde está o arquivo", "procurar arquivo", "localizar arquivos", "arquivos modificados recentemente"],
+      "powershell": ["Get-ChildItem C:\\ -Recurse -Filter '*.conf' -ErrorAction SilentlyContinue  # arquivos por nome", "Get-ChildItem C:\\Users -Recurse -File | Where-Object LastWriteTime -gt (Get-Date).AddDays(-1)  # mudados nas últimas 24 h"],
+      "posix": ["find / -name 'nginx.conf' 2>/dev/null  # arquivo por nome", "find /home -type f -mtime -1  # mudados nas últimas 24 h"]
+    },
+    {
+      "id": "ip",
+      "frases": ["ver meu endereço ip", "ip da máquina", "configuração de rede", "endereço da placa de rede", "gateway e dns"],
+      "powershell": ["Get-NetIPAddress -AddressFamily IPv4  # IP de cada adaptador", "Get-NetIPConfiguration  # IP, gateway e DNS por adaptador", "ipconfig /all  # tudo, no formato clássico"],
+      "posix": ["ip addr  # IP de cada interface", "ip route  # gateway padrão", "resolvectl status  # servidores DNS"]
+    },
+    {
+      "id": "adaptador-rede",
+      "frases": ["placa de rede", "adaptador de rede desativado", "reiniciar a rede", "interface de rede", "wi-fi não conecta"],
+      "powershell": ["Get-NetAdapter  # adaptadores e estado", "Restart-NetAdapter -Name 'Wi-Fi'  # reinicia um adaptador (como administrador)"],
+      "posix": ["ip link  # interfaces e estado", "nmcli device status  # estado no NetworkManager", "sudo systemctl restart NetworkManager  # reinicia a rede"]
+    },
+    {
+      "id": "testar-conexao",
+      "frases": ["testar conexão com a internet", "ping", "sem internet", "servidor responde", "testar se a porta está aberta em outro servidor", "internet caiu"],
+      "powershell": ["Test-Connection 8.8.8.8 -Count 4  # ping", "Test-NetConnection exemplo.com -Port 443  # testa uma porta remota"],
+      "posix": ["ping -c 4 8.8.8.8  # ping", "nc -zv exemplo.com 443  # testa uma porta remota", "curl -I https://exemplo.com  # o site responde?"]
+    },
+    {
+      "id": "porta-em-uso",
+      "frases": ["qual programa está usando a porta", "portas abertas", "porta ocupada", "quem escuta na porta", "conexões de rede ativas", "programa prendendo a porta", "app usando a porta"],
+      "powershell": ["Get-NetTCPConnection -LocalPort 8080 | Select-Object LocalPort, State, OwningProcess  # quem usa a porta 8080", "Get-Process -Id (Get-NetTCPConnection -LocalPort 8080).OwningProcess  # o processo dono", "netstat -ano  # todas as conexões com o PID"],
+      "posix": ["sudo ss -tlnp  # portas TCP escutando e o processo", "sudo ss -tlnp 'sport = :8080'  # só a porta 8080", "sudo lsof -i :8080  # quem usa a porta 8080"]
+    },
+    {
+      "id": "dns",
+      "frases": ["limpar cache de dns", "resolver nome de domínio", "dns não resolve", "consultar dns", "flush dns", "dns"],
+      "powershell": ["Clear-DnsClientCache  # limpa o cache de DNS", "Resolve-DnsName exemplo.com  # consulta um nome", "ipconfig /flushdns  # limpa o cache, forma clássica"],
+      "posix": ["resolvectl flush-caches  # limpa o cache do systemd-resolved", "resolvectl query exemplo.com  # consulta um nome", "getent hosts exemplo.com  # como o sistema resolve o nome"]
+    },
+    {
+      "id": "firewall",
+      "frases": ["liberar porta no firewall", "regras do firewall", "bloquear porta", "firewall ativo", "abrir porta", "firewall", "firewall ligado"],
+      "powershell": ["Get-NetFirewallProfile | Select-Object Name, Enabled  # firewall ligado em cada perfil", "Get-NetFirewallRule -Enabled True -Direction Inbound | Select-Object DisplayName, Action  # regras de entrada ativas", "New-NetFirewallRule -DisplayName 'Web 8080' -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow  # libera a porta 8080 (como administrador)"],
+      "posix": ["sudo ufw status verbose  # estado e regras", "sudo ufw allow 8080/tcp  # libera a porta 8080", "sudo ufw deny 23/tcp  # bloqueia a porta 23"]
+    },
+    {
+      "id": "atualizar-sistema",
+      "frases": ["atualizar o sistema", "instalar atualizações", "atualizar todos os pacotes", "update do sistema", "sistema desatualizado", "atualizar o windows", "atualizar o ubuntu"],
+      "powershell": ["winget upgrade --all  # atualiza os programas instalados pelo winget", "start ms-settings:windowsupdate  # abre o Windows Update"],
+      "posix": ["sudo apt update  # baixa a lista de pacotes", "sudo apt upgrade  # instala as atualizações", "sudo apt full-upgrade  # atualiza, removendo pacotes se preciso"]
+    },
+    {
+      "id": "atualizacoes-pendentes",
+      "frases": ["ver atualizações disponíveis", "quais pacotes têm atualização", "atualizações pendentes", "listar atualizações", "o que vai ser atualizado"],
+      "powershell": ["winget upgrade  # programas com versão nova", "Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 10  # últimas atualizações do Windows instaladas"],
+      "posix": ["apt list --upgradeable  # pacotes com versão nova (rode sudo apt update antes)", "apt-get -s upgrade  # mostra o que mudaria, sem instalar"]
+    },
+    {
+      "id": "instalar-programa",
+      "frases": ["instalar um programa", "instalar pacote", "como instalo", "baixar e instalar aplicativo", "instalar software"],
+      "powershell": ["winget search vlc  # procura o programa", "winget install --id VideoLAN.VLC  # instala pelo id"],
+      "posix": ["apt search vlc  # procura o pacote", "sudo apt install vlc  # instala"]
+    },
+    {
+      "id": "remover-programa",
+      "frases": ["desinstalar programa", "remover pacote", "apagar aplicativo instalado", "remover com configurações", "purge"],
+      "powershell": ["winget uninstall --id VideoLAN.VLC  # desinstala", "Get-AppxPackage *xbox* | Remove-AppxPackage  # remove um app da Store (confira a lista antes)"],
+      "posix": ["sudo apt remove vlc  # remove e mantém a configuração", "sudo apt purge vlc  # remove também a configuração", "sudo apt autoremove  # remove dependências órfãs"]
+    },
+    {
+      "id": "programas-instalados",
+      "frases": ["listar programas instalados", "pacotes instalados", "está instalado", "versão instalada de um pacote", "qual versão"],
+      "powershell": ["winget list  # programas instalados", "Get-Package  # pacotes que o PowerShell enxerga", "Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | Select-Object DisplayName, DisplayVersion  # lista do Painel de Controle"],
+      "posix": ["apt list --installed  # pacotes instalados", "dpkg -l nginx  # se está instalado e a versão", "apt-cache policy nginx  # versão instalada e a disponível"]
+    },
+    {
+      "id": "pacote-quebrado",
+      "frases": ["pacote quebrado", "dependências quebradas", "apt travado", "erro no dpkg", "instalação interrompida"],
+      "powershell": ["winget repair --id VideoLAN.VLC  # repara um programa instalado pelo winget"],
+      "posix": ["sudo dpkg --configure -a  # termina instalações interrompidas", "sudo apt --fix-broken install  # conserta dependências quebradas"]
+    },
+    {
+      "id": "segurar-pacote",
+      "frases": ["impedir atualização de um pacote", "travar versão do pacote", "segurar pacote", "não atualizar", "hold"],
+      "powershell": ["winget pin add --id VideoLAN.VLC  # o winget não atualiza mais esse programa"],
+      "posix": ["sudo apt-mark hold nginx  # o apt não atualiza mais o pacote", "sudo apt-mark unhold nginx  # volta a atualizar", "apt-mark showhold  # pacotes segurados"]
+    },
+    {
+      "id": "repositorio",
+      "frases": ["adicionar repositório", "fontes do apt", "sources list", "chave gpg do repositório", "ppa"],
+      "powershell": ["winget source list  # fontes do winget"],
+      "posix": ["cat /etc/apt/sources.list.d/*  # repositórios configurados", "sudo add-apt-repository ppa:exemplo/ppa  # adiciona um PPA (Ubuntu)", "sudo apt update  # relê os repositórios depois de mudar"]
+    },
+    {
+      "id": "historico-pacotes",
+      "frases": ["histórico de instalação", "o que foi instalado recentemente", "log do apt", "quando o pacote foi atualizado", "últimas atualizações"],
+      "powershell": ["Get-HotFix | Sort-Object InstalledOn -Descending  # atualizações do Windows por data", "Get-WinEvent -LogName Setup -MaxEvents 20  # eventos de instalação"],
+      "posix": ["less /var/log/apt/history.log  # o que o apt instalou, removeu e atualizou", "grep ' install ' /var/log/dpkg.log  # pacotes instalados, com data"]
+    },
+    {
+      "id": "reparar-windows",
+      "frases": ["reparar arquivos do sistema", "windows corrompido", "sfc", "dism", "verificar integridade do sistema"],
+      "powershell": ["sfc /scannow  # confere e repara os arquivos do sistema (como administrador)", "Dism /Online /Cleanup-Image /RestoreHealth  # repara a imagem do Windows (como administrador)"],
+      "posix": ["sudo apt install --reinstall coreutils  # reinstala um pacote danificado", "sudo debsums -s  # arquivos de pacotes alterados (pacote debsums)"]
+    },
+    {
+      "id": "disco-saude",
+      "frases": ["saúde do disco", "disco com defeito", "smart do hd", "verificar erros no disco", "ssd está bom"],
+      "powershell": ["Get-PhysicalDisk | Select-Object FriendlyName, MediaType, HealthStatus  # saúde de cada disco", "Repair-Volume -DriveLetter C -Scan  # procura erros no volume C"],
+      "posix": ["sudo smartctl -H /dev/sda  # saúde do disco (pacote smartmontools)", "sudo fsck -n /dev/sdb1  # confere o sistema de arquivos sem mudar nada (desmontado)"]
+    },
+    {
+      "id": "discos-particoes",
+      "frases": ["listar discos", "partições do disco", "ver os discos conectados", "pendrive conectado", "discos e volumes"],
+      "powershell": ["Get-Disk  # discos", "Get-Partition  # partições", "Get-Volume  # volumes e espaço"],
+      "posix": ["lsblk  # discos e partições em árvore", "lsblk -f  # com o sistema de arquivos e o ponto de montagem", "sudo fdisk -l  # tabela de partições"]
+    },
+    {
+      "id": "montar",
+      "frases": ["montar um disco", "montar pendrive", "desmontar", "montar partição", "fstab"],
+      "powershell": ["Get-Volume  # volumes e letras", "Set-Partition -DiskNumber 1 -PartitionNumber 1 -NewDriveLetter E  # dá a letra E a uma partição"],
+      "posix": ["sudo mount /dev/sdb1 /mnt  # monta em /mnt", "sudo umount /mnt  # desmonta", "findmnt  # o que está montado e onde"]
+    },
+    {
+      "id": "uptime",
+      "frases": ["há quanto tempo o computador está ligado", "último boot", "tempo ligado", "quando reiniciou", "uptime"],
+      "powershell": ["(Get-CimInstance Win32_OperatingSystem).LastBootUpTime  # hora do último boot", "(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime  # tempo ligado"],
+      "posix": ["uptime -p  # tempo ligado", "uptime -s  # hora do último boot", "last reboot | head -n 5  # últimos reinícios"]
+    },
+    {
+      "id": "reiniciar-desligar",
+      "frases": ["reiniciar o computador", "desligar a máquina", "agendar reinício", "reboot", "desligar pelo terminal"],
+      "powershell": ["Restart-Computer  # reinicia agora", "Stop-Computer  # desliga agora", "shutdown /r /t 600  # reinicia em 10 minutos"],
+      "posix": ["sudo reboot  # reinicia agora", "sudo poweroff  # desliga agora", "sudo shutdown -r +10  # reinicia em 10 minutos", "sudo shutdown -c  # cancela o agendado"]
+    },
+    {
+      "id": "info-sistema",
+      "frases": ["versão do sistema operacional", "qual windows tenho", "informações do sistema", "versão do kernel", "qual distribuição"],
+      "powershell": ["Get-ComputerInfo -Property OsName, OsVersion, OsBuildNumber  # versão do Windows", "winver  # janela com a versão"],
+      "posix": ["cat /etc/os-release  # distribuição e versão", "uname -r  # versão do kernel", "hostnamectl  # nome, sistema e kernel"]
+    },
+    {
+      "id": "hardware",
+      "frases": ["modelo do processador", "quantos núcleos", "informações de hardware", "placa mãe", "quanta memória tem"],
+      "powershell": ["Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors  # processador", "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model, TotalPhysicalMemory  # fabricante, modelo e memória"],
+      "posix": ["lscpu  # processador e núcleos", "free -h  # memória", "sudo dmidecode -t baseboard  # placa-mãe", "lspci  # placas PCI (vídeo, rede...)"]
+    },
+    {
+      "id": "temperatura",
+      "frases": ["temperatura da cpu", "computador esquentando", "sensores de temperatura", "superaquecimento", "ventoinha"],
+      "powershell": ["Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature  # temperatura em décimos de kelvin, quando o firmware informa (como administrador)"],
+      "posix": ["sensors  # temperaturas (pacote lm-sensors)", "cat /sys/class/thermal/thermal_zone*/temp  # temperatura em milésimos de grau"]
+    },
+    {
+      "id": "usuarios",
+      "frases": ["listar usuários", "criar usuário", "contas de usuário", "adicionar usuário", "quem está logado"],
+      "powershell": ["Get-LocalUser  # contas locais", "New-LocalUser -Name maria -Password (Read-Host -AsSecureString 'Senha')  # cria uma conta (como administrador)", "query user  # quem está logado"],
+      "posix": ["getent passwd  # contas", "sudo adduser maria  # cria uma conta, pergunta a senha", "who  # quem está logado"]
+    },
+    {
+      "id": "senha-usuario",
+      "frases": ["trocar senha", "mudar a senha do usuário", "redefinir senha", "senha expirada", "bloquear usuário", "esqueci a senha"],
+      "powershell": ["Set-LocalUser -Name maria -Password (Read-Host -AsSecureString 'Nova senha')  # troca a senha (como administrador)", "Disable-LocalUser -Name maria  # desativa a conta"],
+      "posix": ["passwd  # troca a sua senha", "sudo passwd maria  # troca a senha de outra conta", "sudo usermod -L maria  # bloqueia a conta"]
+    },
+    {
+      "id": "grupos-admin",
+      "frases": ["dar permissão de administrador", "adicionar usuário ao grupo", "grupo sudo", "administradores", "grupos do usuário"],
+      "powershell": ["Add-LocalGroupMember -Group Administradores -Member maria  # torna administrador (o nome do grupo muda com o idioma)", "Get-LocalGroupMember -Group Administradores  # quem é administrador"],
+      "posix": ["sudo usermod -aG sudo maria  # dá sudo (entra no próximo login)", "groups maria  # grupos da conta", "getent group sudo  # quem tem sudo"]
+    },
+    {
+      "id": "permissoes",
+      "frases": ["permissão de arquivo", "permissão negada", "mudar dono do arquivo", "chmod", "acesso negado"],
+      "powershell": ["Get-Acl C:\\dados | Format-List  # quem pode o quê", "icacls C:\\dados /grant 'maria:(OI)(CI)M'  # dá permissão de modificar", "takeown /f C:\\dados /r  # toma posse (como administrador)"],
+      "posix": ["ls -l arquivo  # dono e permissões", "chmod 644 arquivo  # dono lê e escreve, os outros só leem", "sudo chown maria:maria arquivo  # muda o dono", "sudo chown -R maria:maria pasta/  # muda o dono da pasta e de tudo dentro", "chmod +x script.sh  # torna executável"]
+    },
+    {
+      "id": "tarefas-agendadas",
+      "frases": ["agendar tarefa", "tarefa agendada", "rodar script todo dia", "cron", "executar automaticamente em horário", "rodar script toda semana", "script automático"],
+      "powershell": ["Get-ScheduledTask | Where-Object State -eq 'Ready'  # tarefas agendadas", "Register-ScheduledTask -TaskName Backup -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-File C:\\scripts\\backup.ps1') -Trigger (New-ScheduledTaskTrigger -Daily -At 3am)  # roda todo dia às 3h"],
+      "posix": ["crontab -l  # suas tarefas agendadas", "crontab -e  # edita; ex.: 0 3 * * * /home/maria/backup.sh roda às 3h", "systemctl list-timers  # timers do systemd"]
+    },
+    {
+      "id": "backup-copia",
+      "frases": ["fazer backup", "copiar pasta", "sincronizar pastas", "cópia de segurança", "copiar arquivos para outro disco"],
+      "powershell": ["robocopy C:\\dados E:\\backup /E  # copia a pasta com subpastas", "robocopy C:\\dados E:\\backup /MIR  # espelha (apaga no destino o que sumiu da origem: confira antes)", "Copy-Item C:\\dados E:\\backup -Recurse  # cópia simples"],
+      "posix": ["rsync -a /home/maria/ /mnt/backup/maria/  # copia mantendo permissões e datas", "rsync -a --delete /home/maria/ /mnt/backup/maria/  # espelha (apaga no destino o que sumiu: confira antes)", "cp -a /etc /mnt/backup/  # cópia simples"]
+    },
+    {
+      "id": "compactar",
+      "frases": ["compactar pasta", "zipar arquivos", "descompactar", "extrair zip", "tar gz"],
+      "powershell": ["Compress-Archive -Path C:\\dados -DestinationPath C:\\dados.zip  # cria um zip", "Expand-Archive -Path C:\\dados.zip -DestinationPath C:\\extraido  # extrai"],
+      "posix": ["tar -czf dados.tar.gz dados/  # compacta", "tar -xzf dados.tar.gz  # extrai", "unzip arquivo.zip  # extrai um zip"]
+    },
+    {
+      "id": "apagar-arquivos",
+      "frases": ["apagar arquivos antigos", "deletar pasta", "remover arquivos com mais de", "excluir logs velhos", "apagar pasta inteira"],
+      "powershell": ["Get-ChildItem C:\\logs -File | Where-Object LastWriteTime -lt (Get-Date).AddDays(-30)  # confira primeiro o que seria apagado", "Get-ChildItem C:\\logs -File | Where-Object LastWriteTime -lt (Get-Date).AddDays(-30) | Remove-Item -WhatIf  # mostra sem apagar; tire -WhatIf para apagar"],
+      "posix": ["find /var/log/app -type f -mtime +30  # confira primeiro o que seria apagado", "find /var/log/app -type f -mtime +30 -delete  # apaga os com mais de 30 dias (irreversível)"]
+    },
+    {
+      "id": "hash-arquivo",
+      "frases": ["verificar hash do arquivo", "checksum", "sha256 do download", "conferir integridade do arquivo", "md5"],
+      "powershell": ["Get-FileHash C:\\Downloads\\arquivo.iso -Algorithm SHA256  # hash SHA-256"],
+      "posix": ["sha256sum arquivo.iso  # hash SHA-256", "sha256sum -c arquivo.iso.sha256  # confere com o arquivo de hashes"]
+    },
+    {
+      "id": "variaveis-ambiente",
+      "frases": ["variável de ambiente", "path do sistema", "adicionar pasta ao path", "ver variáveis", "definir variável"],
+      "powershell": ["$env:Path -split ';'  # pastas do PATH", "[Environment]::SetEnvironmentVariable('MINHA_VAR', 'valor', 'User')  # define para o usuário, de forma permanente"],
+      "posix": ["echo \"$PATH\" | tr ':' '\\n'  # pastas do PATH", "printenv  # todas as variáveis", "echo 'export PATH=\"$HOME/bin:$PATH\"' >> ~/.bashrc  # adiciona ao PATH de forma permanente"]
+    },
+    {
+      "id": "politica-execucao",
+      "frases": ["script não pode ser carregado", "execução de scripts desabilitada", "executionpolicy", "permitir scripts do powershell", "rodar script ps1"],
+      "powershell": ["Get-ExecutionPolicy -List  # política em cada escopo", "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned  # permite seus scripts locais"],
+      "posix": ["chmod +x script.sh  # permite executar", "bash script.sh  # roda sem precisar de permissão de execução"]
+    },
+    {
+      "id": "antivirus",
+      "frases": ["antivírus", "verificar vírus", "windows defender", "escanear o computador", "malware"],
+      "powershell": ["Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated  # estado do Defender", "Update-MpSignature  # atualiza as definições", "Start-MpScan -ScanType QuickScan  # verificação rápida"],
+      "posix": ["sudo apt install clamav  # instala o ClamAV", "sudo freshclam  # atualiza as definições", "clamscan -r /home  # verifica a pasta"]
+    },
+    {
+      "id": "bitlocker-criptografia",
+      "frases": ["bitlocker", "disco criptografado", "chave de recuperação", "criptografia do disco", "luks"],
+      "powershell": ["Get-BitLockerVolume  # estado do BitLocker em cada volume (como administrador)", "manage-bde -protectors -get C:  # mostra a chave de recuperação de C:"],
+      "posix": ["lsblk -f  # partições crypto_LUKS", "sudo cryptsetup status nome  # estado de um volume LUKS aberto"]
+    },
+    {
+      "id": "ponto-restauracao",
+      "frases": ["ponto de restauração", "restaurar o sistema", "voltar o windows para antes", "criar ponto de restauração", "snapshot"],
+      "powershell": ["Checkpoint-Computer -Description 'Antes da mudança'  # cria um ponto (como administrador)", "Get-ComputerRestorePoint  # pontos existentes", "rstrui  # abre a Restauração do Sistema"],
+      "posix": ["sudo timeshift --create --comments 'antes da mudança'  # cria um snapshot (pacote timeshift)", "sudo timeshift --list  # snapshots existentes"]
+    },
+    {
+      "id": "impressora",
+      "frases": ["impressora não imprime", "fila de impressão travada", "listar impressoras", "cancelar impressão", "spooler"],
+      "powershell": ["Get-Printer  # impressoras", "Get-PrintJob -PrinterName 'HP'  # fila de uma impressora", "Restart-Service -Name Spooler  # destrava a fila (como administrador)"],
+      "posix": ["lpstat -p  # impressoras", "lpstat -o  # fila", "cancel -a  # cancela todos os trabalhos", "sudo systemctl restart cups  # reinicia o serviço de impressão"]
+    },
+    {
+      "id": "hora-data",
+      "frases": ["hora errada", "sincronizar relógio", "fuso horário", "ajustar data e hora", "ntp"],
+      "powershell": ["Get-TimeZone  # fuso atual", "Set-TimeZone -Id 'E. South America Standard Time'  # fuso de Brasília", "w32tm /resync  # sincroniza o relógio (como administrador)"],
+      "posix": ["timedatectl  # hora, fuso e se sincroniza", "sudo timedatectl set-timezone America/Sao_Paulo  # fuso de Brasília", "sudo timedatectl set-ntp true  # liga a sincronização"]
+    },
+    {
+      "id": "nome-maquina",
+      "frases": ["nome do computador", "mudar hostname", "renomear máquina", "hostname", "nome da máquina na rede"],
+      "powershell": ["$env:COMPUTERNAME  # nome atual", "Rename-Computer -NewName 'escritorio-01' -Restart  # renomeia e reinicia (como administrador)"],
+      "posix": ["hostnamectl  # nome atual", "sudo hostnamectl hostname escritorio-01  # renomeia"]
+    },
+    {
+      "id": "ssh",
+      "frases": ["acessar servidor por ssh", "conectar remotamente", "chave ssh", "servidor ssh", "copiar arquivo para o servidor", "ssh"],
+      "powershell": ["ssh maria@servidor  # conecta", "ssh-keygen -t ed25519  # cria um par de chaves", "scp C:\\dados\\arq.txt maria@servidor:/tmp/  # copia para o servidor"],
+      "posix": ["ssh maria@servidor  # conecta", "ssh-keygen -t ed25519  # cria um par de chaves", "ssh-copy-id maria@servidor  # instala sua chave no servidor", "sudo systemctl status ssh  # o servidor SSH está rodando?"]
+    },
+    {
+      "id": "kernel-mensagens",
+      "frases": ["mensagens do kernel", "dmesg", "erro de hardware", "dispositivo usb não reconhecido", "driver"],
+      "powershell": ["Get-PnpDevice -Status ERROR  # dispositivos com problema", "Get-WinEvent -LogName System -MaxEvents 30 | Where-Object LevelDisplayName -eq 'Erro'  # erros recentes do sistema"],
+      "posix": ["sudo dmesg -T | tail -n 50  # mensagens recentes do kernel, com hora", "lsusb  # dispositivos USB", "lsmod  # módulos (drivers) carregados"]
+    },
+    {
+      "id": "energia-bateria",
+      "frases": ["bateria", "relatório de bateria", "plano de energia", "consumo de energia", "suspensão"],
+      "powershell": ["powercfg /batteryreport  # gera o relatório de bateria em HTML", "powercfg /list  # planos de energia", "powercfg /energy  # diagnóstico de consumo (como administrador)"],
+      "posix": ["upower -i $(upower -e | grep BAT)  # estado da bateria", "cat /sys/class/power_supply/BAT0/capacity  # carga em %"]
+    },
+    {
+      "id": "historico-comandos",
+      "frases": ["histórico de comandos", "comandos digitados antes", "repetir comando anterior", "history", "último comando"],
+      "powershell": ["Get-History  # comandos desta sessão", "Get-Content (Get-PSReadLineOption).HistorySavePath -Tail 50  # histórico salvo entre sessões"],
+      "posix": ["history | tail -n 50  # últimos comandos", "history | grep apt  # procura no histórico"]
+    },
+    {
+      "id": "docker",
+      "frases": ["containers rodando", "docker", "reiniciar container", "logs do container", "imagens docker", "container"],
+      "powershell": ["docker ps  # containers rodando", "docker logs -f meu-app  # log do container", "docker restart meu-app  # reinicia"],
+      "posix": ["docker ps  # containers rodando", "docker logs -f meu-app  # log do container", "docker restart meu-app  # reinicia", "docker system df  # espaço usado pelo Docker"]
+    },
+    {
+      "id": "wsl",
+      "frases": ["wsl", "distribuição linux no windows", "subsistema linux", "reiniciar o wsl", "listar distros"],
+      "powershell": ["wsl --list --verbose  # distros e versão", "wsl --shutdown  # desliga todas as distros", "wsl --update  # atualiza o WSL"],
+      "posix": ["cat /etc/os-release  # qual distro é esta"]
+    }
+  ]
+}

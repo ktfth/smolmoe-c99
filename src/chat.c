@@ -1,4 +1,5 @@
 #include "chat.h"
+#include "cmdcheck.h"
 #include "config.h"
 #include "papel.h"
 #include "platform.h"
@@ -8,6 +9,7 @@
 #include "util.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PASTE_MS 100u         /* lines closer than this were pasted together: nobody types that fast */
@@ -169,13 +171,75 @@ static int command_line(const ChatContext *c, int truncated, int pasted) {
 
 /* ---- engine output: replies to stdout, notices to stderr ---------------- */
 
+#define REPLY_KEPT 32768u /* reply bytes kept for the command check; a 512-token reply is far less */
+
+/* The reply as it is written, kept for the command check at its end. */
+typedef struct Reply {
+    Output *out;
+    CmdChecker *checker; /* NULL: no check */
+    char *text;
+    size_t len;
+    int full; /* a piece did not fit: the rest is dropped too, so the kept text has no gaps */
+} Reply;
+
 static void reply_text(void *ctx, const unsigned char *bytes, uint32_t n) {
-    Output *out = (Output *)ctx;
-    output_bytes(out, bytes, n);
-    if (fflush(out->f)) die("output flush failed");
+    Reply *r = (Reply *)ctx;
+    output_bytes(r->out, bytes, n);
+    if (fflush(r->out->f)) die("output flush failed");
+    if (!r->checker || r->full) return;
+    if (n > REPLY_KEPT - r->len) {
+        r->full = 1;
+        return;
+    }
+    memcpy(r->text + r->len, bytes, n);
+    r->len += n;
 }
 
-static void reply_end(void *ctx) { output_finish((Output *)ctx); }
+static void reply_end(void *ctx) {
+    Reply *r = (Reply *)ctx;
+    char notice[CMDCHECK_NOTICE_MAX];
+    output_finish(r->out);
+    if (r->checker && r->len && cmdcheck_reply(r->checker, r->text, r->len, notice, sizeof(notice)))
+        fprintf(stderr, "\n%s", notice);
+    r->len = 0;
+    r->full = 0;
+}
+
+/* Starts the check's PowerShell after the system prompt, so it warms up while
+ * the user types instead of competing with the prefill, and before the banner:
+ * starting it takes a moment, and a line typed after the banner but before the
+ * prompt would be read as typed ahead (a paste). Returns 0 with a reason in err. */
+static int start_check(const ChatContext *c, Reply *r, char *err, size_t cap) {
+    if (!c->check_shell) return 1;
+    r->text = (char *)malloc(REPLY_KEPT);
+    if (!r->text) {
+        snprintf(err, cap, "sem memória");
+        return 0;
+    }
+    if ((r->checker = cmdcheck_start(c->check_shell, 1, err, cap)) != NULL) return 1;
+    free(r->text);
+    r->text = NULL;
+    return 0;
+}
+
+/* ---- the command book ----------------------------------------------------- */
+
+/* Sends the message, after the command book's examples when it matches a task.
+ * `message` has room for line_cap + BOOK_PREFIX_MAX bytes; NULL: no book.
+ * Returns what engine_send returns (-1: sm_last_error()). */
+static int send_message(const ChatContext *c, char *message, int len) {
+    int found[BOOK_FOUND_MAX], n, i;
+    size_t prefix;
+    if (!message || (n = book_find(c->line, c->book_shell, found)) == 0 ||
+        (prefix = book_prefix(found, n, c->book_shell, message, BOOK_PREFIX_MAX)) == 0) {
+        return engine_send(c->engine, c->line, (uint32_t)len);
+    }
+    memcpy(message + prefix, c->line, (size_t)len + 1);
+    fputs("(livro de comandos:", stderr);
+    for (i = 0; i < n; ++i) fprintf(stderr, "%s %s", i ? "," : "", book_task_id(found[i]));
+    fputs(")\n", stderr);
+    return engine_send_prefixed(c->engine, message, (uint32_t)(prefix + (size_t)len), (uint32_t)prefix);
+}
 
 static void notice(void *ctx, const char *line) {
     (void)ctx;
@@ -185,12 +249,20 @@ static void notice(void *ctx, const char *line) {
 void chat_run(const ChatContext *c) {
     Engine *e = c->engine;
     PapelLido papel;
+    Reply reply;
+    char check_err[256], *message = NULL;
+    int checking;
     papel_do_ambiente(&papel);
-    e->sink.ctx = c->out;
+    memset(&reply, 0, sizeof(reply));
+    reply.out = c->out;
+    e->sink.ctx = &reply;
     e->sink.text = reply_text;
     e->sink.reply_end = reply_end;
     e->sink.notice = notice;
     sm_check(engine_start(e));
+    checking = start_check(c, &reply, check_err, sizeof(check_err));
+    if (c->book && (message = (char *)malloc((size_t)c->line_cap + BOOK_PREFIX_MAX)) == NULL)
+        fputs("(livro de comandos desligado: sem memória)\n", stderr);
     if (c->terminal) {
         terminal_input_unbuffered();
         bracketed_paste_start();
@@ -202,6 +274,15 @@ void chat_run(const ChatContext *c) {
         fprintf(stderr, "Ferramentas: %s.\n", names);
     }
     if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s; /rodar executa o comando sugerido.\n", c->shell->name);
+    if (reply.checker)
+        fprintf(stderr,
+                "Conferência: os comandos das respostas são procurados no %s desta máquina (nada da resposta roda).\n",
+                c->check_shell->name);
+    else if (!checking)
+        fprintf(stderr, "(conferência dos comandos desligada: %s)\n", check_err);
+    if (message)
+        fprintf(stderr, "Livro de comandos: perguntas de manutenção levam ao modelo exemplos reais de %s.\n",
+                c->book_shell == BOOK_POWERSHELL ? "PowerShell" : "bash");
     papel_anunciar(&papel, stderr_color(), stderr);
     for (;;) {
         int len, truncated, pasted;
@@ -236,7 +317,10 @@ void chat_run(const ChatContext *c) {
             continue;
         }
         e->pasted = pasted; /* a pasted log line forces no tool */
-        if (engine_send(e, c->line, (uint32_t)len) < 0) die("%s", sm_last_error());
+        if (send_message(c, message, len) < 0) die("%s", sm_last_error());
         follow_paste = !message_after_bracket;
     }
+    cmdcheck_stop(reply.checker);
+    free(reply.text);
+    free(message);
 }

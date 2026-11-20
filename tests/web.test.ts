@@ -156,8 +156,9 @@ describe.skipIf(!built)("browser build", () => {
       expect(ok).toBe(true);
       expect(notices.some((l) => l.startsWith("[ferramenta] calcular"))).toBe(true);
 
-      const native = runWithInput([...modelArgs(qwen!), "-i", "--now", "2026-11-06T10:30", "--tokens", 512, "--context", 2048],
-        "Quanto é 15% de 230?\n/sair\n", BINARY);
+      /* The page has no command book. */
+      const native = runWithInput([...modelArgs(qwen!), "-i", "--now", "2026-11-06T10:30", "--tokens", 512, "--context", 2048,
+        "--no-book"], "Quanto é 15% de 230?\n/sair\n", BINARY);
       expect(reply).toBe(native.stdout.toString());
     } finally {
       engine.dispose();

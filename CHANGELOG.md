@@ -10,6 +10,28 @@
   disco" com `Get-PSDrive | Select-Object Size, FreeSpace`, propriedades que não existem e saem como colunas vazias,
   sem erro; com exemplos no prompt ainda errou 3 de 5 perguntas. Onde a tabela não tem comando conferido (cmd para
   disco e memória, por exemplo), a pergunta segue para o modelo.
+- **Conferência dos comandos das respostas:** depois de cada resposta do chat, os comandos dela (blocos de código,
+  código entre crases e `Verbo-Nome` no texto) são procurados no PowerShell da máquina, que só os analisa, sem
+  executar. O aviso aponta cmdlets e parâmetros que não existem aqui, com nomes parecidos, e cmdlets reais que mudam o
+  sistema (os que aceitam `-WhatIf`), e sempre diz que não confere se o comando faz o que foi pedido. Blocos de bash,
+  sh e cmd são citados como não conferidos. Um PowerShell fica aberto em segundo plano: ~14 ms por resposta, ~90–190
+  ms com nome inventado (i7-10610U). Liga no terminal; `--command-check`, `--no-command-check` e
+  `--check-commands ARQUIVO` (sem modelo).
+- **Conferência dos comandos de bash/sh:** no Linux, no macOS e no Git Bash, os comandos das respostas são separados
+  em C (pipes, `&&`, `sudo`, `VAR=valor`, redirecionamentos, here-documents, prompt `$ `) e o `sh` procura cada
+  programa no PATH e cada opção e subcomando no manual da máquina, sem rodar nada da resposta. Aponta também os
+  comandos que mudam o sistema (`rm`, `dd`, `systemctl restart`, `apt install`, `sed -i`, `find -delete`...). Sem
+  manual (containers, instalações mínimas), vale um índice embutido com as opções e subcomandos de 178 programas,
+  tirado dos manuais do Ubuntu 24.04 (`scripts/cmdcheck/`). Lê também as opções do `apt` no manual do `apt-get`,
+  os manuais em mdoc (`ssh-keygen`), os manuais próprios de subcomando (`docker-ps`, `git-commit`) e reconhece os
+  builtins do bash (`history`, `source`); cada aviso sai uma vez só. O chat avisa quando não há shell para conferir.
+  Respostas sintéticas das duas conferências em `tests/goldens/cmdcheck-casos.json`.
+- **Livro de comandos:** 62 tarefas de manutenção em português com comandos reais de PowerShell e bash, embutidas no
+  binário. Uma mensagem do chat com palavras em comum com uma tarefa chega ao modelo depois dos exemplos de até duas
+  tarefas, e o chat diz quais. Em 120 pedidos escritos sem ver o livro, o Dolphin 1B acertou 58 contra 42 (p = 0,005).
+  Liga no chat; `--no-book` desliga, `--book` liga também com `--chat --prompt`. As ferramentas decidem só pelas
+  palavras do usuário. A busca em C (`src/book.c`) é a mesma do eval (`scripts/cmdcheck/livro.ts`), conferida em
+  1.064 perguntas (`tests/goldens/livro-busca.tsv`).
 - **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
   3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
   O runtime ganhou o escalonamento de RoPE `llama3` (quatro chaves opcionais `rope_llama3_*` na `config.ini`), o
