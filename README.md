@@ -111,7 +111,7 @@ Basta executar o binário sem `--prompt`. O cache KV é reaproveitado entre mens
 $ ./dist/qwen-pt
 smolmoe 0.5.0 - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.
 Ferramentas: data_atual, dias_ate, calcular, converter, contar.
-Comandos: !comando roda no pwsh.
+Comandos: !comando roda no pwsh; /rodar executa o comando sugerido.
 
 > Olá! Quem escreveu Dom Casmurro?
 Machado de Assis escreveu Dom Casmurro.
@@ -171,6 +171,22 @@ Qualquer linha digitada começando com `!` roda diretamente no shell do sistema 
 > !cd src
 (pasta atual: C:\Users\voce\smolmoe-c99\src)
 ```
+
+Perguntas comuns sobre a máquina (espaço em disco, memória RAM, processos, IP, tamanho de pasta, maiores arquivos,
+versão do sistema) recebem um **comando pronto**, conferido para o shell e o sistema em uso, sem passar pelo modelo.
+`/rodar` executa o último comando sugerido:
+
+```text
+> verifique o espaço livre do disco
+Comando para ver o espaço em disco (total, usado e livre) no PowerShell 7:
+
+    Get-PSDrive -PSProvider FileSystem | Where-Object Used | Select-Object Name, Root, @{n='Total(GB)';e={...}}, ...
+
+Digite /rodar para executá-lo.
+```
+
+Perguntas sobre conceitos ("o que é", "diferença", "explique") e pedidos sem receita seguem para o modelo. A tabela
+fica em `src/recipes.c`; todas as receitas só leem.
 
 > [!NOTE]
 > **Proteção contra colagem maliciosa (pastejacking):** blocos de texto colados no terminal são enviados inteiros como mensagem ao modelo — linhas com `!` coladas nunca são executadas como comandos.

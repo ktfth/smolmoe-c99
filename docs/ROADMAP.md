@@ -85,6 +85,11 @@ rodar**: os dois atuais já serviram para decidir.
      os arquivos afetados. A função vem desligada por padrão (`--shell`).
    - Medido sem exemplos: o Qwen 0,5B acertou 1 de 9 comandos bash e 1 de 4 PowerShell; com 3 exemplos, 6 de 9. O
      Phi-4-mini acertou de primeira um `Rename-Item` que o Qwen errava.
+   - **Primeiro passo feito (iteração 12):** receitas entregues prontas, sem o modelo, para perguntas sobre disco,
+     memória, processos, IP, pasta, maiores arquivos e versão do sistema (`src/recipes.c`, `/rodar`). Faltam: medir a
+     detecção num conjunto novo de perguntas, executar as receitas de PowerShell no CI do Windows (o teste de
+     `tests/shell.test.ts` cobre só a de disco) e, para os pedidos sem receita, a conferência das propriedades do
+     `Select-Object` contra uma tabela por cmdlet.
 3. **Calendário estendido:** dia da semana de qualquer data, "daqui a N dias" e a diferença entre datas.
 4. **`converter`** (unidades) e **`contar`** (letras e palavras) foram implementadas na v0.5.0; falta medi-las num
    conjunto novo de perguntas.

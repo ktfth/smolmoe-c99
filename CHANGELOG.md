@@ -3,6 +3,13 @@
 ## Não lançado
 
 ### Adicionado
+- **Comandos prontos no chat (`src/recipes.c`):** perguntas sobre espaço em disco, memória RAM, processos, IP,
+  tamanho de pasta, maiores arquivos e versão do sistema recebem um comando conferido para o shell e o sistema em
+  uso (PowerShell no Windows ou fora dele, cmd, bash no Linux, no macOS e no Windows), sem passar pelo modelo.
+  `/rodar` executa o último comando sugerido, só quando digitado. Motivo: o Gemma 3 1B respondia "capacidade do
+  disco" com `Get-PSDrive | Select-Object Size, FreeSpace`, propriedades que não existem e saem como colunas vazias,
+  sem erro; com exemplos no prompt ainda errou 3 de 5 perguntas. Onde a tabela não tem comando conferido (cmd para
+  disco e memória, por exemplo), a pergunta segue para o modelo.
 - **Arquitetura Llama 3.x:** `bun scripts/convert.ts llama` converte checkpoints `LlamaForCausalLM` (Dolphin 3.0 Llama
   3.2 1B/3B, Dolphin 3.0 Llama 3.1 8B, Llama 3.1/3.2 da Meta), com cabeça de saída ligada ao embedding ou separada.
   O runtime ganhou o escalonamento de RoPE `llama3` (quatro chaves opcionais `rope_llama3_*` na `config.ini`), o
