@@ -73,6 +73,22 @@ describe.skipIf(!qwen)("!comando with piped input and --shell-escape", () => {
     }, SLOW);
   }
 
+  /* A disk question gets the checked command, not the model's (src/recipes.c), and
+   * "/rodar" runs it. On Windows this runs the real PowerShell recipe. */
+  test("a recipe answers the disk question and /rodar runs it", () => {
+    const shell = WINDOWS ? "powershell" : "sh";
+    const r = runWithInput(chatArgs(["--shell-escape", "--shell", shell]),
+      "/rodar\nverifique o espaço livre do disco\n/rodar\n/sair\n", BINARY, folder(`recipe-${shell}`));
+    const out = r.stdout.toString();
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("(nenhum comando sugerido ainda)");
+    expect(out).toContain("Comando para ver o espaço em disco");
+    expect(out).toContain(WINDOWS ? "Get-PSDrive -PSProvider FileSystem" : "df -h");
+    expect(r.stderr).toContain(WINDOWS ? "(rodando: Get-PSDrive" : "(rodando: df -h)");
+    if (WINDOWS) expect(out).toContain("Livre(GB)");
+    expect(r.stderr).toContain("(código de saída 0)");
+  }, SLOW);
+
   test("piped input runs nothing without --shell-escape: the line is a message", () => {
     const dir = folder("pipe");
     const r = runWithInput(chatArgs(["--shell", WINDOWS ? "cmd" : "sh"]), "!echo x > pwned.txt\n/sair\n", BINARY, dir);

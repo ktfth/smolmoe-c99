@@ -2,6 +2,7 @@
 #include "config.h"
 #include "platform.h"
 #include "process.h"
+#include "recipes.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -112,6 +113,38 @@ static int read_message(const ChatContext *c, int *truncated, int *pasted) {
     return len;
 }
 
+/* The last recipe shown (recipes.h): "/rodar" runs it. */
+static const char *last_recipe;
+
+/* Answers a request that a recipe covers, without the model: the command
+ * checked for this shell, and how to run it. Returns 1 when it answered. The
+ * model does not see this exchange. */
+static int recipe_reply(const ChatContext *c, int truncated) {
+    Recipe r;
+    char text[2048];
+    int n;
+    if (!c->shell || truncated || !recipe_find(c->line, c->shell->kind, recipe_host_os(), &r)) return 0;
+    n = snprintf(text, sizeof(text), "Comando para ver %s no %s:\n\n    %s\n\nDigite /rodar para executá-lo.\n",
+                 r.topic, c->shell->name, r.command);
+    if (n < 0 || (size_t)n >= sizeof(text)) return 0;
+    output_bytes(c->out, (const unsigned char *)text, (uint32_t)n);
+    output_finish(c->out);
+    if (fflush(c->out->f)) die("output flush failed");
+    last_recipe = r.command;
+    return 1;
+}
+
+/* "/rodar": runs the last recipe, only when typed (a pasted line runs nothing). */
+static void run_recipe(const ChatContext *c, int pasted) {
+    if (!c->shell) fputs("(comandos desligados: sem shell para o !)\n", stderr);
+    else if (pasted) fputs("(texto colado: /rodar só executa quando é digitado sozinho)\n", stderr);
+    else if (!last_recipe) fputs("(nenhum comando sugerido ainda)\n", stderr);
+    else {
+        fprintf(stderr, "(rodando: %s)\n", last_recipe);
+        shell_execute(c->shell, last_recipe, !c->terminal);
+    }
+}
+
 static int has_command_line(const char *text) {
     return text[0] == '!' || strstr(text, "\n!") != NULL;
 }
@@ -160,7 +193,7 @@ void chat_run(const ChatContext *c) {
     }
     fprintf(stderr, "smolmoe " SMOLMOE_VERSION " - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.\n");
     if (e->tools) fputs("Ferramentas: data_atual, dias_ate, calcular, converter, contar.\n", stderr);
-    if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s.\n", c->shell->name);
+    if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s; /rodar executa o comando sugerido.\n", c->shell->name);
     for (;;) {
         int len, truncated, pasted;
         fputs("\n> ", stderr);
@@ -175,12 +208,22 @@ void chat_run(const ChatContext *c) {
             fprintf(stderr, "(mensagem cortada em %d bytes; aumente --context para mensagens maiores)\n", len);
         if (is_command(c->line, "/limpar", "/reset")) {
             engine_reset(e);
+            last_recipe = NULL;
             follow_paste = 0;
             fputs("(conversa reiniciada)\n", stderr);
             continue;
         }
         if (command_line(c, truncated, pasted)) {
             follow_paste = 0;
+            continue;
+        }
+        if (is_command(c->line, "/rodar", "/run")) {
+            run_recipe(c, pasted);
+            follow_paste = 0;
+            continue;
+        }
+        if (recipe_reply(c, truncated)) {
+            follow_paste = !message_after_bracket;
             continue;
         }
         if (engine_send(e, c->line, (uint32_t)len) < 0) die("%s", sm_last_error());

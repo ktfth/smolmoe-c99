@@ -758,6 +758,38 @@ O Git Bash e o CI (shell do MSYS2) seguem como antes.
 - **Em repouso:** sem nada acontecendo, a janela dorme até chegar um evento, ou por até meio segundo (o cursor do campo pisca). Durante uma
   resposta, redesenha a cada quadro.
 
+## Iteração 12: comandos prontos em vez de gerados
+
+**Problema:** pedido "capacidade do disco" no chat com o Gemma 3 1B, executado com `!`. O comando rodava sem erro,
+mas a coluna de capacidade vinha vazia.
+
+**Reprodução (Gemma 3 1B Q8, greedy, prompt padrão com ferramentas):** quatro pedidos de disco, quatro respostas
+erradas. O pior caso foi `Get-PSDrive -Name C | Select-Object Name, Root, Size, FreeSpace`: `Size` e `FreeSpace` são
+do `Win32_LogicalDisk`, e o `Select-Object` imprime uma coluna vazia para propriedade inexistente, com código de saída
+0. Os outros: `Get-Disk` (disco físico, sem espaço livre) e `Win32_LogicalDisk` sem o `FreeSpace` pedido.
+
+**O que não resolveu:**
+- dizer no prompt de sistema que o shell é o PowerShell: os mesmos erros, mais `Get-Disk | Select-Object Size, Free`;
+- três receitas corretas no prompt: 2 de 5 certas. O modelo escolheu a receita errada e acrescentou um `DeviceID`
+  inventado a uma receita certa.
+
+**Decisão:** o modelo deixa de escrever esses comandos. Uma tabela (`src/recipes.c`) liga tema + pedido a um comando
+por shell e sistema. A detecção usa as palavras do usuário, como o portão das ferramentas: tema ("disco",
+"memória", "processos"...) e palavra de pedido ("comando", "verifique", "quanto"...), e nunca uma pergunta de conceito
+("o que é", "diferença", "explique"). A resposta sai direto do chat, e o modelo não a vê. `/rodar` executa o último
+comando sugerido; como o `!`, só quando digitado. Todas as receitas só leem.
+
+**Regras da tabela:**
+- PowerShell sempre com propriedades explícitas que existem no objeto, tamanhos arredondados e poucas colunas. A
+  tabela padrão descarta colunas que não cabem na janela.
+- Sem comando conferido, o campo fica vazio e a pergunta vai ao modelo. É o caso do cmd para disco e memória: o `wmic`
+  saiu do Windows 11 e a saída do `dir` e do `systeminfo` muda com o idioma.
+
+**Limites conhecidos:**
+- Os pedidos de teste são os mesmos que guiaram a tabela; a detecção ainda não foi medida às cegas.
+- Os comandos de PowerShell não rodaram nesta iteração. O teste de integração executa o de disco no Windows.
+- Os comandos Linux rodaram, exceto `ip -brief address`, porque o container de teste não tinha o iproute2.
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é
