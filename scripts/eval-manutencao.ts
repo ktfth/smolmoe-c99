@@ -306,7 +306,9 @@ function perguntar(binario: string, dir: string, sistema: string, cache: string,
   if (/[\r\n]/.test(mensagem)) throw new Error(`${item.id}: pergunta de mais de uma linha; o eval ainda não a envia inteira`);
   const t0 = performance.now();
   const r = Bun.spawnSync([binario, "--model", join(dir, "model.smoe"), "--config", join(dir, "config.ini"),
-    "--tokenizer", join(dir, "tokenizer.qbp"), "--system", sistema, "--no-tools", "--prefix-cache", cache,
+    /* --no-book: the command book (on by default in the chat since it merged) was not there in round 1; its own
+     * eval is scripts/cmdcheck/eval-docs.ts. Without a terminal the recipes and the command check stay off. */
+    "--tokenizer", join(dir, "tokenizer.qbp"), "--system", sistema, "--no-tools", "--no-book", "--prefix-cache", cache,
     "--context", String(CONTEXT), "--tokens", String(item.tokens ?? TOKENS), "--temperature", "0",
     /* The default heap ceiling covers the KV cache of 2048 positions; the Phi's at 4096 needs more. It changes no answer. */
     "--memory-mib", String(MEMORY_MIB)],

@@ -312,7 +312,8 @@ void chat_run(const ChatContext *c) {
             follow_paste = 0;
             continue;
         }
-        if (recipe_reply(c, truncated)) {
+        /* Pasted text (a log) goes to the model, as it forces no tool: a recipe would answer without reading it. */
+        if (!pasted && recipe_reply(c, truncated)) {
             follow_paste = !message_after_bracket;
             continue;
         }

@@ -185,7 +185,8 @@ describe.skipIf(!qwen)("interactive chat input limits", () => {
       `${long}\n/sair\n`);
     expect(r.code).toBe(0);
     /* Exactly two prompts: the long line and /sair. Before the fix its tail became extra turns. */
-    expect(r.stderr.split("\n> ").length - 1).toBe(2);
+    /* Each prompt is the machine's role mark and "> " ("[conservador] > " with SMOLMOE_ENV unset). */
+    expect(r.stderr.match(/\n\[[^\]\n]+\] > /g)?.length ?? 0).toBe(2);
     expect((r.stderr.match(/mensagem cortada em \d+ bytes/g) ?? []).length).toBe(1);
   }, SLOW);
 });

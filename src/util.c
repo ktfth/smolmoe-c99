@@ -1,6 +1,7 @@
 #include "util.h"
 
 #include <errno.h>
+#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -178,7 +179,8 @@ double parse_real(const char *s, const char *what) {
     double n;
     errno = 0;
     n = strtod(s, &end);
-    if (!*s || errno || *end || !isfinite(n)) {
+    /* fabs(n) <= DBL_MAX is isfinite(n); MinGW's isfinite macro trips GCC 15's -Wfloat-conversion here. */
+    if (!*s || errno || *end || !(fabs(n) <= DBL_MAX)) {
         sm_set(SM_ERR_FORMAT, "invalid %s: %s", what, s);
         return 0;
     }

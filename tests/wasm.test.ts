@@ -40,8 +40,11 @@ function stats(r: RunResult): Stats {
 
 /* stderr without the stats line, whose timings differ between runs. Native
  * Windows writes stderr in text mode (CRLF). */
+/* The SMOLMOE_ENV notice tells how to set it on this system (setx on Windows, export elsewhere): the WASI build
+ * is not Windows, so only the notice's first sentence is compared. */
 function notices(r: RunResult): string {
-  return r.stderr.replaceAll("\r\n", "\n").split("\n").filter((line) => !line.includes('{"version"')).join("\n");
+  return r.stderr.replaceAll("\r\n", "\n").split("\n").filter((line) => !line.includes('{"version"'))
+    .map((line) => line.replace(/^(SMOLMOE_ENV não está definida: [^.]*\.).*/, "$1")).join("\n");
 }
 
 test("the WebAssembly build is present where CI expects it", () => {
