@@ -28,6 +28,9 @@ int replace_file(const char *from, const char *to);
 
 /* fopen() that accepts UTF-8 paths on every platform. */
 FILE *open_file(const char *path, const char *mode);
+/* An environment variable in UTF-8 (on Windows, read wide). Returns 0 when it is not set, 1 when out holds the
+ * whole value, 2 when the value was longer than cap and out holds only its start (never a split UTF-8 sequence). */
+int env_utf8(const char *name, char *out, size_t cap);
 int same_file(const char *a, const char *b);
 const char *self_executable_path(void);
 /* Marks a file executable (chmod 0755); no-op on Windows. */

@@ -893,6 +893,10 @@ um conjunto escrito por quem não constrói: o adversário escreveu, com autoriz
     win-012, win-037 e ctn-008; a taxa nas dúvidas cobertas e nas não cobertas (coberta = todas as obrigatórias nos 3
     trechos, calculada só depois da passada); e, por braço, os "proibido", os "falta" com nome de tela em inglês e os
     fora do português.
+- **Casos do papel da máquina, congelados em 2026-11-10** (proposta 4a; escritos pelo adversário, liberados pelo
+  revisor): `ambiente-casos.json`, 32 casos da `SMOLMOE_ENV` (papel, aviso e o valor mostrado no aviso). sha256 do
+  `MANIFEST-ambiente.sha256`: `54800cb6b61fb62d5334b0032430f3dcb5f5f5a27ea57c0dc295c120b42ac928`. O runtime passa
+  em todos (`tests/papel.test.ts`, pelo ambiente de verdade).
 - **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
   log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
 - **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]

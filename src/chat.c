@@ -1,5 +1,6 @@
 #include "chat.h"
 #include "config.h"
+#include "papel.h"
 #include "platform.h"
 #include "process.h"
 #include "recipes.h"
@@ -183,6 +184,8 @@ static void notice(void *ctx, const char *line) {
 
 void chat_run(const ChatContext *c) {
     Engine *e = c->engine;
+    PapelLido papel;
+    papel_do_ambiente(&papel);
     e->sink.ctx = c->out;
     e->sink.text = reply_text;
     e->sink.reply_end = reply_end;
@@ -199,9 +202,10 @@ void chat_run(const ChatContext *c) {
         fprintf(stderr, "Ferramentas: %s.\n", names);
     }
     if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s; /rodar executa o comando sugerido.\n", c->shell->name);
+    papel_anunciar(&papel, stderr_color(), stderr);
     for (;;) {
         int len, truncated, pasted;
-        fputs("\n> ", stderr);
+        fprintf(stderr, "\n%s > ", papel_marca(papel.papel));
         fflush(stderr);
         len = read_message(c, &truncated, &pasted);
         if (len < 0 || is_command(c->line, "/sair", "/exit")) break;

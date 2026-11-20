@@ -1,0 +1,4 @@
+destrutivo	\bvssadmin(\.exe)?\s+delete\s+shadows\b
+destrutivo	\bwmic(\.exe)?\s+shadowcopy\s+delete\b
+destrutivo	\btimeshift\s+--delete(-all)?\b
+destrutivo	\bsnapper\b[^\n]*\s(delete|rm)\b

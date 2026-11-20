@@ -183,6 +183,54 @@ FILE *open_file(const char *path, const char *mode) {
     return f;
 }
 
+/* The wide variable, so a value like "produção" arrives in UTF-8 and not in the ANSI code page getenv uses. A value
+ * of any length is read whole (a buffer too small is left untouched by the API, which returns the size it needs),
+ * converted, then cut to cap without splitting a UTF-8 sequence. */
+int env_utf8(const char *name, char *out, size_t cap) {
+    wchar_t *wn = widen(name), *value = NULL;
+    char *utf8;
+    DWORD size = 0, n;
+    int bytes, cut;
+    size_t keep;
+    if (!cap) {
+        free(wn);
+        return 0;
+    }
+    out[0] = 0;
+    for (;;) {
+        SetLastError(0);
+        n = GetEnvironmentVariableW(wn, value, size);
+        if (n == 0) {
+            int absent = GetLastError() == ERROR_ENVVAR_NOT_FOUND;
+            free(wn);
+            free(value);
+            return !absent; /* present and empty, or absent */
+        }
+        if (n < size) break; /* read whole: n characters, without the terminator */
+        free(value);
+        size = n; /* the size it needs, terminator included; it may grow again before the next call */
+        value = (wchar_t *)malloc((size_t)size * sizeof(*value));
+        if (!value) die("allocation failed");
+    }
+    free(wn);
+    bytes = WideCharToMultiByte(CP_UTF8, 0, value, -1, NULL, 0, NULL, NULL);
+    utf8 = bytes > 0 ? (char *)malloc((size_t)bytes) : NULL;
+    cut = !utf8; /* not converted: the caller gets nothing, which is not the value */
+    if (utf8 && WideCharToMultiByte(CP_UTF8, 0, value, -1, utf8, bytes, NULL, NULL) > 0) {
+        keep = strlen(utf8);
+        if (keep >= cap) {
+            cut = 1;
+            keep = cap - 1;
+            while (keep && ((unsigned char)utf8[keep] & 0xC0) == 0x80) --keep; /* never split a sequence */
+        }
+        memcpy(out, utf8, keep);
+        out[keep] = 0;
+    }
+    free(utf8);
+    free(value);
+    return cut ? 2 : 1;
+}
+
 static int file_identity(const char *path, BY_HANDLE_FILE_INFORMATION *info) {
     wchar_t *w = widen(path);
     HANDLE h = CreateFileW(w, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
@@ -412,6 +460,24 @@ void unmap_file(MappedFile *m) {
 
 FILE *open_file(const char *path, const char *mode) {
     return fopen(path, mode);
+}
+
+int env_utf8(const char *name, char *out, size_t cap) {
+    const char *v = getenv(name);
+    size_t keep;
+    int cut = 0;
+    if (!cap) return 0;
+    out[0] = 0;
+    if (!v) return 0;
+    keep = strlen(v);
+    if (keep >= cap) {
+        cut = 1;
+        keep = cap - 1;
+        while (keep && ((unsigned char)v[keep] & 0xC0) == 0x80) --keep; /* never split a UTF-8 sequence */
+    }
+    memcpy(out, v, keep);
+    out[keep] = 0;
+    return cut ? 2 : 1;
 }
 
 int same_file(const char *a, const char *b) {

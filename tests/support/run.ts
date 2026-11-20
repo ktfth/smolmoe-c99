@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const ROOT = resolve(import.meta.dir, "..", "..");
-const BUILD = resolve(ROOT, process.env.SMOLMOE_BUILD ?? "build");
+export const BUILD = resolve(ROOT, process.env.SMOLMOE_BUILD ?? "build");
 const EXE = process.platform === "win32" ? ".exe" : "";
 
 export const BINARY = join(BUILD, `smolmoe${EXE}`);

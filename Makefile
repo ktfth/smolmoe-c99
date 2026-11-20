@@ -41,7 +41,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell recipes sha256 prefixcache engine chat main
+SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell recipes sha256 prefixcache papel regex engine chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -71,6 +71,8 @@ TEST_SHELL := $(BUILD)/test-shell$(EXE)
 TEST_RECIPES := $(BUILD)/test-recipes$(EXE)
 TEST_DESKTOP := $(BUILD)/test-desktop$(EXE)
 TEST_ERR   := $(BUILD)/test-errors$(EXE)
+TEST_PAPEL := $(BUILD)/test-papel$(EXE)
+TEST_REGEX := $(BUILD)/test-regex$(EXE)
 TEST_INV   := $(BUILD)/test-inventory$(EXE)
 INVENTARIO := $(BUILD)/smolmoe-inventario$(EXE)
 OBJ_INV    := $(BUILD)/obj/inventory.o $(BUILD)/obj/sha256.o
@@ -149,6 +151,14 @@ $(TEST_DESKTOP): $(BUILD)/tests/test_desktop.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
 $(TEST_ERR): $(BUILD)/tests/test_errors.o $(BUILD)/obj/desktop.o $(OBJ_LIB)
 	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
+# Reads SMOLMOE_ENV as the chat does; tests/papel.test.ts runs it for every case of ambiente-casos.json.
+$(TEST_PAPEL): $(BUILD)/tests/papel_main.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
+# The C regex matcher; tests/regex.test.ts compares it with JavaScript's RegExp on the change list.
+$(TEST_REGEX): $(BUILD)/tests/regex_main.o $(OBJ_LIB)
+	$(CC) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+
 $(BUILD)/console-input.exe: tests/support/console_input.c
 	@mkdir -p $(dir $@)
 	$(CC) $(OPT) $(STD) $(PLATFORM) $< -o $@
@@ -172,7 +182,7 @@ test-unit: $(TEST_KERN) $(TEST_TOOLS) $(TEST_TOK) $(TEST_CALC) $(TEST_SHELL) $(T
 TEST_TIMEOUT_MS ?= 30000
 SLOW_TEST_MS ?= 180000
 
-test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE) $(CONSOLE_INPUT) $(TEST_DESKTOP)
+test-integration: $(BIN) $(BIN_SCALAR) $(QUANTIZE) $(BUNDLE) $(CONSOLE_INPUT) $(TEST_DESKTOP) $(TEST_PAPEL) $(TEST_REGEX)
 	SMOLMOE_BUILD=$(BUILD) SMOLMOE_SLOW_MS=$(SLOW_TEST_MS) bun test --timeout $(TEST_TIMEOUT_MS)
 
 test: test-unit test-integration
