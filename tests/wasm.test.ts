@@ -105,5 +105,5 @@ describe.skipIf(!built)("WebAssembly build", () => {
     expect(native.stderr).toContain("[ferramenta] calcular");
     expect(web.stdout.toString()).toBe(native.stdout.toString());
     expect(notices(web)).toBe(notices(native));
-  }, SLOW);
+  }, 2 * SLOW); /* two whole chats; the WASI host alone takes over 2 min on a 4-core laptop */
 });

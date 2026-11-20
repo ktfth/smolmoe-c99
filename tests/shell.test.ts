@@ -124,9 +124,10 @@ describe.skipIf(!qwen)("!comando with piped input and --shell-escape", () => {
   }, SLOW);
 });
 
-/* Lines that are already waiting together when the chat reads them look like a
- * paste, so these tests type only once the chat is ready (its banner shows). */
-const READY = "Digite sua mensagem";
+/* A line already waiting when the chat starts reading looks like a paste, so
+ * these tests type only once the chat is ready: its prompt ("[conservador] > ",
+ * "[dev] > "...) shows. The banner is not enough: notices follow it. */
+const READY = "] > ";
 
 /* Pastes and typing in a real console, through tests/support/console_input.c:
  * one step arrives at once (a paste), "+N" waits N ms (a person between lines),
