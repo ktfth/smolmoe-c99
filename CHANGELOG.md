@@ -18,6 +18,10 @@
   `make dolphin-gui`, `make dolphin-q5` e `make dolphin-weights` (download fixado por SHA-256 do Dolphin 3.0 Llama
   3.2 1B). Logits validados contra uma referência float32 independente (KL médio 0,0045 em Q8) e tokenizer contra o
   Hugging Face; detalhes em `docs/MODELS.md`.
+- **Conversor do Qwen2.5-1.5B-Instruct** (candidato ao kit de manutenção offline). `fetch-qwen2 --size 1.5b` baixa
+  a revisão fixa e confere o SHA-256. O `qwen2` reconhece o tamanho pelo `config.json` e grava a revisão certa na
+  proveniência; sem revisão fixa, grava `unpinned`. O teste confere que o 1,5B convertido lê um texto fixo em pt-BR
+  com NLL menor que o 0,5B, porque carregar e gerar não provam que os pesos estão certos.
 - **`smolmoe-inventario`:** inventário defensivo só leitura de máquinas Linux (portas em escuta com processo,
   usuários com login, grupos administrativos, binários SUID/SGID com hash, caminhos graváveis por todos, pontos de
   persistência, chaves SSH autorizadas, configurações de segurança e alertas) e `--comparar` entre dois relatórios,

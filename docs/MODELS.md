@@ -51,6 +51,9 @@ comandos `fetch-*` usam revisões fixas e conferem SHA-256 dos arquivos declarad
 bun scripts/convert.ts fetch-qwen2 downloads/qwen2.5-0.5b-instruct-src
 bun scripts/convert.ts qwen2 downloads/qwen2.5-0.5b-instruct-src models/qwen2.5-0.5b-instruct
 
+bun scripts/convert.ts fetch-qwen2 downloads/qwen2.5-1.5b-instruct-src --size 1.5b   # 3,1 GB
+bun scripts/convert.ts qwen2 downloads/qwen2.5-1.5b-instruct-src models/qwen2.5-1.5b-instruct
+
 bun scripts/convert.ts fetch-gemma3 downloads/gemma-3-1b-it          # requer HF_TOKEN
 bun scripts/convert.ts gemma3 downloads/gemma-3-1b-it models/gemma-3-1b-it
 
@@ -75,6 +78,11 @@ bun scripts/convert.ts llama downloads/dolphin3.0-llama3.2-1b models/dolphin3.0-
   como texto de propósito. Decode de cerca de 14 a 16 tok/s.
 
 - **Qwen:** a saída é idêntica byte a byte aos arquivos do Release (os hashes da tabela acima). Leva cerca de 9 s.
+- **Qwen2.5-1.5B:** candidato a modelo do kit de manutenção, ainda fora do Release. O conversor reconhece o tamanho
+  pelo `config.json`. Leva cerca de 40 s e gera 1,7 GB. A saída é determinística: `model.smoe` tem SHA-256
+  `790e20de4db9b9508817685e32608ddaf63e359d14550580d895f20521320214`, e o `tokenizer.qbp` é o mesmo do 0,5B. No
+  mesmo texto em pt-BR, ele tem NLL de 1,99 contra 2,50 do 0,5B (`tests/convert-qwen.test.ts`, que roda com
+  `SMOLMOE_QWEN15_SOURCE=downloads/qwen2.5-1.5b-instruct-src`).
 - **Phi-4-mini:** leva cerca de 40 s com 8 threads e gera 4,3 GB. O Release não o hospeda, porque o GitHub limita
   cada arquivo a 2 GB. A saída é determinística: `model.smoe` tem SHA-256
   `83c24b62192add141c230cf30d92d5c0a14d0f36b4642b3249801277419d3468` e `tokenizer.qbp`,

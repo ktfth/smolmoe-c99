@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fetchPinned } from "../scripts/hf/fetch";
+import { QWEN2_FILES, QWEN2_PINS, qwen2Files } from "../scripts/hf/qwen2";
 import { ROOT, tempDir } from "./support/run";
 
 const work = tempDir("convert-cli");
@@ -24,6 +25,8 @@ describe("command line", () => {
     [["qwen2", "a", "b", "--threads", "0"], /--threads must be 1\.\.64/],
     [["phi3", "a", "b", "--container", "v4"], /--container must be v2 or v3/],
     [["check", "m", "--bogus"], /bogus/],
+    [["fetch-qwen2", "d", "--size", "3b"], /--size must be 0\.5b or 1\.5b/],
+    [["qwen2", "a", "b", "--size", "1.5b"], /--size is for fetch-qwen2/],
     [["frobnicate"], /usage/],
   ])("%p is a usage error (exit 2)", (args, error) => {
     const r = cli(...args);
@@ -73,6 +76,20 @@ describe("pinned downloads", () => {
 
   test.each([["../evil", "main"], ["ok.bin", "../main"]])("rejects unsafe names %p@%p", async (name, revision) => {
     await expect(fetchPinned("org/model", [{ name, revision }], join(work.path, "dl-x"), () => {}, fake)).rejects.toThrow(/invalid/);
+  });
+
+  test("each Qwen2.5 size pins its own repo, revision and weights, and the 0.5B keeps the shipped pin", () => {
+    const small = qwen2Files(QWEN2_PINS["0.5b"]), big = qwen2Files(QWEN2_PINS["1.5b"]);
+    expect(QWEN2_FILES).toEqual(small);
+    expect(small.find((f) => f.name === "model.safetensors")).toEqual({ name: "model.safetensors",
+      revision: "eaa56b503cc0a8a4d15de1dd8bd2a7e95a716be2",
+      sha256: "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe" });
+    expect(QWEN2_PINS["1.5b"].repo).toBe("Qwen/Qwen2.5-1.5B-Instruct");
+    expect(big.filter((f) => f.name !== "LICENSE").every((f) => f.revision === QWEN2_PINS["1.5b"].revision && f.sha256))
+      .toBe(true);
+    /* The configs tell the sizes apart in pinned conversion; the tokenizer is the same file. */
+    expect(QWEN2_PINS["1.5b"].configSha256).not.toBe(QWEN2_PINS["0.5b"].configSha256);
+    expect(QWEN2_PINS["1.5b"].tokenizerSha256).toBe(QWEN2_PINS["0.5b"].tokenizerSha256);
   });
 
   test("rejects a malformed repo id", async () => {

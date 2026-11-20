@@ -58,6 +58,8 @@ describe("Qwen2-shaped synthetic checkpoint", () => {
       tokenizer: readFileSync(join(out, "tokenizer.qbp")) });
     expect([r.container.version, r.container.count, r.tokenizer.version]).toEqual([2, 3 + 2 * 13, 1]);
     expect(readdirSync(out).some((f) => f.endsWith(".partial") || f.endsWith(".tmp"))).toBe(false);
+    /* Unpinned: the record names no revision it never checked. */
+    expect(JSON.parse(readFileSync(join(out, "provenance.json"), "utf8"))).toMatchObject({ revision: "unpinned" });
   });
 
   test("embed rows follow the token permutation; q/k rows the head permutation; router is zero", () => {
@@ -145,6 +147,14 @@ describe("Qwen2-shaped synthetic checkpoint", () => {
   ])("the Qwen2 gate rejects %s", (_what, patch) => {
     const raw = JSON.parse(readFileSync(join(QWEN_SRC, "config.json"), "utf8")) as Record<string, unknown>;
     expect(() => qwen2Config({ ...raw, ...patch })).toThrow(/only full-attention/);
+  });
+
+  test("the Qwen2 gate takes the 1.5B shape: a sliding_window size that is not used, head_dim 128", () => {
+    const raw = JSON.parse(readFileSync(join(QWEN_SRC, "config.json"), "utf8")) as Record<string, unknown>;
+    const c = qwen2Config({ ...raw, hidden_size: 1536, intermediate_size: 8960, num_hidden_layers: 28,
+      num_attention_heads: 12, num_key_value_heads: 2, max_position_embeddings: 32768, sliding_window: 32768,
+      max_window_layers: 21, use_sliding_window: false, rope_theta: 1000000.0, vocab_size: 151936 });
+    expect(c).toMatchObject({ dim: 1536, hidden_dim: 8960, layers: 28, heads: 12, kv_heads: 2, max_context: 32768 });
   });
 });
 

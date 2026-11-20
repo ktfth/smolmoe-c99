@@ -1,8 +1,8 @@
 /**
- * Qwen2 (Qwen2.5-0.5B-Instruct) -> smolmoe, a TypeScript port of
- * tools/import_qwen2.py + tools/q8pack.c that reproduces the shipped files
- * byte for byte: config.ini, tokenizer.qbp (v1), model.smoe (v2, compact),
- * provenance.json and LICENSE-Qwen.txt.
+ * Qwen2 (Qwen2.5-0.5B-Instruct, Qwen2.5-1.5B-Instruct) -> smolmoe, a TypeScript
+ * port of tools/import_qwen2.py + tools/q8pack.c that reproduces the shipped
+ * 0.5B files byte for byte: config.ini, tokenizer.qbp (v1), model.smoe (v2,
+ * compact), provenance.json and LICENSE-Qwen.txt.
  */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -20,25 +20,69 @@ import { qkRows, rangeRows } from "./permute";
 import { type ModelPlan, type TensorSource, checkPlan, writeModel } from "./pipeline";
 import { type Checkpoint, type HfTensor, openCheckpoint } from "./safetensors";
 
-export const QWEN2 = {
-  repo: "Qwen/Qwen2.5-0.5B-Instruct",
-  revision: "eaa56b503cc0a8a4d15de1dd8bd2a7e95a716be2",
-  modelSha256: "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe",
-  tokenizerSha256: "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
-  configSha256: "18e18afcaccafade98daf13a54092927904649e1dd4eba8299ab717d5d94ff45",
-  specialIds: { "<|endoftext|>": 151643, "<|im_start|>": 151644, "<|im_end|>": 151645 },
-} as const;
+export interface Qwen2Pin {
+  readonly repo: string;
+  readonly revision: string;
+  readonly modelSha256: string;
+  readonly tokenizerSha256: string;
+  readonly configSha256: string;
+}
+
+/** The pinned checkpoints, by size. Both share the tokenizer (same SHA-256) and the tied-head shape. */
+export const QWEN2_PINS = {
+  "0.5b": {
+    repo: "Qwen/Qwen2.5-0.5B-Instruct",
+    revision: "eaa56b503cc0a8a4d15de1dd8bd2a7e95a716be2",
+    modelSha256: "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe",
+    tokenizerSha256: "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+    configSha256: "18e18afcaccafade98daf13a54092927904649e1dd4eba8299ab717d5d94ff45",
+  },
+  "1.5b": {
+    repo: "Qwen/Qwen2.5-1.5B-Instruct",
+    revision: "989aa7980e4cf806f80c7fef2b1adb7bc71aa306",
+    modelSha256: "dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee",
+    tokenizerSha256: "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+    configSha256: "98d2ff8cc47488d08a2b0b3acf4eb99ef210779b42bd48605f6b8e36acdbf670",
+  },
+} as const satisfies Record<string, Qwen2Pin>;
+
+export type Qwen2Size = keyof typeof QWEN2_PINS;
+
+/** The shipped model. */
+export const QWEN2: Qwen2Pin = QWEN2_PINS["0.5b"];
+
+/** What an unpinned conversion records: not a revision it never checked. */
+const UNPINNED: Qwen2Pin = { repo: "unpinned qwen2 checkpoint", revision: "unpinned", modelSha256: "",
+  tokenizerSha256: "", configSha256: "" };
+
+const QWEN2_SPECIAL_IDS = { "<|endoftext|>": 151643, "<|im_start|>": 151644, "<|im_end|>": 151645 } as const;
+
+export function isQwen2Size(s: string): s is Qwen2Size {
+  return Object.hasOwn(QWEN2_PINS, s);
+}
 
 /**
  * The files tools/import_qwen2.py fetch() downloads. LICENSE comes from main, like the Python, and is not
  * hash-pinned (it is only copied next to the model).
  */
-export const QWEN2_FILES: readonly PinnedFile[] = [
-  { name: "config.json", revision: QWEN2.revision, sha256: QWEN2.configSha256 },
-  { name: "tokenizer.json", revision: QWEN2.revision, sha256: QWEN2.tokenizerSha256 },
-  { name: "LICENSE", revision: "main" },
-  { name: "model.safetensors", revision: QWEN2.revision, sha256: QWEN2.modelSha256 },
-];
+export function qwen2Files(pin: Qwen2Pin): readonly PinnedFile[] {
+  return [
+    { name: "config.json", revision: pin.revision, sha256: pin.configSha256 },
+    { name: "tokenizer.json", revision: pin.revision, sha256: pin.tokenizerSha256 },
+    { name: "LICENSE", revision: "main" },
+    { name: "model.safetensors", revision: pin.revision, sha256: pin.modelSha256 },
+  ];
+}
+
+export const QWEN2_FILES: readonly PinnedFile[] = qwen2Files(QWEN2);
+
+/** The pinned checkpoint a config.json belongs to, told apart by its SHA-256. */
+function pinOf(configPath: string): Qwen2Pin {
+  const digest = sha256File(configPath);
+  const pin = Object.values(QWEN2_PINS).find((p) => p.configSha256 === digest);
+  if (!pin) throw new Error(`${configPath}: SHA-256 matches no pinned revision (${Object.keys(QWEN2_PINS).join(", ")})`);
+  return pin;
+}
 
 const QWEN2_REGEX = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
 
@@ -81,7 +125,7 @@ export function qwen2Tokenizer(json: unknown, vocab: number, pinned: boolean): Q
   gateTokenizer(t);
   const hf = readHfBpe(t);
   if (pinned) {
-    for (const [content, id] of Object.entries(QWEN2.specialIds))
+    for (const [content, id] of Object.entries(QWEN2_SPECIAL_IDS))
       if (!hf.added.some((a) => a.id === id && a.content === content)) throw new Error(`tokenizer.json: ${content} is not id ${id}`);
   }
   const built = buildTokenizer(hf, { vocabSize: vocab, bos: "<|endoftext|>", eos: "<|im_end|>", flagUnreachable: false });
@@ -132,9 +176,9 @@ export function qwen2Plan(c: ModelConfig, ckpt: Checkpoint, oldIds: Uint32Array)
 }
 
 /** The exact record import_qwen2.py writes (json.dumps(indent=2) + newline). */
-export function qwen2Provenance(modelSha256: string, tokenizerSha256: string): string {
+export function qwen2Provenance(modelSha256: string, tokenizerSha256: string, pin: Qwen2Pin = QWEN2): string {
   return `${JSON.stringify({
-    model: QWEN2.repo, revision: QWEN2.revision, source_sha256: modelSha256, tokenizer_sha256: tokenizerSha256,
+    model: pin.repo, revision: pin.revision, source_sha256: modelSha256, tokenizer_sha256: tokenizerSha256,
     quantization: "lossy Q8 block32", qk_permutation: "split-half rotary to adjacent-pair, including bias",
     tied_lm_head: true, full_kimi_compatible: false,
   }, null, 2)}\n`;
@@ -143,10 +187,9 @@ export function qwen2Provenance(modelSha256: string, tokenizerSha256: string): s
 export async function convertQwen2(o: ConvertOptions): Promise<ConvertReport> {
   const started = performance.now();
   const configPath = join(o.source, "config.json"), tokenizerPath = join(o.source, "tokenizer.json");
-  if (o.pinned) {
-    for (const [path, want] of [[configPath, QWEN2.configSha256], [tokenizerPath, QWEN2.tokenizerSha256]] as const)
-      if (sha256File(path) !== want) throw new Error(`${path}: SHA-256 does not match revision ${QWEN2.revision}`);
-  }
+  const pin = o.pinned ? pinOf(configPath) : UNPINNED;
+  if (o.pinned && sha256File(tokenizerPath) !== pin.tokenizerSha256)
+    throw new Error(`${tokenizerPath}: SHA-256 does not match revision ${pin.revision}`);
   const config = qwen2Config(readJsonFile(configPath));
   const tokenizer = qwen2Tokenizer(readJsonFile(tokenizerPath), config.vocab_size, o.pinned);
   const ckpt = openCheckpoint(o.source);
@@ -161,10 +204,10 @@ export async function convertQwen2(o: ConvertOptions): Promise<ConvertReport> {
   /* Side files are written only once the sources are verified, and before the model lands. */
   const beforeRename = async () => {
     const h = await hashes;
-    if (o.pinned && h.get(modelPath) !== QWEN2.modelSha256) throw new Error("official model checksum mismatch");
+    if (o.pinned && h.get(modelPath) !== pin.modelSha256) throw new Error("official model checksum mismatch");
     writeAtomic(files[0]!, formatConfig(config));
     writeAtomic(files[1]!, tokenizer.bytes);
-    writeAtomic(files[3]!, qwen2Provenance(h.get(modelPath)!, h.get(tokenizerPath)!));
+    writeAtomic(files[3]!, qwen2Provenance(h.get(modelPath)!, h.get(tokenizerPath)!, pin));
   };
   o.log(`converting ${config.layers} layers with ${o.threads} thread(s)`);
   await writeModel(plan, { output: files[2]!, container: o.container, threads: o.threads, tokenizer: tokenizer.bytes,
