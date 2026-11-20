@@ -169,12 +169,14 @@ build/smolmoe-gui models/qwen2.5-0.5b-instruct/model.smoe
 | `make qwen-gui` | `qwen-pt-gui` | A janela com o Qwen Q8 |
 | `make qwen-q5` | `qwen-pt-q5` | Terminal com o Qwen Q5: 340 MB, menos memória. O arquivo Q5 é gerado do Q8. |
 | `make qwen-q5-gui` | `qwen-pt-q5-gui` | A janela com o Qwen Q5 |
+| `make qwen-1.5b` | `qwen-1.5b` | Terminal com o Qwen2.5-1.5B Q8 (1,7 GB); baixa e converte na primeira vez (3,1 GB de download, ou `make qwen-1.5b-weights`) |
+| `make qwen-1.5b-gui` | `qwen-1.5b-gui` | A janela com o Qwen2.5-1.5B |
 | `make gemma` | `gemma-3-1b` | Terminal com o Gemma 3 1B; baixa e converte na primeira vez (requer `HF_TOKEN` e aceite dos termos) |
 | `make gemma-gui` | `gemma-3-1b-gui` | A janela com o Gemma 3 1B |
 | `make phi` | `phi-4-mini` | Terminal com o Phi-4-mini (4,4 GB). Os pesos vêm de `make phi-weights`: 7,7 GB de download e ~13 GB de disco. No Windows o programa e o `.smoe` ficam lado a lado, porque o executável passaria de 4 GiB. |
 | `make phi-gui` | `phi-4-mini-gui` | A janela com o Phi-4-mini. No Windows, o mesmo par programa + `.smoe`. |
 | `make stories` | `tinystories` | Historinhas em inglês, para testar se roda |
-| `make all-models` | todos acima | O Phi entra só quando os pesos já estão em `models/` |
+| `make all-models` | todos acima | Qwen 1.5B, Gemma, Phi e Dolphin entram só quando os pesos já estão em `models/` |
 
 Os pesos do Qwen e do TinyStories são baixados e conferidos (SHA-256) na primeira vez. Cada atalho compila o programa
 de release antes, então um só comando basta. `make help` mostra esta lista.

@@ -110,6 +110,7 @@ static const char *resolve_desktop_path(Desktop *d, const char *arg) {
     if (!arg) return NULL;
     if (!strcmp(arg, "qwen") || !strcmp(arg, "qwen-pt")) return "models/qwen2.5-0.5b-instruct/model.smoe";
     if (!strcmp(arg, "qwen-q5") || !strcmp(arg, "qwen-pt-q5")) return "models/qwen2.5-0.5b-instruct/model-q5.smoe";
+    if (!strcmp(arg, "qwen-1.5b")) return "models/qwen2.5-1.5b-instruct/model.smoe";
     if (!strcmp(arg, "gemma") || !strcmp(arg, "gemma-3") || !strcmp(arg, "gemma-3-1b"))
         return "models/gemma-3-1b-it/model.smoe";
     if (!strcmp(arg, "gemma-270m") || !strcmp(arg, "gemma-3-270m"))

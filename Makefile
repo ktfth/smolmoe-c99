@@ -4,7 +4,7 @@
 #   make test            kernel unit tests + bun integration suite
 #   make sanitize        ASan/UBSan build and tests (Linux/macOS)
 #   make release         stripped, statically linked where supported (release-gui: the same for the window)
-#   make qwen, qwen-gui, qwen-q5, qwen-q5-gui, phi, phi-gui, stories, all-models
+#   make qwen, qwen-q5, qwen-1.5b, gemma, phi, dolphin, stories (and -gui variants), all-models
 #                        dist/: one executable per model, runtime or window + weights
 #   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
 #   make web             build/web: the browser page (needs zig and bun)
@@ -87,7 +87,7 @@ OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
 .PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui \
-	qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui gemma-weights phi phi-gui dolphin dolphin-gui dolphin-q5 dolphin-weights stories all-models phi-weights \
+	qwen qwen-gui qwen-q5 qwen-q5-gui qwen-1.5b qwen-1.5b-gui qwen-1.5b-weights gemma gemma-gui gemma-weights phi phi-gui dolphin dolphin-gui dolphin-q5 dolphin-weights stories all-models phi-weights \
 	chat run-gui run-web help inventario fuzz fuzz-run bench-kernels
 
 all: $(BIN) $(QUANTIZE) $(BUNDLE)
@@ -221,6 +221,7 @@ models:
 # from the Q8 one; Phi-4-mini is converted only on request (make phi-weights).
 DIST        := dist
 QWEN        := models/qwen2.5-0.5b-instruct
+QWEN15      := models/qwen2.5-1.5b-instruct
 GEMMA       := models/gemma-3-1b-it
 PHI         := models/phi-4-mini-instruct
 DOLPHIN     := models/dolphin3.0-llama3.2-1b
@@ -228,7 +229,7 @@ STORIES     := models/tinystories-15m
 REL_CLI     := $(RELEASE_DIR)/smolmoe$(EXE)
 REL_GUI     := $(RELEASE_DIR)/smolmoe-gui$(EXE)
 REL_BUNDLE  := $(RELEASE_DIR)/smolmoe-bundle$(EXE)
-MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui gemma gemma-gui phi phi-gui dolphin dolphin-gui dolphin-q5 stories
+MODEL_ALIASES := qwen qwen-gui qwen-q5 qwen-q5-gui qwen-1.5b qwen-1.5b-gui gemma gemma-gui phi phi-gui dolphin dolphin-gui dolphin-q5 stories
 
 # Windows will not launch a PE image of 4 GiB or more (the size does not fit in
 # 32 bits). The estimate adds the config, the tokenizer, alignment, the trailer
@@ -276,6 +277,10 @@ qwen-q5: release $(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp
 	$(call bundle,qwen-pt-q5,$(QWEN)/model-q5.smoe,$(QWEN),tokenizer.qbp,$(REL_CLI))
 qwen-q5-gui: release-gui $(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp
 	$(call bundle,qwen-pt-q5-gui,$(QWEN)/model-q5.smoe,$(QWEN),tokenizer.qbp,$(REL_GUI))
+qwen-1.5b: release $(QWEN15)/model.smoe
+	$(call bundle,qwen-1.5b,$(QWEN15)/model.smoe,$(QWEN15),tokenizer.qbp,$(REL_CLI))
+qwen-1.5b-gui: release-gui $(QWEN15)/model.smoe
+	$(call bundle,qwen-1.5b-gui,$(QWEN15)/model.smoe,$(QWEN15),tokenizer.qbp,$(REL_GUI))
 gemma: release $(GEMMA)/model.smoe
 	$(call bundle,gemma-3-1b,$(GEMMA)/model.smoe,$(GEMMA),tokenizer.qbp,$(REL_CLI))
 gemma-gui: release-gui $(GEMMA)/model.smoe
@@ -294,9 +299,10 @@ stories: release $(STORIES)/model.smoe $(STORIES)/tokenizer.spb
 	$(call bundle,tinystories,$(STORIES)/model.smoe,$(STORIES),tokenizer.spb,$(REL_CLI))
 endif
 
-# Every alias whose weights can be had without a long conversion; Phi-4-mini and Gemma too
-# once they are in models/.
-all-models: qwen qwen-gui qwen-q5 qwen-q5-gui stories $(if $(wildcard $(GEMMA)/model.smoe),gemma gemma-gui) $(if $(wildcard $(PHI)/model.smoe),phi phi-gui) $(if $(wildcard $(DOLPHIN)/model.smoe),dolphin dolphin-gui)
+# Every alias whose weights can be had without a long conversion; Qwen 1.5B, Gemma, Phi-4-mini and
+# Dolphin too once they are in models/.
+all-models: qwen qwen-gui qwen-q5 qwen-q5-gui stories $(if $(wildcard $(QWEN15)/model.smoe),qwen-1.5b qwen-1.5b-gui) $(if $(wildcard $(GEMMA)/model.smoe),gemma gemma-gui) $(if $(wildcard $(PHI)/model.smoe),phi phi-gui) $(if $(wildcard $(DOLPHIN)/model.smoe),dolphin dolphin-gui)
+	$(if $(wildcard $(QWEN15)/model.smoe),,$(info Qwen2.5-1.5B ficou de fora: os pesos não estão em $(QWEN15) (make qwen-1.5b-weights).))
 	$(if $(wildcard $(GEMMA)/model.smoe),,$(info Gemma-3-1B ficou de fora: os pesos não estão em $(GEMMA) (make gemma-weights).))
 	$(if $(wildcard $(PHI)/model.smoe),,$(info Phi-4-mini ficou de fora: os pesos não estão em $(PHI) (make phi-weights).))
 	$(if $(wildcard $(DOLPHIN)/model.smoe),,$(info Dolphin 3.0 Llama 3.2 1B ficou de fora: os pesos não estão em $(DOLPHIN) (make dolphin-weights).))
@@ -314,6 +320,13 @@ $(STORIES)/tokenizer.spb: | $(STORIES)/model.smoe
 # Q5: 39% smaller, perplexity +1.7% (README).
 $(QWEN)/model-q5.smoe: $(QWEN)/model.smoe | release
 	$(RELEASE_DIR)/smolmoe-quantize$(EXE) --in $< --out $@
+# Qwen2.5-1.5B: 3,1 GB de download, 1,7 GB em Q8.
+$(QWEN15)/model.smoe:
+	$(info Os pesos do Qwen2.5-1.5B não estão em $(QWEN15); baixando e convertendo automaticamente...)
+	$(MAKE) qwen-1.5b-weights
+qwen-1.5b-weights:
+	bun scripts/convert.ts fetch-qwen2 downloads/qwen2.5-1.5b-instruct --size 1.5b
+	bun scripts/convert.ts qwen2 downloads/qwen2.5-1.5b-instruct $(QWEN15)
 $(GEMMA)/model.smoe:
 	$(info Os pesos do Gemma-3-1B não estão em $(GEMMA); baixando e convertendo automaticamente...)
 	$(MAKE) gemma-weights
@@ -346,8 +359,8 @@ help:
 	$(info )
 	$(info $(EMPTY)  make                 programa de terminal: build/smolmoe, smolmoe-bundle, smolmoe-quantize)
 	$(info $(EMPTY)  make gui             janela: build/smolmoe-gui)
-	$(info $(EMPTY)  make chat            abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi|dolphin))
-	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|gemma|phi|dolphin))
+	$(info $(EMPTY)  make chat            abre o chat no terminal (MODEL=qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin))
+	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin))
 	$(info $(EMPTY)  make run-web         abre a interface web em http://localhost:8080)
 	$(info $(EMPTY)  make test            testes (em C e com o bun))
 	$(info $(EMPTY)  make inventario      inventário defensivo só leitura (coleta no Linux) e os testes dele)
@@ -357,6 +370,8 @@ help:
 	$(info $(EMPTY)  make qwen-gui        $(DIST)/qwen-pt-gui         janela, Qwen Q8)
 	$(info $(EMPTY)  make qwen-q5         $(DIST)/qwen-pt-q5          terminal, Qwen Q5: 340 MB, menos memória)
 	$(info $(EMPTY)  make qwen-q5-gui     $(DIST)/qwen-pt-q5-gui      janela, Qwen Q5)
+	$(info $(EMPTY)  make qwen-1.5b       $(DIST)/qwen-1.5b           terminal, Qwen2.5-1.5B Q8 (1,7 GB; pesos: make qwen-1.5b-weights))
+	$(info $(EMPTY)  make qwen-1.5b-gui   $(DIST)/qwen-1.5b-gui       janela, Qwen2.5-1.5B)
 	$(info $(EMPTY)  make gemma           $(DIST)/gemma-3-1b          terminal, Gemma 3 1B (pesos: make gemma-weights))
 	$(info $(EMPTY)  make gemma-gui       $(DIST)/gemma-3-1b-gui      janela, Gemma 3 1B)
 	$(info $(EMPTY)  make phi             $(DIST)/phi-4-mini          terminal, Phi-4-mini 3,8B (pesos: make phi-weights))
@@ -365,16 +380,16 @@ help:
 	$(info $(EMPTY)  make dolphin-gui     $(DIST)/dolphin3-llama3.2-1b-gui janela, Dolphin 3.0 Llama 3.2 1B)
 	$(info $(EMPTY)  make dolphin-q5      $(DIST)/dolphin3-llama3.2-1b-q5 terminal, Dolphin em Q5 (850 MB))
 	$(info $(EMPTY)  make stories         $(DIST)/tinystories         historinhas em inglês, para testar)
-	$(info $(EMPTY)  make all-models      todos acima; Gemma, Phi e Dolphin só quando os pesos já estão em models/)
+	$(info $(EMPTY)  make all-models      todos acima; Qwen 1.5B, Gemma, Phi e Dolphin só quando os pesos já estão em models/)
 	$(info )
 	$(info No Windows, um modelo que passaria de 4 GiB sai como o programa e um .smoe com o mesmo nome, lado a lado.)
 	$(info Os pesos do Qwen e do TinyStories são baixados e conferidos na primeira vez.)
 	@:
 
-chat: $(BIN) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe) $(if $(filter dolphin dolphin-1b llama,$(MODEL)),$(DOLPHIN)/model.smoe) $(if $(filter dolphin-q5 llama-q5,$(MODEL)),$(DOLPHIN)/model-q5.smoe)
+chat: $(BIN) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-1.5b,$(MODEL)),$(QWEN15)/model.smoe) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe) $(if $(filter dolphin dolphin-1b llama,$(MODEL)),$(DOLPHIN)/model.smoe) $(if $(filter dolphin-q5 llama-q5,$(MODEL)),$(DOLPHIN)/model-q5.smoe)
 	$(BIN) $(MODEL)
 
-run-gui: $(GUI) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe) $(if $(filter dolphin dolphin-1b llama,$(MODEL)),$(DOLPHIN)/model.smoe) $(if $(filter dolphin-q5 llama-q5,$(MODEL)),$(DOLPHIN)/model-q5.smoe)
+run-gui: $(GUI) $(if $(filter qwen qwen-pt,$(MODEL)),$(QWEN)/model.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-q5 qwen-pt-q5,$(MODEL)),$(QWEN)/model-q5.smoe $(QWEN)/tokenizer.qbp) $(if $(filter qwen-1.5b,$(MODEL)),$(QWEN15)/model.smoe) $(if $(filter gemma gemma-3 gemma-3-1b,$(MODEL)),$(GEMMA)/model.smoe) $(if $(filter phi phi-4 phi-4-mini,$(MODEL)),$(PHI)/model.smoe) $(if $(filter dolphin dolphin-1b llama,$(MODEL)),$(DOLPHIN)/model.smoe) $(if $(filter dolphin-q5 llama-q5,$(MODEL)),$(DOLPHIN)/model-q5.smoe)
 	$(GUI) $(MODEL)
 
 run-web: web $(QWEN)/model.smoe $(BUNDLE)

@@ -71,7 +71,7 @@ typedef struct Source {
 
 static void usage(FILE *out) {
     fputs("smolmoe " SMOLMOE_VERSION " - CPU inference for SMOEQ8 checkpoints\n\n"
-          "usage: smolmoe [--model] <FILE|DIR|qwen|qwen-q5|gemma|phi|dolphin|stories> [--prompt TEXT] [options]\n"
+          "usage: smolmoe [--model] <FILE|DIR|qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin|stories> [--prompt TEXT] [options]\n"
           "       qwen-pt.exe [--prompt TEXT] [options]     (self-contained bundle: no files needed)\n"
           "  Without a prompt, a chat model starts an interactive conversation.\n"
           "  --config/--tokenizer default to config.ini and tokenizer.qbp/.spb beside the model,\n"
@@ -406,6 +406,7 @@ static const char *resolve_model_target(const char *arg, Memory *mem) {
     if (!arg) return NULL;
     if (!strcmp(arg, "qwen") || !strcmp(arg, "qwen-pt")) return "models/qwen2.5-0.5b-instruct/model.smoe";
     if (!strcmp(arg, "qwen-q5") || !strcmp(arg, "qwen-pt-q5")) return "models/qwen2.5-0.5b-instruct/model-q5.smoe";
+    if (!strcmp(arg, "qwen-1.5b")) return "models/qwen2.5-1.5b-instruct/model.smoe";
     if (!strcmp(arg, "gemma") || !strcmp(arg, "gemma-3") || !strcmp(arg, "gemma-3-1b"))
         return "models/gemma-3-1b-it/model.smoe";
     if (!strcmp(arg, "gemma-270m") || !strcmp(arg, "gemma-3-270m"))

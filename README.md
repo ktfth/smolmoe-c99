@@ -37,12 +37,12 @@ make qwen-gui
 
 ### 2. Usando o runtime `smolmoe` direto com a pasta `models/` (ou apelidos)
 
-Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `gemma`, `gemma-270m`, `phi`, `dolphin`, `dolphin-q5`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
+Tanto `build/smolmoe` (CLI) quanto `build/smolmoe-gui` (Desktop) aceitam apelidos (`qwen`, `qwen-q5`, `qwen-1.5b`, `gemma`, `gemma-270m`, `phi`, `dolphin`, `dolphin-q5`, `stories`) ou pastas de modelo e descobrem `config.ini` e `tokenizer.qbp`/`.spb` automaticamente ao lado do `.smoe`:
 
 ```sh
 # Atalhos diretos via make:
-make chat              # abre o chat no terminal (MODEL=qwen|qwen-q5|gemma|phi)
-make run-gui           # abre a janela gráfica (MODEL=qwen|qwen-q5|gemma|phi)
+make chat              # abre o chat no terminal (MODEL=qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin)
+make run-gui           # abre a janela gráfica (MODEL=qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin)
 make chat gemma        # abre o chat no terminal com Gemma 3 1B
 make run-gui gemma     # abre a janela com Gemma 3 1B
 
@@ -68,6 +68,7 @@ bun scripts/serve-web.ts 3000  # ou escolha a porta diretamente (ex.: http://loc
 |---|---:|---|---:|---:|---:|---|---|
 | **Qwen2.5-0.5B-Instruct** | 0,5B | Q8_0 | 556 MB | ~0,6 GB | 22–27 tok/s | `qwen` / `make qwen` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **Qwen2.5-0.5B-Instruct** | 0,5B | Q5_0 | 340 MB | ~0,4 GB | 15–18 tok/s | `qwen-q5` / `make qwen-q5` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Qwen2.5-1.5B-Instruct** | 1,5B | Q8_0 | 1,7 GB | ~1,8 GB | ~10 tok/s | `qwen-1.5b` / `make qwen-1.5b` | Completas (o mesmo template do 0,5B) |
 | **Gemma-3-1B-Instruct** | 1,0B | Q8_0 | ~1,0 GB | ~1,2 GB | ~12 tok/s | `gemma` / `make gemma` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **Gemma-3-270M-Instruct** | 0,27B | Q8_0 | ~290 MB | não medido | não medido | CLI: `gemma-270m` | Conversão e uso com esses pesos ainda não validados ponta a ponta |
 | **Phi-4-mini-instruct** | 3,8B | Q8_0 | 4,3 GB | ~4,4 GB | ~4 tok/s | `phi` / `make phi` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
@@ -76,9 +77,14 @@ bun scripts/serve-web.ts 3000  # ou escolha a porta diretamente (ex.: http://loc
 
 *\*Medido em um Intel Core i7-10610U (4 núcleos físicos, AVX2). Em Apple Silicon M2 Pro (NEON, 5 threads), o Qwen2.5-0.5B Q8 atinge **64 tok/s** no decode e **148 tok/s** no prefill.*
 
-Para converter o **Gemma 3**, o **Phi-4-mini** ou o **Dolphin 3.0 (Llama 3.2 1B)** a partir dos pesos originais do Hugging Face:
+Para converter o **Qwen2.5-1.5B**, o **Gemma 3**, o **Phi-4-mini** ou o **Dolphin 3.0 (Llama 3.2 1B)** a partir dos pesos originais do Hugging Face:
 
 ```sh
+# Qwen2.5-1.5B Instruct (3,1 GB)
+make qwen-1.5b-weights # baixa e converte para models/qwen2.5-1.5b-instruct/
+make qwen-1.5b         # empacota dist/qwen-1.5b[.exe]
+make qwen-1.5b-gui     # empacota dist/qwen-1.5b-gui[.exe]
+
 # Gemma 3 1B Instruct (requer HF_TOKEN com licença do Gemma aceita no Hugging Face)
 make gemma-weights # baixa e converte para models/gemma-3-1b-it/
 make gemma         # empacota dist/gemma-3-1b[.exe]

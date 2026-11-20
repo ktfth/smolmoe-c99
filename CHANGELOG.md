@@ -3,6 +3,12 @@
 ## Não lançado
 
 ### Adicionado
+- **Atalho do Qwen2.5-1.5B:** `make chat qwen-1.5b`, `make run-gui MODEL=qwen-1.5b`, `make qwen-1.5b` e
+  `make qwen-1.5b-gui` (em `dist/`), o apelido `qwen-1.5b` no programa e na janela, e `make qwen-1.5b-weights`
+  (3,1 GB de download). Era o 2º no eval de manutenção e só rodava com os três caminhos à mão.
+- **Testes do Qwen 1.5B, do Gemma 3 1B e do Phi-4-mini (`tests/more-models.test.ts`):** logits iguais entre threads,
+  lotes e kernels, e uma resposta em português; no 1.5B também o apelido e a ferramenta `calcular`. Cada bloco só roda
+  quando os pesos estão em `models/` (~3 min os três). Antes nenhum teste gerava texto com esses pesos.
 - **Comandos prontos no chat (`src/recipes.c`):** perguntas sobre espaço em disco, memória RAM, processos, IP,
   tamanho de pasta, maiores arquivos e versão do sistema recebem um comando conferido para o shell e o sistema em
   uso (PowerShell no Windows ou fora dele, cmd, bash no Linux, no macOS e no Windows), sem passar pelo modelo.
