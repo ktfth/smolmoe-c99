@@ -921,21 +921,33 @@ static int current_date_question(const char *user_text) {
            strstr(s, "que dia") != NULL || strstr(s, "qual a data") != NULL || strstr(s, "qual e a data") != NULL;
 }
 
-const char *tools_forced_choice(const char *user_text) {
-    if (date_question(user_text)) return NULL;
+/* Pasted text (a log, a command's output), where a time zone reads as a sum and a log date as a question about
+ * days: what the chat saw pasted, or more than one line ("\n" or "\r"), for callers without that signal. A
+ * trailing line break alone is still one line. */
+static int pasted_text(const char *text, int pasted) {
+    const char *nl = strpbrk(text, "\r\n");
+    if (pasted) return 1;
+    if (!nl) return 0;
+    for (++nl; *nl; ++nl)
+        if (*nl != '\r' && *nl != '\n' && *nl != ' ' && *nl != '\t') return 1;
+    return 0;
+}
+
+const char *tools_forced_choice(const char *user_text, int pasted) {
+    if (pasted_text(user_text, pasted) || date_question(user_text)) return NULL;
     if (count_relevant(user_text)) return "contar";
     if (convert_relevant(user_text)) return "converter";
     if (calc_relevant(user_text)) return "calcular";
     return NULL;
 }
 
-const char *tools_date_choice(const char *user_text) {
+const char *tools_date_choice(const char *user_text, int pasted) {
     Date named, reference;
     reference.year = 2000;
     reference.month = 1;
     reference.day = 1;
-    if (!date_question(user_text) || calc_relevant(user_text) || convert_relevant(user_text) ||
-        count_relevant(user_text))
+    if (pasted_text(user_text, pasted) || !date_question(user_text) || calc_relevant(user_text) ||
+        convert_relevant(user_text) || count_relevant(user_text))
         return NULL;
     if (date_find(user_text, reference, &named, 1) > 0) return "dias_ate";
     if (current_date_question(user_text)) return "data_atual";

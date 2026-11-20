@@ -226,6 +226,7 @@ void chat_run(const ChatContext *c) {
             follow_paste = !message_after_bracket;
             continue;
         }
+        e->pasted = pasted; /* a pasted log line forces no tool */
         if (engine_send(e, c->line, (uint32_t)len) < 0) die("%s", sm_last_error());
         follow_paste = !message_after_bracket;
     }

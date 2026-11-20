@@ -33,12 +33,15 @@ int tools_relevant(const char *user_text);
 
 /* The one tool a message clearly needs, or NULL: "calcular", "converter" or
  * "contar" when no date or time is asked. Used when the model omits or misses
- * the call: the runtime then opens that call. */
-const char *tools_forced_choice(const char *user_text);
+ * the call: the runtime then opens that call. Pasted text (`pasted`: the chat
+ * saw a paste, or the message has more than one line) never forces a tool; the
+ * model may still call one. */
+const char *tools_forced_choice(const char *user_text, int pasted);
 
 /* Date/time fallback choice ("dias_ate" or "data_atual") when a date/time
- * question is asked and the model omits the tool call. */
-const char *tools_date_choice(const char *user_text);
+ * question is asked and the model omits the tool call. Never for pasted text,
+ * as above. */
+const char *tools_date_choice(const char *user_text, int pasted);
 
 /* The call text the model would write after <tool_call> up to the first
  * argument's value, for a forced choice. Returns its length, or 0 when the

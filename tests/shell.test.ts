@@ -5,7 +5,7 @@
  * the Qwen weights (skipped without them).
  */
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { BINARY, CONSOLE_INPUT_BINARY, bundledModel, modelArgs, runWithInput, tempDir } from "./support/run";
@@ -204,6 +204,20 @@ describe.skipIf(!qwen || process.platform !== "linux" || !Bun.which("script"))("
     expect(session(input, dir).exitCode).toBe(0);
     expect(existsSync(join(dir, "colado.txt"))).toBe(false);
     expect(existsSync(join(dir, "depois.txt"))).toBe(true);
+  }, SLOW);
+
+  test("a single log line pasted with bracketed paste forces no tool", () => {
+    /* Typed, the time zone of an ISO timestamp (+03:00) reads as a sum and the runtime would force calcular when
+     * the model does not call it; pasted, it is a log line. The model may still call a tool itself. */
+    const dir = folder("pty-log-line");
+    const chat = [BINARY, ...modelArgs(qwen!), "--context", "512", "--tokens", "16"].map(q).join(" ");
+    const line = "2026-11-10T11:07:48+03:00 host sshd[812]: error: Bind to port 22 failed";
+    const input = `${prompts(1)}; printf '\\033[200~${line}\\n\\033[201~'; ${prompts(2)}; printf '/sair\\n'`;
+    expect(Bun.spawnSync(["sh", "-c", `(${input}) | script -qec ${q(chat)} /dev/null > transcript.txt 2>&1`],
+      { cwd: dir, stdout: "pipe", stderr: "pipe" }).exitCode).toBe(0);
+    const transcript = readFileSync(join(dir, "transcript.txt"), "utf8");
+    expect(transcript).toContain("Bind to port 22");
+    expect(transcript).not.toContain("chamada refeita");
   }, SLOW);
 
   test("a paste that arrives in two pieces does not run its second piece", () => {

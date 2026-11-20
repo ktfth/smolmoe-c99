@@ -49,6 +49,7 @@ typedef struct Engine {
     uint32_t hist_cap, hist_len, nturns;
     uint32_t anchor; /* history index where the current message starts; older turns may be dropped */
     int stopped;            /* the last engine_send() was ended by sink.stop */
+    int pasted;             /* set before engine_send(): the message was pasted, so no tool is forced; cleared by it */
     const char *message;    /* the user message being answered */
     ChatStats stats;
 } Engine;
@@ -75,7 +76,8 @@ sm_status engine_start(Engine *e);
  * activation included). When sink.stop ends a reply, e->stopped is set and the
  * reply stays in the history as far as it got, unless it was inside a tool
  * call: then the whole message leaves the history, so it never holds a call
- * without its result. */
+ * without its result.
+ * Set e->pasted first when the text was pasted: no tool is then forced. */
 int engine_send(Engine *e, const char *text, uint32_t len);
 
 /* Forgets the conversation, keeping the processed system prompt. */
