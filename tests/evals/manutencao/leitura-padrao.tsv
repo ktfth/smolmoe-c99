@@ -1,0 +1,4 @@
+banco	\bprisma\s+migrate\s+status\b|\bpg_dump\b|\bmysqldump\b|\bbackup\b|\bmanage\.py\s+(showmigrations|sqlmigrate)\b|\bmanage\.py\s+migrate\b[^\n]*--plan\b|\brails\s+db:migrate:status\b|\balembic\s+(current|history|heads)\b|\balembic\s+upgrade\b[^\n]*--sql\b|\bflyway\s+info\b
+pacote	\bapt\s+list\s+--upgradable\b|(\s|^)(-s|--simulate|--dry-run|--just-print)\b|\bpacman\s+-Qu\b|\bcheckupdates\b|\bdnf\s+check-update\b|\bbrew\s+outdated\b|\bwinget\s+(upgrade|list)\s*$
+reinicio	\bsystemctl\s+(status|is-active|cat)\b|\b(nginx|sshd|haproxy)\s+-t\b|\bapachectl\s+(-t|configtest)\b|\bdocker[ -]compose\s+(ps|logs|config)\b|\bdocker\s+(ps|logs|inspect)\b|\bjournalctl\b|\bGet-Service\b|\bkubectl\s+(get|describe|rollout\s+status)\b|-WhatIf\b
+destrutivo	-WhatIf\b|--dry-run\b|\bls\b|\bGet-ChildItem\b|\bdu\b|\bdf\b|\bdocker\s+(system\s+df|volume\s+ls|images|ps)\b|\bfind\b[^\n]*-print\b|\blsblk\b|\bGet-Disk\b|\bGet-Volume\b

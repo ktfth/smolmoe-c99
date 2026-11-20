@@ -22,8 +22,17 @@ typedef struct ToolClock {
 int tool_clock_parse(const char *s, ToolClock *out);
 ToolClock tool_clock_now(void);
 
+/* Restricts the tools on offer to a comma-separated list of names ("data_atual",
+ * "dias_ate", "calcular", "converter", "contar"); NULL turns them all back on.
+ * Returns 0, changing nothing, for an unknown name or an empty list. Every
+ * function below then declares, offers, forces, grounds and runs only those. */
+int tools_select(const char *list);
+
+/* The names on offer, comma-separated ("data_atual, calcular"). */
+void tools_on_offer(char *out, size_t cap);
+
 /* Writes `system` followed by the template's "# Tools" section declaring the
- * built-in tools. Returns the length, or 0 when it does not fit in cap. */
+ * built-in tools on offer. Returns the length, or 0 when it does not fit in cap. */
 size_t tools_system_prompt(const char *system, char *out, size_t cap);
 
 /* Whether to offer the tools for this user message: it names a date, talks

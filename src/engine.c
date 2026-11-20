@@ -2,6 +2,7 @@
 #include "config.h"
 #include "kernels.h"
 #include "platform.h"
+#include "prefixcache.h"
 #include "sha256.h"
 #include "util.h"
 
@@ -652,15 +653,50 @@ static void save_system_kv(Engine *e, const char *dir, const unsigned char key[3
     if (!replace_file(tmp, final_path)) remove(tmp);
 }
 
+/* The automatic cache of the system prompt's KV in the user cache directory
+ * (SMOLMOE_KV_CACHE), keyed by the model, the prompt and this build. */
+static void auto_system_kv(Engine *e, uint32_t n) {
+    char dir[CACHE_PATH];
+    unsigned char key[32];
+    int keyed = kv_directory(dir, sizeof(dir)) && system_kv_key(e, e->ids, n, key);
+    double t0;
+    if (keyed) {
+        char path[CACHE_PATH], hex[65];
+        int npath;
+        to_hex(key, hex);
+        npath = snprintf(path, sizeof(path), "%s/%s", dir, hex);
+        if (npath > 0 && npath < (int)sizeof(path) && load_system_kv(e, path, n)) e->stats.system_kv = 2;
+    }
+    if (e->stats.system_kv == 2) return;
+    t0 = now_seconds();
+    if (model_prefill(e->model, e->ids, n, 0, 0) != SM_OK) return;
+    e->stats.prefill_seconds = now_seconds() - t0;
+    e->stats.prompt_tokens = n;
+    if (keyed) {
+        e->stats.system_kv = 1;
+        save_system_kv(e, dir, key, n);
+    }
+}
+
+/* --prefix-cache FILE: the file the caller named, checked by the logits of
+ * the last prefix position at every start (prefixcache.h). It replaces the
+ * automatic cache for this chat. */
+static void named_prefix_cache(Engine *e, uint32_t n) {
+    double t0 = now_seconds();
+    e->stats.prefix_cache = (int)prefix_cache_prefill(e->model, e->ids, n, e->prefix_cache);
+    if (sm_failed()) return;
+    e->stats.prefill_seconds = now_seconds() - t0;
+    e->stats.prompt_tokens = n;
+    if (e->sink.notice && e->stats.prefix_cache == PREFIX_CACHE_REBUILT)
+        say(e, "(o cache do prompt de sistema não conferiu com este modelo e prompt: refeito)");
+    if (e->sink.notice && e->stats.prefix_cache == PREFIX_CACHE_UNWRITABLE)
+        say(e, "(não consegui gravar o cache do prompt de sistema; o chat segue sem ele)");
+}
+
 static void engine_start_body(Engine *e) {
     const char *tools_hdr = e->model->c.gemma3 ? strstr(e->system, "\n\n# Tools") : NULL;
     uint32_t sys_len = tools_hdr ? (uint32_t)(tools_hdr - e->system) : (uint32_t)strlen(e->system);
     uint32_t n = tokenizer_chat_turn(e->tok, "system", (const unsigned char *)e->system, sys_len, 0, e->ids);
-    char dir[CACHE_PATH];
-    unsigned char key[32];
-    int cached = kv_directory(dir, sizeof(dir));
-    int keyed = 0;
-    double t0;
     if (!e->mem) sm_fail(SM_ERR_STATE, "internal error: engine has no heap");
     memset(&e->stats, 0, sizeof(e->stats));
     if (sm_failed()) return;
@@ -672,24 +708,9 @@ static void engine_start_body(Engine *e) {
     }
     e->hist_len = e->nturns = e->anchor = 0;
     if (n + CLOSE_RESERVE + 16 > e->model->context) sm_fail(SM_ERR_RANGE, "the system prompt does not fit in --context");
-    keyed = cached && system_kv_key(e, e->ids, n, key);
-    if (keyed) {
-        char path[CACHE_PATH], hex[65];
-        int npath;
-        to_hex(key, hex);
-        npath = snprintf(path, sizeof(path), "%s/%s", dir, hex);
-        if (npath > 0 && npath < (int)sizeof(path) && load_system_kv(e, path, n)) e->stats.system_kv = 2;
-    }
-    if (e->stats.system_kv != 2) {
-        t0 = now_seconds();
-        if (model_prefill(e->model, e->ids, n, 0, 0) != SM_OK) return;
-        e->stats.prefill_seconds = now_seconds() - t0;
-        e->stats.prompt_tokens = n;
-        if (keyed) {
-            e->stats.system_kv = 1;
-            save_system_kv(e, dir, key, n);
-        }
-    }
+    if (e->prefix_cache) named_prefix_cache(e, n);
+    else auto_system_kv(e, n);
+    if (sm_failed()) return;
     e->system_len = e->pos = n;
     e->message = NULL;
 }

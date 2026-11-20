@@ -3,6 +3,7 @@
 #include "platform.h"
 #include "process.h"
 #include "recipes.h"
+#include "tools.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -192,7 +193,11 @@ void chat_run(const ChatContext *c) {
         bracketed_paste_start();
     }
     fprintf(stderr, "smolmoe " SMOLMOE_VERSION " - chat local. Digite sua mensagem; /limpar reinicia, /sair encerra.\n");
-    if (e->tools) fputs("Ferramentas: data_atual, dias_ate, calcular, converter, contar.\n", stderr);
+    if (e->tools) {
+        char names[128];
+        tools_on_offer(names, sizeof(names));
+        fprintf(stderr, "Ferramentas: %s.\n", names);
+    }
     if (c->shell) fprintf(stderr, "Comandos: !comando roda no %s; /rodar executa o comando sugerido.\n", c->shell->name);
     for (;;) {
         int len, truncated, pasted;

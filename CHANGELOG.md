@@ -22,6 +22,24 @@
   a revisão fixa e confere o SHA-256. O `qwen2` reconhece o tamanho pelo `config.json` e grava a revisão certa na
   proveniência; sem revisão fixa, grava `unpinned`. O teste confere que o 1,5B convertido lê um texto fixo em pt-BR
   com NLL menor que o 0,5B, porque carregar e gerar não provam que os pesos estão certos.
+- **Eval de manutenção offline** (`scripts/eval-manutencao.ts`): faz cada item do conjunto de decisão congelado
+  (`tests/evals/manutencao/`, v1 com 60 pedidos de comando e 18 de papel da máquina) ao chat de verdade de cada
+  modelo, como o kit pergunta (o prompt `kit/manutencao.txt`, a linha de papel, a linha de data `kit/linha-data.txt`
+  e nenhuma ferramenta, escolha que veio de um piloto registrado no `docs/DECISIONS.md`), e dá a nota com o
+  `nota.ts` do conjunto. Recusa rodar se o conjunto, o detector de português, o prompt ou a linha de data não forem
+  os congelados por sha256 no `docs/DECISIONS.md`. Guarda o resultado em JSONL retomável e resume com o IC de Wilson e o teste de sinal pareado
+  nos dois sentidos.
+- **`--tools LISTA`:** o chat oferece só as ferramentas escolhidas (por exemplo, `--tools data_atual`, a do kit de
+  manutenção). As outras não são declaradas, oferecidas, forçadas nem executadas, mesmo que o modelo as chame.
+- **`--prefix-cache ARQUIVO`:** o chat guarda o prompt de sistema já processado (o cache KV dele) e, nas aberturas
+  seguintes, pula o prefill desse prompt (com as ferramentas, 666 tokens no Qwen 0,5B). O ganho de tempo ainda não
+  foi medido com `bench.ts --ab`: o cenário de abertura vem com o kit. O cache só é usado depois de conferido, pela
+  identidade do modelo, pelo hash dos dados e pelos logits da última posição, recalculados sobre ele. Um arquivo
+  danificado, outro prompt ou outro modelo de mesma forma fazem o cache ser refeito, com aviso. As respostas são
+  idênticas com e sem cache. O arquivo tem 16,4 MB no Qwen 0,5B com as ferramentas e cerca de 180 MB no Phi-4-mini.
+  Com `--prefix-cache`, o cache automático do `SMOLMOE_KV_CACHE` fica de fora naquele chat: o arquivo nomeado é
+  conferido pelos logits a cada abertura, e o automático só pela chave. Funciona também com `--kv-f16`; um cache
+  de float16 nunca é lido num chat de float32, e vice-versa (é refeito).
 - **`smolmoe-inventario`:** inventário defensivo só leitura de máquinas Linux (portas em escuta com processo,
   usuários com login, grupos administrativos, binários SUID/SGID com hash, caminhos graváveis por todos, pontos de
   persistência, chaves SSH autorizadas, configurações de segurança e alertas) e `--comparar` entre dois relatórios,

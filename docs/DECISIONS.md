@@ -796,6 +796,154 @@ comando sugerido; como o `!`, só quando digitado. Todas as receitas só leem.
 - Os pedidos de teste são os mesmos que guiaram a tabela; a detecção ainda não foi medida às cegas.
 - Os comandos de PowerShell não rodaram nesta iteração. O teste de integração executa o de disco no Windows.
 - Os comandos Linux rodaram, exceto `ip -brief address`, porque o container de teste não tinha o iproute2.
+## Rodada 2: conjunto de decisão da manutenção offline (v1 congelado em 2026-11-10)
+
+O norte do dono é o smolmoe ajudar na manutenção das máquinas dele sem internet. A escolha do modelo do kit sai de
+um conjunto escrito por quem não constrói: o adversário escreveu, com autorização do dono, e o revisor atacou.
+- **Congelado por bloco (v1):** `comando` (60 itens) e `papel` (18), 78 no total, em `tests/evals/manutencao/`,
+  copiado sem editar de `warp-exchange/adversario/conjunto/`.
+- **sha256 do `MANIFEST.sha256`:** `f4caf5b2cde9f1fdfeb92ff3d451fa12b2d4054fdd3ef59a2fe7a0b447a40b32`. O manifesto
+  cobre o JSON, o `nota.ts` (a nota de cada resposta), as listas e o `papel.json`; o `README.md`, o `gerar.ts` e o
+  `referencias.json` vão junto, fora do manifesto, porque não entram na nota.
+- **Mudar qualquer arquivo do manifesto exige recongelar** e registrar o sha novo aqui. A única revisão de rubrica
+  permitida é a da leitura cega do revisor, a partir de 2 discordâncias em 60 respostas, e antes de qualquer
+  comparação entre modelos.
+- **Regra de decisão, fixada antes de rodar:** toda taxa sai com o IC 95% de Wilson; toda comparação entre dois
+  modelos é pareada nas mesmas perguntas, com teste de sinal exato unilateral e p < 0,05 sobre os pares
+  discordantes; empate não muda nada sem decisão do dono.
+- **Dúvidas, congeladas em 2026-11-10** (escritas pelo adversário, liberadas pelo revisor): `duvidas.json`, 90
+  itens (40 de Windows, 30 de Debian/Ubuntu, 20 de container/WSL/VM), corrigidos pelo `nota-duvidas.ts`, que importa
+  o `nota.ts` da v1 sem mudá-lo. sha256 do `MANIFEST-duvidas.sha256`:
+  `4f16d072d2d8aa0b4838b292f1a78959fbbc6a9da1c02d1f8c9c04ac2e561282`. A v1 não mudou.
+- **Revisão da rubrica (a única permitida), 2026-11-10.** A leitura cega do revisor na rodada 1 (66 respostas, 22 por
+  modelo, sem o Phi) teve 8 discordâncias (12,1%, Wilson de 6,3% a 22,1%), acima do gatilho de 2 em 60. A rubrica
+  errava nos dois sentidos: um cmdlet inventado dentro de `( )` escapava, `docker compose down` sozinho passava, o
+  OOM explicado sem a sigla reprovava e um `apt-get purge` citado sem alvo reprovava. O adversário aplicou F1 (todo
+  cmdlet da linha no PowerShell; `$( )` e crases no bash), F2 (`restart|up`), F3 (OOM sem a sigla) e F4 (crase da
+  prosa só conta com alvo), mais as políticas: bloco de outro sistema fica fora da conferência de existência; um
+  placeholder no lugar do nome dado continua errado. Antes de congelar, o revisor restringiu o F4 à remoção de pacote
+  (R10-1): sem isso, `docker system prune -a`, `docker volume prune` e `Clear-RecycleBin` citados na prosa passavam
+  sem aviso. **Nenhuma pergunta mudou.** Shas da v1.2: `MANIFEST.sha256`
+  `7290a81a19e8310e978c14d6e3c57aad6a10d34670f73e8f68c3616ddd9cb755` e `MANIFEST-duvidas.sha256`
+  `fd20a5e8aa6485fdc809320793cbdf038c9a3cb675115fe6451e75060d8671c4` (os intermediários `9e68430a` e `e5bd4aff`
+  ficaram superados). Todas as respostas gravadas, inclusive as do Phi, receberam a nota de novo com esses shas
+  (`--renotar`, sem rodar os modelos). Uma nova leitura cega, com outra semente e com o Phi, valida a revisão.
+- **Correção da 2ª leitura cega (v1.3), 2026-11-10.** A leitura cega da v1.2, com outra semente e com o Phi, achou
+  dois furos na mesma regra da v1.2, sem mudar o gatilho nem abrir revisão nova:
+  - **R11-1:** o `ver` do cmd só conta como código (em crase ou sozinho na linha), não como palavra da prosa; o
+    "terminar" da prosa passa a casar só nas formas `termin(ar|ou|ad[oa]|a|e|ando)`. Os comandos internos do cmd
+    entram na lista da família powershell.
+  - **R11-2, forma da revisão 30, que caiu:** "o comando de um bloco de outro sistema só sai da existência se estiver
+    na lista de alguma família". Só existem as listas do Windows e do Ubuntu do WSL, então ela derrubava 9 respostas
+    certas do Phi (dúvidas de 41/90 para 32/90; todas por alternativa de macOS ou de outro Linux citada à parte:
+    `smartctl`, `spctl`, `dislocker`, `systemd-resolve`, `flatpak`, `dscl`, `sw_vers`, `nautilus`, `debsums`, nos
+    itens win-008, 009, 010, 014, 017, 022, 024, 031 e 036). Os outros modelos não mudavam.
+  - **R11-2, forma aplicada:** num bloco rotulado para outro sistema, o comando continua fora da existência, menos no
+    item de Windows quando o comando tem cara de Windows (Verbo-Substantivo do PowerShell ou comando clássico do
+    console): aí é do sistema do item, mal rotulado, e é conferido (o `wmic` num bloco `bash` reprova). Os comandos
+    de macOS e de Linux sem lista continuam isentos como alternativa.
+  - **Viradas da v1.2 para a v1.3** nas 600 respostas, todas no win-024: 0,5B −1, Gemma −1, 1,5B +1, Phi 0. Dúvidas:
+    0,5B 9/90, 1,5B 35/90, Gemma 15/90, Phi 41/90 (35,7% a 55,8%). Phi contra 1,5B, pareado só nas dúvidas: 16 a 10,
+    p = 0,1635, sem diferença pela regra (nos 150 itens, 31 a 16, p = 0,020, mas a regra olha as dúvidas).
+  - **Nenhuma pergunta mudou.** Shas finais: `MANIFEST.sha256` (v1.3)
+    `ae2d97983c27c3b10eaf5a60af23b3e93bd4a3f6c5e4b82250bb9fe7b98eece5` e `MANIFEST-duvidas.sha256`
+    `41dabf4b6f7b3e3afedcfa57c33e1347af40e30e3e01b3fdef3e7980e4020562`, copiados sem editar da pasta do adversário
+    depois do OK do revisor. A decisão usa só eles (`build/rodada-1-v13.jsonl`). As 9 respostas do Phi acima vão
+    para a 3ª leitura do revisor.
+- **3ª leitura cega (v1.3), 2026-11-10: a rubrica fica como está e a escolha vai para o dono.** 68 respostas,
+  semente 424242, sem repetir pares das leituras anteriores, com as 9 do Phi e as 3 viradas do win-024 forçadas.
+  - Discordâncias: 6/68 pela contagem estrita (8,8%, Wilson de 4,1% a 17,9%), 2/68 firmes (2,9%, de 0,8% a 10,1%).
+    Pela regra da revisão 30 vale a estrita: dispara, e sem 4ª revisão a decisão é do dono, com a margem declarada.
+  - As firmes, ambas do Phi: T27 (win-002, opções de DISM inventadas e `vssadmin delete shadows` passam porque a
+    obrigatória `\bDISM\b` casa com qualquer DISM) e T63 (deb-012, uma alternativa de Windows num bloco `bash` de
+    item Linux reprova a resposta certa, o espelho do R11-2). Das 9 do Phi, 7 concordam e 2 são limítrofes.
+  - A regra olha as 90 dúvidas. Phi contra 1,5B, pareado: 16 a 10 (p = 0,163) como está; 15 a 9 (0,154) com as
+    firmes; 15 a 10 (0,212) com todas as discordâncias: empate em todo cenário. Phi e 1,5B ganham do Gemma e do
+    0,5B (p < 0,001); Gemma contra 0,5B empata (10 a 4, p = 0,090). Nos 150 itens, que não decidem, o Phi passa o
+    1,5B (31 a 16, p = 0,020).
+  - Margem para o dono: a rubrica discorda do revisor em cerca de 9% das respostas lidas (até 18%), nos dois
+    sentidos, concentrada nas respostas longas do Phi que misturam sistemas.
+  - Para a v2, sem mexer na v1.3: `vssadmin delete shadows` na lista de destrutivos, opção de DISM conferida e o
+    rótulo `bash` num item Linux com comando de Windows.
+- **Teste da fonte offline, congelado em 2026-11-10** (plano, revisões 28 a 35). Pergunta: com 3 trechos de uma fonte
+  offline antes da pergunta, o 1,5B fica tão bom quanto o Phi? O resultado não entra no runtime em C antes de sair.
+  - **Fontes**, escolhidas pelo tema das dúvidas, em `../fontes-offline` (`SMOLMOE_FONTES`):
+    - SupportArticles-docs `f35d5396` (support/windows-client), CC BY 4.0;
+    - windows-powershell-docs `b064f9a3` (docset/winserver2022-ps), CC BY 4.0;
+    - docker/docs `75a95460` (content/manuals e content/reference/cli), Apache 2.0;
+    - arch-wiki-docs 20261101, em inglês, sem as páginas de modelo de notebook, GFDL 1.3+;
+    - MicrosoftDocs/WSL `526e5775`, CC BY 4.0 (código MIT), e Debian Reference `ce774075`, GPL-2+ (revisão 34).
+    O `debian-handbook` saiu (2015, ensina o proibido `apt-key add`); o Ubuntu Server ficou fora por licença não confirmada.
+  - **Busca:** BM25 em trechos de ~80 palavras; consulta da variante G (termos da própria pergunta presentes em 5 ou mais
+    trechos, mais um glossário pt→en em que cada linha cita o item da regressão que a motiva). Trecho com código pesa 1,3.
+  - **Afinada só na regressão do dev** (44 perguntas, nenhuma igual às 90; o F-1 do adversário trocou 3 que miravam fato
+    das 90): 29/44 trechos com o fato (24 sem o peso de código). A **variante K** (o modelo escreve palavras-chave em
+    inglês) ficou de fora pela regra da revisão 34: G + palavras do Phi 25/44 (0 ganhos, 4 perdas), do 1,5B 27/44 (0 e 2).
+    O Phi escreveu as palavras em português.
+  - **Tratamento:** o texto de apresentação, com os 3 trechos e a pergunta, numa linha da mensagem do usuário; o prompt do
+    kit não muda. `--trechos` no eval.
+  - **Shas congelados** (`FONTE` no eval): apresentação `e29074206ad408b4ec4bd2b701d699077727e67a8d8eceedfe428418fcbbad31`,
+    glossário `b6de3c250909016f821f53f480a43da3832b361bb48521e77d3ed068de4ae52e`, regressão
+    `e73509cca472e9cc59be8231e1a709bfe4964997d02e9f7c0dff1644a692934e`, busca
+    `3fce635602dccdc3f861cb761df197563f2b70ce20152fd7a8442dc7d4d5856d` e trechos
+    `76cf6f8fd5e7a4f187b2e7e6887ca0bd03ca6618b894371c915a47e742c385ac` (a montagem é determinística).
+  - **Regra, fixada antes:** o 1,5B com trechos é tão bom quanto o Phi com trechos se o limite superior do IC 95% de
+    Phi − 1,5B (Newcombe, pareado, com a correlação ajustada) ficar abaixo de 10 pontos; ou ganha do Phi sozinho pelo
+    teste de sinal. Se o IC for largo demais, decide o dono. O resumo (`scripts/fonte/resumo-fonte.ts`) dá as 90 com e sem
+    win-012, win-037 e ctn-008; a taxa nas dúvidas cobertas e nas não cobertas (coberta = todas as obrigatórias nos 3
+    trechos, calculada só depois da passada); e, por braço, os "proibido", os "falta" com nome de tela em inglês e os
+    fora do português.
+- **Pendentes:** a lista de comandos do pacman (Arch/Omarchy do dono), as respostas do dono e o bloco de leitura de
+  log. A escolha do modelo espera o bloco de log; Arch e macOS ficam fora da taxa de decisão até a v2.
+- **O eval:** `bun scripts/eval-manutencao.ts --modelo models/<nome> [--modelo ...] [--itens cmd-*] [--saida ARQ]
+  [--piloto]`. Ele recusa rodar se os conjuntos presentes, o detector, o prompt do kit ou a linha de data não forem os
+  congelados aqui. Lê todos os conjuntos copiados para `tests/evals/manutencao/` (o v1 e, quando congelado, o das
+  dúvidas, cada um com o seu manifesto). Faz uma pergunta por processo do chat de verdade, como o kit pergunta: o
+  prompt do kit, a linha de papel nos itens de papel, a linha de data e nenhuma ferramenta (`--no-tools`), com
+  `--context 4096`, temperatura 0 e `--prefix-cache` por modelo e variante de prompt. Dá a nota com o `nota.ts` do
+  conjunto, sem editar. Itens de família sem lista de comandos (pacman, brew) ficam fora até a v2. Cada linha do
+  JSONL grava os congelamentos e o sha256 do `model.smoe`; a retomada recusa um arquivo feito em outras condições
+  (piloto, outro congelamento, outro modelo com o mesmo nome) em vez de misturar. O resumo dá cada taxa com o IC de
+  Wilson e cada par de modelos com o teste de sinal nos dois sentidos.
+- **Detector de português** (a única regra que o `nota.ts` deixa ao dev), `scripts/eval/portugues.ts`, congelado com
+  sha256 `49b3cb218ff729ce7f5636036059a915673f8a48aa4774546cc046b2febdd7e7`, recongelado antes da 1ª rodada de
+  decisão: o `0f3f9366` aprovava espanhol, porque "de", "que" e "para" contavam só para
+  o português; o `1d22c832` reprovava "Use este comando para ver se está cheio", que empata por só ter palavras
+  compartilhadas, e também a resposta certa de referência `ctn-013` das dúvidas, porque um caminho
+  (`/sys/fs/cgroup/...`) virava palavras em inglês. Ele lê só a prosa, sem blocos, crases, caminhos
+  de arquivo e nomes de domínio. Cada palavra funcional conta para todas as
+  línguas em que existe ("de" para o português e o espanhol, "do" para o português e o inglês); `ç`/`ã`/`õ` marcam o
+  português, e `ñ`/`-ción` marcam o espanhol. A resposta está em português quando a contagem do português supera a do
+  inglês e a do espanhol; num empate, ela só fica em português se a outra língua não tiver nenhuma palavra só dela.
+  Prosa de menos de 4 palavras passa.
+- **Prompt do kit**, `kit/manutencao.txt`, congelado com sha256
+  `860d7bfd0350be7e08c768e605a383635caa4a1b119a58f193a5cbd2e64b1582`: é o prompt de sistema do kit e do eval. Nos
+  itens de papel, a linha do `papel.json` vem depois dele. **O bloco de comando mede sem linha de papel:** no kit, uma
+  máquina sem papel declarado vai agir como produção (proposta 4a), então a taxa do bloco de comando não é a de uma
+  máquina não declarada. Isso fica assim na v1; o efeito do papel é medido pelo bloco de papel.
+- **Linha de data**, `kit/linha-data.txt`, congelada com sha256
+  `29782c739b156c66809b54220db37f3726acb3e25773b0466dfea1c882546386`: "Agora é {dia_semana}, {dia} de {mes} de
+  {ano}, {hora}." Sem ferramentas, é por ela que o modelo do kit sabe a data. No eval, ela fecha o prompt de sistema,
+  com o relógio fixo em 2026-11-10T10:00; no kit, ela entra depois do prefixo em cache.
+- **Por que o prompt e as ferramentas mudaram antes da rodada de decisão:** numa amostra de 11 itens com o prompt
+  padrão do chat e as 5 ferramentas, o Qwen 0,5B respondeu um pedido de comando em inglês, falando das ferramentas
+  em vez de dar o comando. A mudança veio dessa amostra, antes de qualquer rodada de decisão, e vale para todos os
+  modelos. O extrator de comandos do `nota.ts` não mudou (a v1.1 candidata do adversário ficou guardada).
+- **Piloto das ferramentas (último ajuste vindo de amostra; depois disso o prompt congela).** Os mesmos 11 itens, com
+  o prompt do kit, nos dois Qwen, com só o `data_atual` e sem ferramentas. A regra foi escrita antes de rodar: o kit
+  fica sem ferramentas se, somando os dois modelos, as respostas em inglês ou sobre "functions" (o detector reprova a
+  resposta inteira, ou ela cita `function`, `<tools>` ou `tool_call`) forem estritamente menos e as certas não
+  caírem; empate fica com o `data_atual`.
+
+  | Modelo | Com `data_atual`: certas / inglês ou functions | Sem ferramentas: certas / inglês ou functions |
+  |---|---|---|
+  | Qwen 0,5B | 1/11 / 7/11 | 6/11 / 0/11 |
+  | Qwen 1,5B | 6/11 / 1/11 | 6/11 / 0/11 |
+  | Soma | 7 / 8 | 12 / 0 |
+
+  Resultado: **sem ferramentas**. Mesmo só com o `data_atual`, a seção de ferramentas do template do Qwen, escrita em
+  inglês, puxava as respostas para o inglês. Os 4 pilotos estão marcados como piloto e não entram na decisão. O
+  runtime ganhou `--tools LISTA` nesse caminho e o mantém.
 
 ## O que sustenta o projeto (o "pó" que ficou)
 

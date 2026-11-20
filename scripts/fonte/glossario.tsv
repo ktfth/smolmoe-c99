@@ -1,0 +1,76 @@
+driver	driver drivers	r-win-01
+instalad	installed	r-win-01
+arquivo	file	r-win-01
+som	sound audio	r-win-02
+audio	audio sound	r-win-02
+atualiza	update updates	r-win-02
+reinstal	reinstall uninstall	r-win-02
+historico	history	r-win-03
+impressora	printer	r-win-04
+endereco ip	ip address	r-win-04
+reinicia	restart	r-win-04
+senha	password	r-win-06
+wi-fi	wi-fi wireless wlan	r-win-06
+sem fio	wireless wi-fi	r-win-07
+adaptador	adapter	r-win-07
+religo	enable restart	r-win-07
+desligo	disable	r-win-07
+pesquisa	search	r-win-08
+indice	index indexing	r-win-08
+reconstruo	rebuild	r-win-08
+memoria	memory	r-win-09
+defeito	diagnostic problem	r-win-09
+politica de execucao	execution policy	r-win-10
+script	script	r-win-10
+area de trabalho remota	remote desktop	r-win-11
+visualizador de eventos	event viewer	r-win-12
+logon	logon	r-win-12
+senha errada	failed logon	r-win-12
+compartilh	share sharing	r-win-13
+pasta	folder	r-win-13
+compatibilidade	compatibility	r-win-14
+monitor	monitor display	r-win-15
+detecta	detect	r-win-15
+suspens	sleep	r-win-17
+acord	wake	r-win-17
+firewall	firewall	r-win-18
+libero	allow	r-win-18
+pacote	package	r-deb-01
+manualmente	manually	r-deb-02
+impeco	hold	r-deb-03
+versao	version	r-deb-03
+boot anterior	previous boot	r-deb-04
+logs	log logs journal	r-deb-04
+editor de texto padrao	default editor	r-deb-05
+nome da maquina	hostname	r-deb-06
+swap	swap swapfile	r-deb-07
+placa de rede	network interface card	r-deb-08
+outro usuario	user password	r-deb-09
+servidor dns	dns server	r-deb-10
+bloqueio	block ban deny	r-deb-11
+compacto	compress archive	r-deb-12
+descompacto	extract	r-deb-12
+inode	inode inodes	r-deb-13
+espaco no disco	disk space	r-deb-13
+permissao de escrita	write permission	r-deb-14
+grupo	group	r-deb-14
+distribuic	distribution distributions distro	r-ctn-01
+padrao	default	r-ctn-01
+backup	backup export	r-ctn-02
+kernel	kernel	r-ctn-03
+eventos	events	r-ctn-04
+imagens	images	r-ctn-05
+apago	remove prune	r-ctn-05
+espaco em disco	disk space usage	r-ctn-06
+variaveis de ambiente	environment variables	r-ctn-07
+pelo nome	name network	r-ctn-08
+volumes	volumes	r-ctn-09
+guarda	data directory storage	r-ctn-09
+banco	database	r-ctn-11
+pronto	healthy ready	r-ctn-11
+navegador	browser	r-ctn-12
+porta	port	r-ctn-12
+endereco mac	mac address	r-win-05
+variavel de ambiente	environment variable	r-win-16
+permanente	permanent persistent	r-win-16
+troco o nome	rename	r-ctn-10

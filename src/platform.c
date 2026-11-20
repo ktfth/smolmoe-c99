@@ -379,7 +379,8 @@ void platform_init(int *argc, char ***argv) {
 #endif
 
 int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
-    int fd = open(path, O_RDONLY);
+    /* O_NONBLOCK: opening a FIFO with no writer would block forever; fstat then refuses it. */
+    int fd = open(path, O_RDONLY | O_NONBLOCK);
     struct stat st;
     void *p = MAP_FAILED;
     memset(m, 0, sizeof(*m));

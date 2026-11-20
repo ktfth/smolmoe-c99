@@ -1,0 +1,1 @@
+Trechos da documentação técnica que podem ajudar: {trechos} Os trechos estão em inglês; responda em português do Brasil e use os nomes de tela do Windows em português. Pergunta: {pergunta}

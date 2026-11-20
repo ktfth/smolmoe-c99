@@ -511,6 +511,52 @@ static void test_fuzz_calls(void) {
     }
 }
 
+/* --tools: the maintenance kit offers only data_atual. A tool not on offer is never declared, offered, forced,
+ * grounded or run, whatever the model writes. */
+static void test_tool_selection(void) {
+    static char prompt[8192];
+    char names[128], name[TOOL_NAME_MAX], result[TOOL_RESULT_MAX];
+    const char *calc = "{\"name\": \"calcular\", \"arguments\": {\"expressao\": \"2 + 2\"}}";
+    const char *date = "{\"name\": \"data_atual\", \"arguments\": {}}";
+    ToolClock now;
+    CHECK(tool_clock_parse("2026-11-10T10:00", &now), "clock");
+    CHECK(!tools_select("bogus") && !tools_select("data_atual,bogus") && !tools_select(""), "unknown or empty list taken");
+    CHECK(tools_select("data_atual"), "data_atual refused");
+    tools_on_offer(names, sizeof(names));
+    CHECK(!strcmp(names, "data_atual"), "on offer: %s", names);
+    CHECK(tools_system_prompt("S", prompt, sizeof(prompt)) > 0 && strstr(prompt, "\"data_atual\"") &&
+              !strstr(prompt, "\"calcular\"") && !strstr(prompt, "\"dias_ate\""),
+          "the prompt declares a tool not on offer");
+    CHECK(!tools_relevant("Quanto é 2 + 2?") && tools_relevant("Que dia é hoje?"), "offered for a tool not on offer");
+    CHECK(!tools_forced_choice("Quanto é 2 + 2?", 0) && !tools_date_choice("Quantos dias faltam para 25/12?", 0),
+          "forced a tool not on offer");
+    CHECK(tools_date_choice("Que dia é hoje?", 0) && !strcmp(tools_date_choice("Que dia é hoje?", 0), "data_atual"),
+          "data_atual not forced");
+    CHECK(!tool_call_grounded(calc, strlen(calc), "Quanto é 2 + 2?"), "a call to a tool not on offer grounded");
+    CHECK(tool_call_grounded(date, strlen(date), "Que dia é hoje?"), "data_atual not grounded");
+    CHECK(!tool_run(calc, strlen(calc), "Quanto é 2 + 2?", &now, name, result) && strstr(result, "desconhecida"),
+          "a tool not on offer ran: %s", result);
+    /* TOOL_NAMES and TOOL_SPECS keep one order: each name alone declares its own spec and no other. */
+    {
+        static const char *const all[] = {"data_atual", "dias_ate", "calcular", "converter", "contar"};
+        size_t i, j;
+        for (i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
+            char want[64];
+            CHECK(tools_select(all[i]) && tools_system_prompt("S", prompt, sizeof(prompt)) > 0, "select %s", all[i]);
+            for (j = 0; j < sizeof(all) / sizeof(all[0]); ++j) {
+                snprintf(want, sizeof(want), "\"name\": \"%s\"", all[j]);
+                CHECK((strstr(prompt, want) != NULL) == (i == j), "%s alone: spec of %s %s", all[i], all[j],
+                      i == j ? "missing" : "declared");
+            }
+        }
+    }
+    CHECK(tools_select(NULL), "reset");
+    tools_on_offer(names, sizeof(names));
+    CHECK(!strcmp(names, "data_atual, dias_ate, calcular, converter, contar"), "all back: %s", names);
+    CHECK(tools_forced_choice("Quanto é 2 + 2?", 0) && !strcmp(tools_forced_choice("Quanto é 2 + 2?", 0), "calcular"),
+          "calcular not back");
+}
+
 int main(void) {
     test_calendar();
     test_date_parse();
@@ -528,6 +574,7 @@ int main(void) {
     test_forced_choice();
     test_system_prompt();
     test_fuzz_calls();
+    test_tool_selection();
     if (failures) {
         fprintf(stderr, "%d tool test(s) failed\n", failures);
         return 1;

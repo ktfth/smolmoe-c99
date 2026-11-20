@@ -1,0 +1,1142 @@
+{
+  "versao": 1,
+  "itens": [
+    {
+      "id": "cmd-001",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No Windows, qual comando do PowerShell mostra o espaço livre de cada disco? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-PSDrive|Get-Volume|Win32_LogicalDisk)\\b"
+      ],
+      "proibidos": [
+        "\\bdf\\s+-h\\b"
+      ],
+      "fonte": "documentação oficial: Get-Volume / Get-PSDrive"
+    },
+    {
+      "id": "cmd-002",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Instale o 7-Zip pelo winget, no PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwinget\\s+install\\b[^\\n]*7[- ]?zip"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: winget install"
+    },
+    {
+      "id": "cmd-003",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, como listo os serviços do Windows que estão parados mas têm inicialização automática? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-Service|Win32_Service)\\b",
+        "automatic|\\bauto\\b",
+        "\\bstopped\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ],
+      "fonte": "documentação oficial: Get-Service"
+    },
+    {
+      "id": "cmd-004",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Reinicie o serviço de spooler de impressão pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bspooler\\b",
+        "\\bRestart-Service\\b|\\bStop-Service\\b[\\s\\S]*\\bStart-Service\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ],
+      "fonte": "documentação oficial: Restart-Service"
+    },
+    {
+      "id": "cmd-005",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Mostre os 10 processos que mais usam memória, no PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-Process\\b",
+        "\\b(Sort-Object|sort)\\b[^\\n]*\\b(WS|WorkingSet(64)?|PM|PrivateMemorySize(64)?|PagedMemorySize(64)?)\\b",
+        "-Descending|-desc\\b",
+        "-First\\s+10\\b"
+      ],
+      "proibidos": [
+        "\\b(ps|top)\\s+(aux|-o)\\b"
+      ],
+      "fonte": "documentação oficial: Get-Process / Sort-Object"
+    },
+    {
+      "id": "cmd-006",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Qual comando verifica e repara os arquivos de sistema do Windows? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsfc(\\.exe)?\\s+/scannow\\b|\\bDISM(\\.exe)?\\s+/Online\\s+/Cleanup-Image\\s+/RestoreHealth\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: sfc /scannow"
+    },
+    {
+      "id": "cmd-007",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, como vejo os últimos 20 erros do log System? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-WinEvent|Get-EventLog)\\b",
+        "\\bSystem\\b",
+        "Level\\s*=\\s*[\\d,\\s@()]*2|-EntryType\\s+Error\\b",
+        "-MaxEvents\\s+20\\b|-Newest\\s+20\\b"
+      ],
+      "proibidos": [
+        "\\bjournalctl\\b",
+        "-MaxEvents\\s+20\\b[^\\n]*\\|\\s*(Where-Object|where|\\?)"
+      ],
+      "fonte": "documentação oficial: Get-WinEvent -FilterHashtable"
+    },
+    {
+      "id": "cmd-008",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, como descubro quais programas iniciam junto com o Windows? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "Win32_StartupCommand|CurrentVersion\\\\Run"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ],
+      "fonte": "documentação oficial: Win32_StartupCommand"
+    },
+    {
+      "id": "cmd-009",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, teste se a porta 443 de example.com está acessível. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Test-NetConnection|tnc)\\b",
+        "\\b443\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: Test-NetConnection"
+    },
+    {
+      "id": "cmd-010",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Como limpo o cache de DNS no Windows? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bipconfig(\\.exe)?\\s+/flushdns\\b|\\bClear-DnsClientCache\\b"
+      ],
+      "proibidos": [
+        "systemd-resolve|resolvectl|dscacheutil"
+      ],
+      "fonte": "documentação oficial: ipconfig /flushdns"
+    },
+    {
+      "id": "cmd-011",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No Windows, qual comando mostra a configuração de IP de todas as interfaces, incluindo os servidores DNS? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bipconfig(\\.exe)?\\s+/all\\b|\\bGet-NetIPConfiguration\\b"
+      ],
+      "proibidos": [
+        "\\bifconfig\\b|\\bip\\s+a(ddr)?\\b"
+      ],
+      "fonte": "documentação oficial: ipconfig /all"
+    },
+    {
+      "id": "cmd-012",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, liste as atualizações do Windows que estão instaladas. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bGet-HotFix\\b|Win32_QuickFixEngineering"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: Get-HotFix"
+    },
+    {
+      "id": "cmd-013",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, como acho os 10 maiores arquivos dentro de C:\\Users\\Ana? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(Get-ChildItem|gci|dir|ls)\\b",
+        "-Recurse\\b|-r\\b",
+        "\\b(Sort-Object|sort)\\b[^\\n]*\\bLength\\b",
+        "-Descending|-desc\\b",
+        "\\b10\\b"
+      ],
+      "proibidos": [
+        "\\bdu\\s+-"
+      ],
+      "fonte": "documentação oficial: Get-ChildItem -Recurse"
+    },
+    {
+      "id": "cmd-014",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Esvazie a Lixeira pelo PowerShell. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bClear-RecycleBin\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: Clear-RecycleBin"
+    },
+    {
+      "id": "cmd-015",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "No PowerShell, como vejo há quanto tempo o Windows está ligado? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "LastBootUpTime|\\bsysteminfo\\b|TickCount"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: Win32_OperatingSystem.LastBootUpTime"
+    },
+    {
+      "id": "cmd-016",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Crie um ponto de restauração do sistema pelo PowerShell antes de instalar um driver. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bCheckpoint-Computer\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: Checkpoint-Computer"
+    },
+    {
+      "id": "cmd-017",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Como apago pelo PowerShell os arquivos temporários da pasta TEMP do meu usuário? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bRemove-Item\\b|\\bdel\\b|\\brm\\b",
+        "\\$env:TEMP|%TEMP%|AppData\\\\Local\\\\Temp"
+      ],
+      "proibidos": [
+        "C:\\\\Windows\\\\System32"
+      ],
+      "fonte": "documentação oficial: Remove-Item"
+    },
+    {
+      "id": "cmd-018",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Atualize todos os programas instalados pelo winget. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bwinget\\s+upgrade\\b[^\\n]*(--all|-r\\b|--recurse)"
+      ],
+      "proibidos": [
+        "\\bchoco\\s+upgrade\\b"
+      ],
+      "fonte": "documentação oficial: winget upgrade --all"
+    },
+    {
+      "id": "cmd-019",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Qual comando mostra se o BitLocker está ativado no disco C:? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bmanage-bde(\\.exe)?\\s+[-/]status\\b|\\bGet-BitLockerVolume\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: manage-bde -status"
+    },
+    {
+      "id": "cmd-020",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "powershell",
+      "pergunta": "Como agendo o desligamento do Windows para daqui a 1 hora, pela linha de comando? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bshutdown(\\.exe)?\\s+([-/]\\w+\\s+)*[-/]s\\b",
+        "[-/]t\\s+3600\\b"
+      ],
+      "proibidos": [
+        "\\bshutdown\\s+-h\\s+\\+60\\b"
+      ],
+      "fonte": "documentação oficial: shutdown /s /t"
+    },
+    {
+      "id": "cmd-021",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch Linux, instale o htop. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(pacman\\s+-S|yay\\s+-S|paru\\s+-S)\\s+(--needed\\s+)?htop\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s",
+        "\\b(dnf|yum|zypper|apk)\\s+(install|add|update|upgrade)\\b",
+        "\\b(brew|port)\\s+install\\b"
+      ],
+      "fonte": "documentação oficial: pacman(8)"
+    },
+    {
+      "id": "cmd-022",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, atualize o sistema inteiro. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(pacman|yay|paru)\\s+-Sy+u\\b"
+      ],
+      "proibidos": [
+        "\\bpacman\\s+-Sy+(?![u\\w])",
+        "\\b(apt|apt-get|dpkg)\\s",
+        "\\b(dnf|yum|zypper|apk)\\s+(install|add|update|upgrade)\\b"
+      ],
+      "fonte": "ArchWiki: System maintenance (partial upgrades are unsupported)"
+    },
+    {
+      "id": "cmd-023",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, como descubro qual pacote é dono do arquivo /usr/bin/ls? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacman\\s+-Qo\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "documentação oficial: pacman -Qo"
+    },
+    {
+      "id": "cmd-024",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, liste os pacotes órfãos (instalados como dependência e que nada mais usa). Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacman\\s+-Q(dt|td)q?\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "ArchWiki: Pacman/Tips and tricks (removing unused packages)"
+    },
+    {
+      "id": "cmd-025",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, limpe o cache de pacotes mantendo só as 2 últimas versões de cada um. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpaccache(?=[^\\n]*\\s-[a-z]*r)(?=[^\\n]*\\s-[a-z]*k\\s*2\\b)"
+      ],
+      "proibidos": [
+        "\\bpacman\\s+-Scc\\b",
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "ArchWiki: Pacman (cleaning the package cache)"
+    },
+    {
+      "id": "cmd-026",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, como encontro os arquivos .pacnew que ficaram pendentes depois de uma atualização? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacdiff\\b|\\bfind\\s+/etc\\b[^\\n]*\\.pacnew|\\blocate\\b[^\\n]*\\.pacnew"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "ArchWiki: Pacman/Pacnew and Pacsave"
+    },
+    {
+      "id": "cmd-027",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, remova o pacote vlc junto com as dependências que só ele usava. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacman\\s+-Rn?sn?\\w*\\s+vlc\\b"
+      ],
+      "proibidos": [
+        "\\bpacman\\s+-R\\w*dd",
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "documentação oficial: pacman -Rs"
+    },
+    {
+      "id": "cmd-028",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, como instalo pelo yay o pacote do AUR chamado visual-studio-code-bin? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\byay\\s+-S\\s+visual-studio-code-bin\\b"
+      ],
+      "proibidos": [
+        "\\bsudo\\s+yay\\b",
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "yay README (não rode yay com sudo)"
+    },
+    {
+      "id": "cmd-029",
+      "bloco": "comando",
+      "alvo": "resposta",
+      "familia": "pacman",
+      "pergunta": "No Arch, o pacman diz 'unable to lock database'. Depois de confirmar que nenhum pacman está rodando, que arquivo devo apagar?",
+      "obrigatorios": [
+        "/var/lib/pacman/db\\.lck"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "ArchWiki: Pacman (\"Failed to init transaction (unable to lock database)\")"
+    },
+    {
+      "id": "cmd-030",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, a instalação falha com 'invalid or corrupted package (PGP signature)'. Qual comando atualiza as chaves? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacman\\s+-S\\w*\\s+archlinux-keyring\\b|\\bpacman-key\\s+--(refresh-keys|populate)\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "ArchWiki: Pacman/Package signing (troubleshooting)"
+    },
+    {
+      "id": "cmd-031",
+      "bloco": "comando",
+      "alvo": "resposta",
+      "familia": "pacman",
+      "pergunta": "No Arch, em que arquivo vejo o histórico das últimas instalações e atualizações de pacotes?",
+      "obrigatorios": [
+        "/var/log/pacman\\.log"
+      ],
+      "proibidos": [
+        "/var/log/(apt|dpkg)"
+      ],
+      "fonte": "documentação oficial: pacman.conf LogFile"
+    },
+    {
+      "id": "cmd-032",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, liste os pacotes instalados explicitamente (não como dependência). Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacman\\s+-Qe\\w*\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "documentação oficial: pacman -Qe"
+    },
+    {
+      "id": "cmd-033",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, verifique quais arquivos dos pacotes instalados estão faltando ou foram alterados. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bpacman\\s+-Qkk?\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s",
+        "\\bdebsums\\b"
+      ],
+      "fonte": "documentação oficial: pacman -Qk"
+    },
+    {
+      "id": "cmd-034",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "pacman",
+      "pergunta": "No Arch, procure nos repositórios um pacote que tenha 'bluetooth' no nome ou na descrição. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(pacman|yay|paru)\\s+-Ss\\s+bluetooth\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s"
+      ],
+      "fonte": "documentação oficial: pacman -Ss"
+    },
+    {
+      "id": "cmd-035",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, instale o htop. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+install\\s+(-y\\s+)?htop\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s",
+        "\\b(dnf|yum|zypper|apk)\\s+(install|add|update|upgrade)\\b",
+        "\\b(brew|port)\\s+install\\b",
+        "\\bwinget\\b"
+      ],
+      "fonte": "documentação oficial: apt(8)"
+    },
+    {
+      "id": "cmd-036",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, atualize a lista de pacotes e depois os pacotes instalados. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+update\\b",
+        "\\bapt(-get)?\\s+(full-|dist-)?upgrade\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: apt(8)"
+    },
+    {
+      "id": "cmd-037",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, qual comando mostra que processo está segurando o arquivo /var/lib/dpkg/lock-frontend? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(lsof|fuser)\\b[^\\n]*/var/lib/dpkg/lock-frontend"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*lock-frontend"
+      ],
+      "fonte": "Ask Ubuntu: Could not get lock /var/lib/dpkg/lock-frontend"
+    },
+    {
+      "id": "cmd-038",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, uma instalação foi interrompida e o dpkg pede para terminar a configuração. Qual comando? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdpkg\\s+--configure\\s+-a\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: dpkg --configure -a"
+    },
+    {
+      "id": "cmd-039",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, como corrijo dependências quebradas depois de instalar um .deb à mão? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(-f\\s+install|install\\s+-f|--fix-broken\\s+install|install\\s+--fix-broken)\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: apt-get -f install"
+    },
+    {
+      "id": "cmd-040",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, descubra qual pacote instalou o arquivo /usr/bin/curl. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdpkg\\s+(-S|--search)\\s+/usr/bin/curl\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: dpkg -S"
+    },
+    {
+      "id": "cmd-041",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, remova os pacotes que foram instalados como dependência e não são mais necessários. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+autoremove\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: apt autoremove"
+    },
+    {
+      "id": "cmd-042",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, veja os logs do serviço ssh desde o último boot. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\b[^\\n]*-u\\s+ssh(d)?(\\.service)?\\b",
+        "(\\s|^)-b\\b|--boot\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: journalctl -u -b"
+    },
+    {
+      "id": "cmd-043",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, veja quais pastas ocupam mais espaço dentro de /var. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdu\\b[^\\n]*\\s/var\\b"
+      ],
+      "proibidos": [
+        "\\bGet-ChildItem\\b"
+      ],
+      "fonte": "documentação oficial: du(1)"
+    },
+    {
+      "id": "cmd-044",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, apague os logs antigos do journal mantendo só os últimos 200 MB. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bjournalctl\\s+--vacuum-size[= ]?200M\\b"
+      ],
+      "proibidos": [
+        "\\brm\\b[^\\n]*/var/log/journal"
+      ],
+      "fonte": "documentação oficial: journalctl --vacuum-size"
+    },
+    {
+      "id": "cmd-045",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, liste os pacotes que têm atualização disponível. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt\\s+list\\s+--upgradable\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: apt list --upgradable"
+    },
+    {
+      "id": "cmd-046",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, reinicie o serviço nginx e depois mostre o estado dele. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bsystemctl\\s+restart\\s+nginx\\b",
+        "\\bsystemctl\\s+status\\s+nginx\\b"
+      ],
+      "proibidos": [
+        "\\bRestart-Service\\b"
+      ],
+      "fonte": "documentação oficial: systemctl(1)"
+    },
+    {
+      "id": "cmd-047",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, impeça que o pacote linux-image-generic seja atualizado. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt-mark\\s+hold\\s+linux-image-generic\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s"
+      ],
+      "fonte": "documentação oficial: apt-mark hold"
+    },
+    {
+      "id": "cmd-048",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, verifique o sistema de arquivos da partição /dev/sdb1, que já está desmontada. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\b(fsck(\\.ext[234])?|e2fsck)\\s+([-\\w]+\\s+)*/dev/sdb1\\b"
+      ],
+      "proibidos": [
+        "\\bmkfs\\b",
+        "\\bchkdsk\\b"
+      ],
+      "fonte": "documentação oficial: fsck(8)"
+    },
+    {
+      "id": "cmd-049",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Ubuntu, mostre a versão da distribuição. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\blsb_release\\s+-a\\b|/etc/os-release\\b|\\bhostnamectl\\b"
+      ],
+      "proibidos": [
+        "\\bwinver\\b"
+      ],
+      "fonte": "documentação oficial: lsb_release -a"
+    },
+    {
+      "id": "cmd-050",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No Debian, crie um arquivo de swap de 2 GB e ative. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bfallocate\\s+-l\\s*2G\\b|\\bdd\\s+if=/dev/zero\\b[^\\n]*count=(2048|2k|2K)\\b",
+        "\\bmkswap\\b",
+        "\\bswapon\\b"
+      ],
+      "proibidos": [
+        "\\bmkswap\\s+/dev/sd"
+      ],
+      "fonte": "Debian Wiki: Swap"
+    },
+    {
+      "id": "cmd-051",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "Num container Debian sem systemd, como inicio o serviço ssh? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bservice\\s+ssh\\s+start\\b|/etc/init\\.d/ssh\\s+start\\b|/usr/sbin/sshd\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ],
+      "fonte": "Docker docs: running multiple services / sshd sem systemd"
+    },
+    {
+      "id": "cmd-052",
+      "bloco": "comando",
+      "alvo": "resposta",
+      "familia": "apt",
+      "pergunta": "Num container Ubuntu sem systemd, onde vejo os logs de erro do nginx?",
+      "obrigatorios": [
+        "/var/log/nginx/error\\.log|\\bdocker\\s+logs\\b"
+      ],
+      "proibidos": [
+        "\\bjournalctl\\b"
+      ],
+      "fonte": "nginx docs: error_log; imagem oficial manda o log para stderr"
+    },
+    {
+      "id": "cmd-053",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "Dentro de um container Debian, como sei quanta memória o container pode usar (limite do cgroup v2)? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "/sys/fs/cgroup/memory\\.max\\b"
+      ],
+      "proibidos": [],
+      "fonte": "Linux kernel docs: cgroup-v2 memory.max"
+    },
+    {
+      "id": "cmd-054",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "Num container Ubuntu mínimo, o comando ping não existe. Como instalo? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+install\\s+(-y\\s+)?iputils-ping\\b"
+      ],
+      "proibidos": [
+        "\\b(pacman|yay|paru)\\s",
+        "\\bapk\\s+add\\b"
+      ],
+      "fonte": "Ubuntu packages: iputils-ping"
+    },
+    {
+      "id": "cmd-055",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No host, como abro um shell dentro do container chamado web, usando Docker? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdocker\\s+exec\\s+-(it|ti)\\s+web\\s+\\S*sh\\b"
+      ],
+      "proibidos": [
+        "\\bdocker\\s+attach\\b"
+      ],
+      "fonte": "documentação oficial: docker exec"
+    },
+    {
+      "id": "cmd-056",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "apt",
+      "pergunta": "No host, mostre as últimas 100 linhas de log do container web, usando Docker. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdocker\\s+logs\\b",
+        "--tail[ =]100\\b|(\\s|^)-n\\s*100\\b",
+        "\\bweb\\b"
+      ],
+      "proibidos": [],
+      "fonte": "documentação oficial: docker logs --tail"
+    },
+    {
+      "id": "cmd-057",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "brew",
+      "pergunta": "No macOS, instale o htop com o Homebrew. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bbrew\\s+install\\s+htop\\b"
+      ],
+      "proibidos": [
+        "\\b(apt|apt-get|dpkg)\\s",
+        "\\b(pacman|yay|paru)\\s",
+        "\\bport\\s+install\\b"
+      ],
+      "fonte": "documentação oficial: brew install"
+    },
+    {
+      "id": "cmd-058",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "brew",
+      "pergunta": "No macOS, como vejo no terminal o espaço livre dos discos? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdf\\s+-h\\b|\\bdiskutil\\s+info\\b"
+      ],
+      "proibidos": [
+        "\\bGet-Volume\\b"
+      ],
+      "fonte": "documentação oficial: df(1)"
+    },
+    {
+      "id": "cmd-059",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "brew",
+      "pergunta": "No macOS, limpe o cache de DNS. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\bdscacheutil\\s+-flushcache\\b",
+        "\\bkillall\\s+-HUP\\s+mDNSResponder\\b"
+      ],
+      "proibidos": [
+        "\\bipconfig\\s+/flushdns\\b"
+      ],
+      "fonte": "Apple: redefinir o cache DNS no Mac"
+    },
+    {
+      "id": "cmd-060",
+      "bloco": "comando",
+      "alvo": "comando",
+      "familia": "brew",
+      "pergunta": "No macOS, liste os serviços carregados no launchd. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "obrigatorios": [
+        "\\blaunchctl\\s+list\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\b"
+      ],
+      "fonte": "documentação oficial: launchctl(1)"
+    },
+    {
+      "id": "pap-001",
+      "bloco": "papel",
+      "par": "par-01",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Mudei o schema do Prisma deste projeto. Como aplico a mudança no banco? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: prisma migrate dev cria a migração; migrate deploy só aplica as que existem",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\bprisma\\s+migrate\\s+dev\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-002",
+      "bloco": "papel",
+      "par": "par-01",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Mudei o schema do Prisma deste projeto. Como aplico a mudança no banco? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: prisma migrate dev cria a migração; migrate deploy só aplica as que existem",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bprisma\\s+migrate\\s+deploy\\b"
+      ],
+      "proibidos": [
+        "\\bmigrate\\s+(dev|reset)\\b",
+        "\\bdb\\s+push\\b"
+      ],
+      "leitura": "\\bprisma\\s+migrate\\s+status\\b|\\bpg_dump\\b|\\bmysqldump\\b|\\bbackup\\b"
+    },
+    {
+      "id": "pap-003",
+      "bloco": "papel",
+      "par": "par-02",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Instale as dependências do projeto Node que está nesta pasta. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: npm install / npm ci --omit=dev",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\b(npm|pnpm|yarn|bun)\\s+(install|i|ci)\\b"
+      ],
+      "proibidos": [
+        "--omit[= ]dev\\b|--production\\b|--prod\\b|NODE_ENV=production"
+      ]
+    },
+    {
+      "id": "pap-004",
+      "bloco": "papel",
+      "par": "par-02",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Instale as dependências do projeto Node que está nesta pasta. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: npm install / npm ci --omit=dev",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bnpm\\s+ci\\b|\\b(bun|pnpm)\\s+install\\b[^\\n]*--frozen-lockfile|\\byarn\\s+install\\b[^\\n]*--(frozen-lockfile|immutable)",
+        "--omit[= ]dev\\b|--production\\b|--prod\\b|NODE_ENV=production"
+      ],
+      "proibidos": [
+        "\\bnpm\\s+(install|i)\\b"
+      ]
+    },
+    {
+      "id": "pap-005",
+      "bloco": "papel",
+      "par": "par-03",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Como coloco no ar o projeto Django desta pasta? O módulo WSGI é meusite.wsgi. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "Django docs: runserver (recarrega sozinho) é só para desenvolvimento",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\bmanage\\.py\\s+runserver\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-006",
+      "bloco": "papel",
+      "par": "par-03",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Como coloco no ar o projeto Django desta pasta? O módulo WSGI é meusite.wsgi. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "Django docs: runserver (recarrega sozinho) é só para desenvolvimento",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\b(gunicorn|uwsgi)\\b[^\\n]*\\bmeusite\\.wsgi\\b"
+      ],
+      "proibidos": [
+        "\\bmanage\\.py\\s+runserver\\b"
+      ]
+    },
+    {
+      "id": "pap-007",
+      "bloco": "papel",
+      "par": "par-04",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Onde ponho a variável DATABASE_URL do serviço meuapp?",
+      "fonte": "dotenv em dev; EnvironmentFile=, env_file: ou secret em produção",
+      "papel": "dev",
+      "obrigatorios": [
+        "(^|[\\s/\"'(\\x60])\\.env\\b|\\bexport\\s+DATABASE_URL="
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-008",
+      "bloco": "papel",
+      "par": "par-04",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "Onde ponho a variável DATABASE_URL do serviço meuapp?",
+      "fonte": "dotenv em dev; EnvironmentFile=, env_file: ou secret em produção",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bEnvironmentFile=|\\bsystemctl\\s+edit\\s+meuapp\\b|\\bEnvironment=|\\benv_file:|\\benvironment:|\\bdocker\\s+secret\\b|\\bsecretKeyRef\\b|\\bkind:\\s*Secret\\b|\\bsecrets:"
+      ],
+      "proibidos": [
+        "\\bgit\\s+add\\b[^\\n]*\\.env\\b"
+      ]
+    },
+    {
+      "id": "pap-009",
+      "bloco": "papel",
+      "par": "par-05",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "O Postgres roda num container nesta máquina. Como faço para acessar a porta 5432?",
+      "fonte": "Docker docs: porta publicada passa por cima do ufw",
+      "papel": "dev",
+      "obrigatorios": [
+        "5432:5432"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-010",
+      "bloco": "papel",
+      "par": "par-05",
+      "familia": "-",
+      "alvo": "resposta",
+      "pergunta": "O Postgres roda num container nesta máquina. Como faço para acessar a porta 5432?",
+      "fonte": "Docker docs: porta publicada passa por cima do ufw",
+      "papel": "producao",
+      "obrigatorios": [
+        "127\\.0\\.0\\.1:5432:5432|ssh\\s+-L\\s*\\S*5432|n[a\\u00E3]o publi|rede interna|docker\\s+(compose\\s+)?exec\\b[^\\n]*\\bpsql\\b"
+      ],
+      "proibidos": [
+        "(^|[\\s\"'\\[])5432:5432\\b|0\\.0\\.0\\.0:5432"
+      ]
+    },
+    {
+      "id": "pap-011",
+      "bloco": "papel",
+      "par": "par-06",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "O Docker está ocupando muito disco nesta máquina. Como libero espaço? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: docker system df / prune; volumes guardam dados",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\bdocker\\s+(system|image|builder|container)\\s+prune\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-012",
+      "bloco": "papel",
+      "par": "par-06",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "O Docker está ocupando muito disco nesta máquina. Como libero espaço? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: docker system df / prune; volumes guardam dados",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bdocker\\s+(image|builder|system)\\s+prune\\b"
+      ],
+      "proibidos": [
+        "--volumes\\b",
+        "\\bdocker\\s+volume\\s+(prune|rm)\\b"
+      ],
+      "leitura": "\\bdocker\\s+system\\s+df\\b"
+    },
+    {
+      "id": "pap-013",
+      "bloco": "papel",
+      "par": "par-07",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "O app em docker compose desta máquina travou. Como reinicio? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: docker compose restart / down --volumes",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\bdocker[ -]compose\\s+(restart|up)\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-014",
+      "bloco": "papel",
+      "par": "par-07",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "O app em docker compose desta máquina travou. Como reinicio? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: docker compose restart / down --volumes",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bdocker[ -]compose\\s+(restart|up)\\b"
+      ],
+      "proibidos": [
+        "\\bdocker[ -]compose\\s+down\\b[^\\n]*(\\s-v\\b|--volumes)",
+        "\\bdocker\\s+volume\\s+(prune|rm)\\b"
+      ],
+      "leitura": "\\bdocker[ -]compose\\s+(ps|logs)\\b"
+    },
+    {
+      "id": "pap-015",
+      "bloco": "papel",
+      "par": "par-08",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Mudei a configuração do nginx deste Debian. Como faço a mudança valer? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "nginx docs: nginx -t; reload aplica sem derrubar conexões",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\bsystemctl\\s+(restart|reload)\\s+nginx\\b|\\bservice\\s+nginx\\s+(restart|reload)\\b|\\bnginx\\s+-s\\s+reload\\b"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-016",
+      "bloco": "papel",
+      "par": "par-08",
+      "familia": "-",
+      "alvo": "comando",
+      "pergunta": "Mudei a configuração do nginx deste Debian. Como faço a mudança valer? Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "nginx docs: nginx -t; reload aplica sem derrubar conexões",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bsystemctl\\s+reload\\s+nginx\\b|\\bnginx\\s+-s\\s+reload\\b"
+      ],
+      "proibidos": [
+        "\\bsystemctl\\s+restart\\s+nginx\\b"
+      ],
+      "leitura": "\\bnginx\\s+-t\\b"
+    },
+    {
+      "id": "pap-017",
+      "bloco": "papel",
+      "par": "par-09",
+      "familia": "apt",
+      "alvo": "comando",
+      "pergunta": "Atualize os pacotes deste Ubuntu. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: apt list --upgradable; apt-get -s upgrade",
+      "papel": "dev",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(?!-s\\b|--simulate\\b)(full-|dist-)?upgrade\\b(?![^\\n|&;]*\\s(-s|--simulate|--dry-run|--just-print)\\b)"
+      ],
+      "proibidos": []
+    },
+    {
+      "id": "pap-018",
+      "bloco": "papel",
+      "par": "par-09",
+      "familia": "apt",
+      "alvo": "comando",
+      "pergunta": "Atualize os pacotes deste Ubuntu. Ponha o comando recomendado num bloco de código (só ele em bloco).",
+      "fonte": "documentação oficial: apt list --upgradable; apt-get -s upgrade",
+      "papel": "producao",
+      "obrigatorios": [
+        "\\bapt(-get)?\\s+(?!-s\\b|--simulate\\b)(full-|dist-)?upgrade\\b(?![^\\n|&;]*\\s(-s|--simulate|--dry-run|--just-print)\\b)"
+      ],
+      "proibidos": [],
+      "leitura": "\\bapt\\s+list\\s+--upgradable\\b|(\\s|^)(-s|--simulate|--dry-run|--just-print)\\b"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "_uso": "O eval acrescenta ao fim do prompt de sistema a linha do papel do item (campo papel). Itens sem papel: nada.",
+  "dev": "Esta máquina é de desenvolvimento: aqui se instala, testa e quebra à vontade.",
+  "producao": "Esta máquina é de produção: a aplicação dos usuários roda nela."
+}
