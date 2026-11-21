@@ -66,8 +66,8 @@ bun scripts/serve-web.ts 3000  # ou escolha a porta diretamente (ex.: http://loc
 
 | Modelo | Parâmetros | Quantização | Tamanho | RAM aprox. | Velocidade (CPU)* | Atalho `make` / CLI | Status das Ferramentas |
 |---|---:|---|---:|---:|---:|---|---|
-| **Qwen2.5-0.5B-Instruct** | 0,5B | Q8_0 | 556 MB | ~0,6 GB | 22–27 tok/s | `qwen` / `make qwen` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
-| **Qwen2.5-0.5B-Instruct** | 0,5B | Q5_0 | 340 MB | ~0,4 GB | 15–18 tok/s | `qwen-q5` / `make qwen-q5` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
+| **Qwen2.5-0.5B-Instruct** | 0,5B | Q8_0 | 556 MB | ~0,6 GB | 22–27 tok/s | `qwen` / `make qwen` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`); no chat com o livro de comandos, só com `--tools` ou `--no-book` |
+| **Qwen2.5-0.5B-Instruct** | 0,5B | Q5_0 | 340 MB | ~0,4 GB | 15–18 tok/s | `qwen-q5` / `make qwen-q5` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`); no chat com o livro de comandos, só com `--tools` ou `--no-book` |
 | **Qwen2.5-1.5B-Instruct** | 1,5B | Q8_0 | 1,7 GB | ~1,8 GB | ~10 tok/s | `qwen-1.5b` / `make qwen-1.5b` | Completas (o mesmo template do 0,5B) |
 | **Gemma-3-1B-Instruct** | 1,0B | Q8_0 | ~1,0 GB | ~1,2 GB | ~12 tok/s | `gemma` / `make gemma` | Completas (`data_atual`, `dias_ate`, `calcular`, `converter`, `contar`) |
 | **Gemma-3-270M-Instruct** | 0,27B | Q8_0 | ~290 MB | não medido | não medido | CLI: `gemma-270m` | Conversão e uso com esses pesos ainda não validados ponta a ponta |
@@ -257,6 +257,7 @@ O espaço livre do disco pode ser visto com o comando `df -h` ...
 - **O risco:** quando a busca escolhe a tarefa errada, o modelo pode copiar o exemplo errado (a versão do sistema no lugar da do kernel). O aviso com o nome da tarefa existe para você perceber isso.
 - Liga sozinho no chat; `--no-book` desliga. Com `--chat --prompt`, só com `--book`.
 - As ferramentas (data, cálculo) decidem só pelas suas palavras, nunca pelos exemplos do livro.
+- **Modelos pequenos (o Qwen 0,5B, largura abaixo de 1024) ficam sem ferramentas quando o livro está ligado.** Com os dois juntos, o 0,5B confundia as descrições das ferramentas com a pergunta e as repetia em vez de responder. `--tools LISTA` religa as ferramentas pedidas; `--no-book` desliga o livro e volta as ferramentas. O 1,5B, o Gemma 1B e o Phi não mudam.
 - O livro é `scripts/cmdcheck/livro.json`. Depois de mudá-lo, `bun scripts/cmdcheck/gen-book.ts inc > src/book_data.inc` e `bun scripts/cmdcheck/gen-book.ts golden > tests/goldens/livro-busca.tsv`. Mudar o livro ou a busca pede uma nova medição, como diz o `docs/DECISIONS.md`.
 
 ---

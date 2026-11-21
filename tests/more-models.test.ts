@@ -44,6 +44,13 @@ describe.skipIf(!qwen15)("Qwen2.5-1.5B-Instruct", () => {
     expect(r.stdout.toString()).toContain("Brasília");
   }, SLOW);
 
+  test("keeps the tools with the command book on (only the 0.5B drops them)", () => {
+    const r = runWithInput([...modelArgs(qwen15!), "--tokens", 8], "/sair\n");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("Ferramentas: data_atual");
+    expect(r.stderr).not.toContain("ferramentas desligadas");
+  }, SLOW);
+
   test("does the arithmetic in calcular", () => {
     const r = runWithInput([...modelArgs(qwen15!), "--now", "2026-11-06T10:30", "--tokens", 48, "--no-book"],
       "Quanto é 15% de 230?\n");

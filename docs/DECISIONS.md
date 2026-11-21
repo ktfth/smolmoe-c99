@@ -1071,6 +1071,28 @@ somam os mesmos doubles na mesma ordem.
 - **Fica de fora por enquanto:** a janela (GUI) e a página web, que chamam o motor direto. Diminuir as tarefas erradas
   copiadas fica para outra rodada, com conjunto novo: mexer na busca invalida esta medição.
 
+## Iteração 14: o Qwen 0,5B sem ferramentas quando o livro está ligado
+
+**Motivo:** no chat interativo, o padrão liga as ferramentas e o livro de comandos juntos, combinação que nenhum eval
+mediu (o livro foi medido com `--no-tools`, iteração 13). Com o Qwen 0,5B, "Como verificar com o PowerShell quanto
+tempo o computador esta ligado?" recebeu o exemplo certo do livro (`uptime`), mas a resposta listou as descrições das
+ferramentas do prompt de sistema ("Data de hoje, dia da semana e hora atual", "Quantos dias faltam...") como se fossem
+perguntas, cada uma com `(Get-Date)` repetido, até o limite de tokens. Com temperatura 0, a mesma saída sempre.
+
+- **Isolamento:** a mesma pergunta com `--no-tools` e o livro, e com `--chat --book --prompt` (sem ferramentas),
+  deu o comando do livro (`(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime`). É o mesmo efeito do
+  piloto do kit (iteração 13): com ferramentas, o 0,5B acertou 1/11; sem elas, 6/11.
+- **O que não foi feito:** reescrever o texto do livro. Uma frase de abertura diferente acertou essa pergunta, em 3
+  perguntas, mas o texto atual é o do braço D medido (58/120), que `tests/book.test.ts` confere byte a byte.
+- **A regra:** no chat interativo, um modelo com largura (`dim`) abaixo de 1024 e o livro ligado fica sem
+  ferramentas, com um aviso, a menos que `--tools LISTA` as peça; `--no-book` desliga o livro e as ferramentas voltam.
+  O corte em 1024 separa o 0,5B (896), onde a falha foi vista, do 1,5B (1536) e do Gemma 1B (1152), que ficam como
+  estavam; o Gemma 270M (640) também cai na regra, sem medição própria. A janela e a página web não usam o livro e
+  não mudam.
+- **Testes:** `tests/models.test.ts` (a pergunta acima responde com `LastBootUpTime` e sem "Data de hoje"; `--tools`
+  religa; os testes das ferramentas passam a usar `--no-book`) e `tests/more-models.test.ts` (o 1,5B mantém as
+  ferramentas com o livro).
+
 ## O que sustenta o projeto (o "pó" que ficou)
 
 1. **C99, zero dependências, um executável.** Roda em qualquer lugar e é fácil de auditar e de embarcar. A janela é

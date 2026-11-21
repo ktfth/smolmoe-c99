@@ -696,15 +696,26 @@ static void run_chat(const Run *r) {
     st->prefix_cache = prefix_cache_state_name((PrefixCacheState)cs->prefix_cache);
 }
 
+/* Narrower models (Qwen2.5-0.5B: 896) read the tool declarations as part of the
+ * question: with the command book's examples too, the 0.5B answered a maintenance
+ * question with the tool descriptions, repeated (docs/DECISIONS.md, iteration 14). */
+#define SMALL_MODEL_DIM 1024
+
 /* Chat tools are on when the vocabulary has the call markers, --no-tools is
- * absent and the declarations fit in half the context. Otherwise the chat runs
- * with the plain system prompt and the markers stay banned. */
-static void enable_tools(Run *r, uint32_t context, Memory *mem) {
-    uint32_t needed = 0;
-    const char *text = r->o->no_tools ? NULL
-                                      : engine_tools_prompt(r->tok, r->o->system, context, r->ids, &r->tool_open,
-                                                            &r->tool_close, &needed, mem);
+ * absent and the declarations fit in half the context. A small model with the
+ * command book on chats without them unless --tools asks. Otherwise the chat
+ * runs with the plain system prompt and the markers stay banned. */
+static void enable_tools(Run *r, uint32_t context, uint32_t dim, Memory *mem) {
+    uint32_t needed = 0, open, close;
+    int small = dim < SMALL_MODEL_DIM && r->o->book >= 0 && !r->o->tools && !r->o->no_tools;
+    const char *text = r->o->no_tools || small ? NULL
+                                               : engine_tools_prompt(r->tok, r->o->system, context, r->ids,
+                                                                     &r->tool_open, &r->tool_close, &needed, mem);
     if (needed) fprintf(stderr, "(ferramentas desativadas: o contexto é pequeno; use --context %u ou mais)\n", needed);
+    if (small && tokenizer_tool_markers(r->tok, &open, &close))
+        fputs("(ferramentas desligadas neste modelo pequeno: com o livro de comandos ele confunde as duas coisas; "
+              "--tools as religa e --no-book desliga o livro)\n",
+              stderr);
     r->system = text ? text : r->o->system;
     r->tools = text != NULL;
 }
@@ -810,7 +821,7 @@ int main(int argc, char **argv) {
     if (!banned) die("%s", sm_last_error());
     for (i = 0; i < c.vocab; ++i) banned[i] = (unsigned char)tokenizer_is_control(run.tok, i);
     run.banned = banned;
-    if (o.interactive) enable_tools(&run, context, &mem);
+    if (o.interactive) enable_tools(&run, context, c.dim, &mem);
     sm_check(sampler_init(&sampler, c.vocab, banned, o.temperature, o.top_k, o.top_p, o.seed, &mem));
     run.model = &model;
     run.mem = &mem;

@@ -123,10 +123,33 @@ describe.skipIf(!qwen)("interactive chat", () => {
   }, SLOW);
 });
 
+describe.skipIf(!qwen)("the 0.5B chat with the command book", () => {
+  /* With the tool declarations and the book's examples together, the 0.5B answered the uptime question with the
+   * tool descriptions, repeated (docs/DECISIONS.md, iteration 14): with the book on, it chats without tools. */
+  test("turns the tools off and answers a maintenance question with the book's command", () => {
+    const r = runWithInput([...modelArgs(qwen!), "--tokens", 120],
+      "Como verificar com o PowerShell quanto tempo o computador esta ligado?\n/sair\n");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("(ferramentas desligadas neste modelo pequeno");
+    expect(r.stderr).not.toContain("Ferramentas:");
+    expect(r.stderr).toContain("(livro de comandos: uptime)");
+    expect(r.stdout.toString()).toContain("LastBootUpTime");
+    expect(r.stdout.toString()).not.toContain("Data de hoje");
+  }, SLOW);
+
+  test("--tools keeps the tools asked for, with the book on", () => {
+    const r = runWithInput([...modelArgs(qwen!), "--tokens", 8, "--tools", "calcular"], "/sair\n");
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("Ferramentas: calcular.");
+    expect(r.stderr).not.toContain("ferramentas desligadas");
+  }, SLOW);
+});
+
 describe.skipIf(!qwen)("chat tools", () => {
   const NOW = ["--now", "2026-11-06T10:30"]; /* a Friday, 49 days before Christmas */
+  /* No book: with it, the 0.5B chats without tools (above). */
   const chat = (input: string, extra: readonly (string | number)[] = []) =>
-    runWithInput([...modelArgs(qwen!), ...NOW, "--tokens", 96, ...extra], `${input}\n/sair\n`);
+    runWithInput([...modelArgs(qwen!), ...NOW, "--tokens", 96, "--no-book", ...extra], `${input}\n/sair\n`);
 
   test("counts the days to Christmas with dias_ate and answers with the exact number", () => {
     const r = chat("Quanto tempo falta para o natal?");

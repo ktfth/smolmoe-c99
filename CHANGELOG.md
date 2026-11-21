@@ -78,6 +78,10 @@
   `SM_FUZZ_ITERS` aumenta as baterias.
 
 ### Corrigido
+- **Qwen 0,5B no chat com o livro de comandos:** a pergunta de manutenção recebia o exemplo certo, mas a
+  resposta listava as descrições das ferramentas, repetidas. Modelos com largura abaixo de 1024 agora conversam sem
+  ferramentas quando o livro está ligado, com um aviso; `--tools LISTA` as religa e `--no-book` desliga o livro.
+  O 1,5B, o Gemma 1B e o Phi não mudam (`docs/DECISIONS.md`, iteração 14).
 - Chat: um log colado forçava uma ferramenta antes de o modelo ler. O fuso de um horário ISO (`11:07:48+03:00`)
   contava como conta e forçava `calcular`, e uma data `10/11/2026` do Event Log forçava `dias_ate`. Texto colado
   (o que o chat reconhece como colagem, ou uma mensagem com mais de uma linha) não força mais ferramenta. O modelo
