@@ -17,6 +17,12 @@ struct Platform {
     // window then shows a path field). Returns nullopt when cancelled.
     std::function<std::optional<std::string>()> pick_file;
     std::function<void(const std::string &title)> set_title;
+    // A touch screen (Android): no Esc or Ctrl shortcuts, dragging scrolls and
+    // a long press copies. edit_text opens the system's own text box on the
+    // draft, which keeps accents, autocorrect and paste; its answer comes back
+    // through ChatView::edited.
+    bool touch = false;
+    std::function<void(const std::string &draft)> edit_text;
 };
 
 // Fonts and colors, rebuilt when the window's scale changes.
@@ -24,6 +30,8 @@ struct Look {
     ImFont *large = nullptr;  // titles; nullptr: the regular font
     float scale = 1.0f;       // sizes in pixels at 96 DPI are multiplied by this
     bool light = false;
+    float inset_top = 0;      // pixels the system's bars cover (Android): the screens stay clear of them
+    float inset_bottom = 0;
 };
 
 // Theme and spacing for `scale`, light or dark.
@@ -44,6 +52,7 @@ public:
 
     void draw(const Look &look);           // one frame, between NewFrame() and Render()
     void drop(const std::string &path);    // a file dropped on the window
+    void edited(const std::string &text, bool send);  // Platform::edit_text's answer
     bool animating() const;                // loading or replying: keep redrawing
     bool close_requested() const { return close_requested_; }
 
@@ -57,6 +66,8 @@ private:
     void draw_transcript(float height);
     void draw_entry(const Entry &entry, bool last);
     void draw_input();
+    void draw_touch_input(float width, float height);
+    void drag_to_scroll();
     void draw_status();
     void send_input();
     void title(const char *text) const;

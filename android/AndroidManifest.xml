@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The smolmoe app (docs/ANDROID.md): the chat window over a NativeActivity.
+     No permissions: the model is inside the APK and nothing leaves the phone.
+     Target 34 keeps the window between the status and navigation bars
+     (35 forces edge to edge, which a NativeActivity would have to inset by hand).
+     The library is stored uncompressed (extractNativeLibs false) and the model
+     too, so both are read in place from the APK. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.smolmoe.app"
+    android:versionCode="1"
+    android:versionName="@VERSION@">
+
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+
+    <application
+        android:label="smolmoe"
+        android:hasCode="true"
+        android:allowBackup="false"
+        android:extractNativeLibs="false"
+        android:theme="@style/App">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/App"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale"
+            android:windowSoftInputMode="adjustNothing">
+            <meta-data android:name="android.app.lib_name" android:value="smolmoe" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

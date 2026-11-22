@@ -34,6 +34,10 @@ typedef enum DesktopStage {
 
 typedef struct DesktopOptions {
     const char *path;  /* UTF-8; NULL: the model appended to this executable */
+    /* A self-contained .smoe stored inside path's file (an uncompressed asset
+     * of an Android APK): its first byte and its size; length 0 reads the whole
+     * file. Ignored without a path. */
+    uint64_t offset, length;
     uint32_t context;  /* 0: DESKTOP_DEFAULT_CONTEXT; capped at the model's */
     uint32_t threads;  /* 0: the physical cores */
     EngineSink sink;   /* the replies; text, reply_end and notice are required */

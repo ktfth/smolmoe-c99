@@ -2,6 +2,11 @@
 
 #include <utility>
 
+#if defined(__ANDROID__)
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
 extern "C" {
 #include "platform.h"
 #include "util.h"
@@ -81,18 +86,18 @@ void ChatSession::changed() {
     if (wake_) wake_();
 }
 
-void ChatSession::open(const std::string &path) {
+void ChatSession::open(const std::string &path, uint64_t offset, uint64_t length) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (state_.phase != Phase::NoModel || worker_running_) return;
     if (worker_.joinable()) worker_.join();  // the thread of a refused file, already finished
     state_.phase = Phase::Opening;
     state_.stage = DESKTOP_CHECKING;
     state_.error.clear();
-    state_.model_name = display_name(path);
+    state_.model_name = options_.name.empty() ? display_name(path) : options_.name;
     state_.phase_started = now_seconds();
     worker_running_ = true;
     changed();
-    worker_ = std::thread(&ChatSession::run, this, path);
+    worker_ = std::thread(&ChatSession::run, this, path, offset, length);
 }
 
 bool ChatSession::send(const std::string &text) {
@@ -140,10 +145,19 @@ bool ChatSession::shutdown() {
     return true;
 }
 
-void ChatSession::run(std::string path) {
+void ChatSession::run(std::string path, uint64_t offset, uint64_t length) {
+#if defined(__ANDROID__)
+    // The app's thread runs at the display's priority (nice -10) and threads
+    // inherit it: the model's threads would then take every core from the
+    // window and the rest of the system. Normal priority here, and so in the
+    // pool's threads, which this thread starts.
+    setpriority(PRIO_PROCESS, static_cast<id_t>(gettid()), 0);
+#endif
     DesktopOptions o{};
     char err[DESKTOP_ERROR_BYTES];
     o.path = path.empty() ? nullptr : path.c_str();
+    o.offset = offset;
+    o.length = length;
     o.context = options_.context;
     o.threads = options_.threads;
     o.sink = EngineSink{this, on_text, on_reply_end, on_notice, on_stop};

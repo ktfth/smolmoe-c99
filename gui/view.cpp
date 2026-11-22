@@ -20,6 +20,8 @@ constexpr float kTitlePixels = 26.0f;
 constexpr float kBubbleShare = 0.78f;      // a message bubble takes at most this much of the width
 constexpr float kColumnPixels = 560.0f;    // width of the centered screens
 constexpr int kInputLines = 3;
+constexpr float kLongPressSeconds = 0.5f;  // a touch held this long opens the copy menu
+constexpr float kNarrowPixels = 640.0f;    // below this width (at 96 DPI) the header takes two lines
 // Dear ImGui swaps Cmd and Ctrl on macOS, so the shortcuts are Cmd+N and Cmd+Enter there.
 #if defined(__APPLE__)
 #define SHORTCUT_KEY "Cmd"
@@ -81,7 +83,12 @@ void text(const std::string &s, const ImVec4 *color = nullptr) {
     if (color) ImGui::PopStyleColor();
 }
 
-void copy_menu(const std::string &s) {
+// Right click, or a long press on a touch screen.
+void copy_menu(const std::string &s, bool touch) {
+    const ImGuiIO &io = ImGui::GetIO();
+    if (touch && ImGui::IsItemHovered() && io.MouseDownDuration[0] >= kLongPressSeconds &&
+        io.MouseDownDuration[0] - io.DeltaTime < kLongPressSeconds && !ImGui::IsMouseDragging(0))
+        ImGui::OpenPopup("copiar");
     if (ImGui::BeginPopupContextItem("copiar")) {
         if (ImGui::MenuItem("Copiar")) ImGui::SetClipboardText(s.c_str());
         ImGui::EndPopup();
@@ -174,6 +181,11 @@ void ChatView::drop(const std::string &path) {
     if (state_.phase == Phase::NoModel) session_.open(path);
 }
 
+void ChatView::edited(const std::string &text, bool send) {
+    input_ = text;
+    if (send && state_.phase == Phase::Ready) send_input();
+}
+
 void ChatView::refresh() {
     content_changed_ = false;
     std::optional<SessionState> next = session_.changed_since(state_.version);
@@ -198,8 +210,8 @@ void ChatView::draw(const Look &look) {
     look_ = look;
     refresh();
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowPos(viewport->WorkPos + ImVec2(0, look.inset_top));
+    ImGui::SetNextWindowSize(viewport->WorkSize - ImVec2(0, look.inset_top + look.inset_bottom));
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
     ImGui::Begin("smolmoe", nullptr, flags);
@@ -226,7 +238,7 @@ void ChatView::draw_pick() {
         if (ImGui::Button("Abrir modelo (.smoe)…")) {
             if (std::optional<std::string> path = platform_.pick_file()) session_.open(*path);
         }
-    } else {
+    } else if (!platform_.touch) {
         text("Caminho do modelo (.smoe):");
         ImGui::SetNextItemWidth(width - ImGui::CalcTextSize("Abrir").x - ImGui::GetStyle().FramePadding.x * 2 -
                                 ImGui::GetStyle().ItemSpacing.x);
@@ -234,10 +246,12 @@ void ChatView::draw_pick() {
         ImGui::SameLine();
         if ((ImGui::Button("Abrir") || entered) && !trimmed(path_input_).empty()) session_.open(trimmed(path_input_));
     }
-    ImGui::Spacing();
-    text("Ou arraste um arquivo .smoe para esta janela.", &p.dim);
-    text("Os modelos estão na página de releases do projeto, por exemplo qwen2.5-0.5b-instruct-q8.smoe (560 MB).",
-         &p.dim);
+    if (!platform_.touch) {
+        ImGui::Spacing();
+        text("Ou arraste um arquivo .smoe para esta janela.", &p.dim);
+        text("Os modelos estão na página de releases do projeto, por exemplo qwen2.5-0.5b-instruct-q8.smoe (560 MB).",
+             &p.dim);
+    }
     if (!state_.error.empty()) {
         ImGui::Spacing();
         text(sentence(state_.error), &p.error);
@@ -264,8 +278,9 @@ void ChatView::draw_failed() {
     ImGui::Spacing();
     text(sentence(state_.error), &p.error);
     ImGui::Spacing();
-    text("Feche a janela e abra o programa de novo. Se o erro voltar, o arquivo do modelo pode estar corrompido: "
-         "baixe-o outra vez.");
+    text(platform_.touch ? "Feche o aplicativo e abra de novo. Se o erro voltar, reinstale o aplicativo."
+                         : "Feche a janela e abra o programa de novo. Se o erro voltar, o arquivo do modelo pode estar "
+                           "corrompido: baixe-o outra vez.");
     ImGui::Spacing();
     if (ImGui::Button("Fechar")) close_requested_ = true;
     end_column(column);
@@ -292,18 +307,26 @@ void ChatView::draw_header() {
     const char *reset_label = "Nova conversa";
     const float reset_width = ImGui::CalcTextSize(reset_label).x + ImGui::GetStyle().FramePadding.x * 2;
     const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(state_.model_name.c_str());
-    ImGui::SameLine();
+    const bool narrow = ImGui::GetContentRegionAvail().x < kNarrowPixels * look_.scale;
     char details[160];
     std::snprintf(details, sizeof(details), "%s · %u threads · contexto %u%s", info.backend ? info.backend : "",
                   info.threads, info.context, info.tools ? " · ferramentas de data e contas" : "");
-    ImGui::TextColored(p.dim, "%s", details);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(state_.model_name.c_str());
+    if (!narrow) {
+        ImGui::SameLine();
+        ImGui::TextColored(p.dim, "%s", details);
+    }
     ImGui::SameLine(std::max(right - reset_width, ImGui::GetCursorPosX()));
     ImGui::BeginDisabled(state_.phase != Phase::Ready || state_.entries.empty());
     if (ImGui::Button(reset_label)) session_.reset();
-    ImGui::SetItemTooltip(SHORTCUT_KEY "+N");
+    if (!platform_.touch) ImGui::SetItemTooltip(SHORTCUT_KEY "+N");
     ImGui::EndDisabled();
+    if (narrow) {
+        ImGui::PushStyleColor(ImGuiCol_Text, p.dim);
+        ImGui::TextWrapped("%s", details);
+        ImGui::PopStyleColor();
+    }
     ImGui::Separator();
 }
 
@@ -325,9 +348,18 @@ void ChatView::draw_transcript(float height) {
     const bool waiting = state_.phase == Phase::Busy &&
                          (state_.entries.empty() || state_.entries.back().role != Role::Assistant);
     if (waiting) text(dots(), &p.dim);
+    if (platform_.touch) drag_to_scroll();
     if (scroll_to_bottom_ || (content_changed_ && at_bottom)) ImGui::SetScrollHereY(1.0f);
     scroll_to_bottom_ = false;
     ImGui::EndChild();
+}
+
+// A touch screen has no wheel: a finger dragged over the conversation moves it.
+void ChatView::drag_to_scroll() {
+    const ImGuiIO &io = ImGui::GetIO();
+    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::IsMouseDragging(0, 0.0f) &&
+        io.MouseDelta.y != 0.0f)
+        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
 }
 
 void ChatView::draw_entry(const Entry &entry, bool last) {
@@ -336,13 +368,13 @@ void ChatView::draw_entry(const Entry &entry, bool last) {
     if (entry.role == Role::Assistant && entry.text.empty()) return;
     if (entry.role == Role::Notice) {
         text(entry.text, &p.dim);
-        copy_menu(entry.text);
+        copy_menu(entry.text, platform_.touch);
     } else if (entry.role == Role::Assistant) {
         const size_t shown = last && state_.phase == Phase::Busy ? complete_utf8(entry.text) : entry.text.size();
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextUnformatted(entry.text.data(), entry.text.data() + shown);
         ImGui::PopTextWrapPos();
-        copy_menu(entry.text);
+        copy_menu(entry.text, platform_.touch);
     } else {
         // The user's message: a bubble on the right.
         const ImVec2 pad = ImVec2(12, 8) * look_.scale;
@@ -359,7 +391,7 @@ void ChatView::draw_entry(const Entry &entry, bool last) {
         ImGui::PopTextWrapPos();
         ImGui::SetCursorScreenPos(start);
         ImGui::Dummy(box);
-        copy_menu(entry.text);
+        copy_menu(entry.text, platform_.touch);
     }
     ImGui::Dummy(ImVec2(0, gap));
 }
@@ -379,23 +411,27 @@ void ChatView::draw_input() {
     const float height = ImGui::GetTextLineHeight() * kInputLines + style.FramePadding.y * 2;
     const ImVec2 size(ImGui::GetContentRegionAvail().x - button_width - style.ItemSpacing.x, height);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    if (focus_input_) {
-        ImGui::SetKeyboardFocusHere();
-        focus_input_ = false;
-    }
-    // Enter sends, Ctrl+Enter breaks the line.
-    const ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine;
-    const bool entered = ImGui::InputTextMultiline("##mensagem", &input_, size, flags);
-    if (input_.empty() && !ImGui::IsItemActive()) {
-        const ImVec4 clip(origin.x, origin.y, origin.x + size.x - style.FramePadding.x, origin.y + size.y);
-        ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), ImGui::GetFontSize(), origin + style.FramePadding,
-                                            ImGui::GetColorU32(p.dim),
-                                            "Escreva sua mensagem (Enter envia, " SHORTCUT_KEY "+Enter quebra a linha)", nullptr,
-                                            0.0f, &clip);
-    }
-    if (entered) {
-        if (!busy) send_input();
-        focus_input_ = true;  // Enter leaves the field
+    if (platform_.touch && platform_.edit_text) {
+        draw_touch_input(size.x, height);
+    } else {
+        if (focus_input_) {
+            ImGui::SetKeyboardFocusHere();
+            focus_input_ = false;
+        }
+        // Enter sends, Ctrl+Enter breaks the line.
+        const ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine;
+        const bool entered = ImGui::InputTextMultiline("##mensagem", &input_, size, flags);
+        if (input_.empty() && !ImGui::IsItemActive()) {
+            const ImVec4 clip(origin.x, origin.y, origin.x + size.x - style.FramePadding.x, origin.y + size.y);
+            ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), ImGui::GetFontSize(), origin + style.FramePadding,
+                                                ImGui::GetColorU32(p.dim),
+                                                "Escreva sua mensagem (Enter envia, " SHORTCUT_KEY "+Enter quebra a linha)",
+                                                nullptr, 0.0f, &clip);
+        }
+        if (entered) {
+            if (!busy) send_input();
+            focus_input_ = true;  // Enter leaves the field
+        }
     }
     ImGui::SameLine();
     if (busy) {
@@ -410,11 +446,28 @@ void ChatView::draw_input() {
     }
 }
 
+// The draft in a frame like the desktop's field; a tap opens the system's text box on it.
+void ChatView::draw_touch_input(float width, float height) {
+    const Palette p = palette(look_.light);
+    const ImGuiStyle &style = ImGui::GetStyle();
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 end = origin + ImVec2(width, height);
+    if (ImGui::InvisibleButton("##mensagem", ImVec2(width, height))) platform_.edit_text(input_);
+    ImDrawList *draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, end, ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_FrameBgActive : ImGuiCol_FrameBg),
+                        style.FrameRounding);
+    const bool empty = input_.empty();
+    const char *shown = empty ? "Toque aqui para escrever" : input_.c_str();
+    const ImVec4 clip(origin.x, origin.y, end.x - style.FramePadding.x, end.y - style.FramePadding.y);
+    draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), origin + style.FramePadding,
+                  ImGui::GetColorU32(empty ? p.dim : p.text), shown, nullptr, width - style.FramePadding.x * 2, &clip);
+}
+
 void ChatView::draw_status() {
     const Palette p = palette(look_.light);
     std::string status;
     if (state_.phase == Phase::Busy) {
-        status = "Respondendo" + dots() + " (Esc ou Parar interrompe)";
+        status = "Respondendo" + dots() + (platform_.touch ? " (Parar interrompe)" : " (Esc ou Parar interrompe)");
     } else if (!state_.error.empty()) {
         status = sentence(state_.error);
     } else if (state_.last_stopped) {

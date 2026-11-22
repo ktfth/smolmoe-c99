@@ -8,7 +8,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { bundledModel, DESKTOP_TEST_BINARY, GUI_BINARY, ROOT, run, tempDir } from "./support/run";
+import { BUNDLE_BINARY, bundledModel, DESKTOP_TEST_BINARY, GUI_BINARY, modelArgs, ROOT, run, tempDir } from "./support/run";
 
 const SLOW = Number(process.env.SMOLMOE_SLOW_MS ?? 180_000);
 const qwen = bundledModel("qwen2.5-0.5b-instruct", "tokenizer.qbp");
@@ -22,13 +22,17 @@ test("the window program is present where CI expects it", () => {
   if (process.env.SM_EXPECT_GUI === "1") expect(guiBuilt).toBe(true);
 });
 
-test.skipIf(!qwen || !haveStories)("model layer: stopping replies and refusing files, with Qwen", () => {
+test.skipIf(!qwen || !haveStories)("model layer: stopping replies, refusing files and a model inside another file, with Qwen", () => {
   /* A bare .smoe without config.ini beside it, and TinyStories (no chat template) with its files. */
   mkdirSync(join(work.path, "bare"));
   mkdirSync(join(work.path, "stories"));
   copyFileSync(join(stories, "model.smoe"), join(work.path, "bare", "model.smoe"));
   for (const f of ["model.smoe", "config.ini", "tokenizer.spb"]) copyFileSync(join(stories, f), join(work.path, "stories", f));
-  const result = run([qwen!.model, work.path], DESKTOP_TEST_BINARY);
+  /* A single-file Qwen, which test_desktop.c stores inside a fake APK (an asset read through offset and length). */
+  const single = join(work.path, "qwen-unico.smoe");
+  const bundled = run([...modelArgs(qwen!), "--out", single], BUNDLE_BINARY);
+  expect(bundled.code).toBe(0);
+  const result = run([qwen!.model, work.path, single], DESKTOP_TEST_BINARY);
   expect(result.stderr).toBe("");
   expect(result.stdout.toString()).toContain("desktop tests passed (with a model)");
   expect(result.code).toBe(0);

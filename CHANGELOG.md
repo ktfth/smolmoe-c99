@@ -3,6 +3,12 @@
 ## Não lançado
 
 ### Adicionado
+- **App para Android (`make apk`, docs/ANDROID.md):** o chat num APK com o Qwen dentro, sem Termux e sem
+  permissões. A tela é a da janela do desktop (Dear ImGui sobre uma `NativeActivity` com OpenGL ES 3); o texto é
+  escrito na caixa do próprio Android (acentos, correção, colar), toque longo copia e o dedo rola a conversa. O modelo
+  fica sem compressão no APK e é mapeado de lá, sem cópia (`desktop_open` aceita `offset` e `length` dentro de um
+  arquivo). Usa só os núcleos rápidos do celular. Build sem Gradle: NDK, `aapt`, `zipalign -P 16` e `apksigner`.
+  Testado no emulador (x86_64 e arm64 traduzido); falta o celular de verdade.
 - **Atalho do Qwen2.5-1.5B:** `make chat qwen-1.5b`, `make run-gui MODEL=qwen-1.5b`, `make qwen-1.5b` e
   `make qwen-1.5b-gui` (em `dist/`), o apelido `qwen-1.5b` no programa e na janela, e `make qwen-1.5b-weights`
   (3,1 GB de download). Era o 2º no eval de manutenção e só rodava com os três caminhos à mão.

@@ -277,6 +277,61 @@ static void test_layouts(const char *dir) {
     expect_refused(path, "não conversa");
 }
 
+/* argv[3]: a self-contained model (config and tokenizer embedded) stored
+ * inside a larger file, as an asset inside an Android APK: opened through
+ * offset and length, refused when the window misses the container or runs
+ * past the end. */
+static void test_window(const char *model, const char *dir) {
+    static const char before[] = "PK bytes de outro arquivo antes do modelo";
+    static const char after[] = "e bytes depois dele";
+    char path[1024], err[DESKTOP_ERROR_BYTES], buf[65536];
+    uint64_t length = 0;
+    size_t n;
+    Capture c;
+    DesktopOptions o;
+    Desktop *d;
+    FILE *in = fopen(model, "rb"), *out;
+    snprintf(path, sizeof(path), "%s/apk-falso.apk", dir);
+    out = fopen(path, "wb");
+    CHECK(in && out, "cannot copy %s to %s", model, path);
+    if (!in || !out) {
+        if (in) fclose(in);
+        if (out) fclose(out);
+        return;
+    }
+    fwrite(before, 1, sizeof(before), out);
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        fwrite(buf, 1, n, out);
+        length += n;
+    }
+    fwrite(after, 1, sizeof(after), out);
+    fclose(in);
+    fclose(out);
+
+    o = options(path, &c);
+    o.offset = sizeof(before);
+    o.length = length;
+    reset_capture(&c, 0, 0);
+    d = desktop_open(&o, err);
+    CHECK(d != NULL, "cannot open the model inside %s: %s", path, err);
+    if (d) {
+        send_text(d, "Diga olá em uma palavra.");
+        CHECK(c.replies >= 1 && c.len > 0, "no reply from the model inside %s (%d replies, %zu bytes)", path,
+              c.replies, c.len);
+        desktop_close(d);
+    }
+    o.offset = 1; /* inside the bytes before the container */
+    d = desktop_open(&o, err);
+    CHECK(!d && strstr(err, "não é um modelo do smolmoe"), "a window off the container: \"%s\"", err);
+    desktop_close(d);
+    o.offset = sizeof(before);
+    o.length = length + sizeof(after) + 1;
+    d = desktop_open(&o, err);
+    CHECK(!d && strstr(err, "passa do fim do arquivo"), "a window past the end: \"%s\"", err);
+    desktop_close(d);
+    remove(path);
+}
+
 int main(int argc, char **argv) {
     const char *dir = argc > 2 ? argv[2] : NULL;
     test_notices();
@@ -284,6 +339,7 @@ int main(int argc, char **argv) {
     test_refused(dir);
     if (argc > 1) test_stop(argv[1]);
     if (argc > 2) test_layouts(dir);
+    if (argc > 3) test_window(argv[3], dir);
     if (failures) {
         fprintf(stderr, "%d desktop test failure(s)\n", failures);
         return 1;

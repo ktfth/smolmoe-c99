@@ -140,7 +140,7 @@ static const char *resolve_desktop_path(Desktop *d, const char *arg) {
 
 /* Maps the model and parses its directory; a file that does not even start
  * like a container is refused here instead of by die(). */
-static int map_model(Desktop *d, const char **path, char *err) {
+static int map_model(Desktop *d, const char **path, const DesktopOptions *o, char *err) {
     char why[DESKTOP_ERROR_BYTES - 64]; /* room for the sentence around it */
     uint64_t offset = 0, length;
     const unsigned char *data;
@@ -149,6 +149,13 @@ static int map_model(Desktop *d, const char **path, char *err) {
         if (!try_map_file(*path, &d->file, why, sizeof(why)))
             return fail(err, "não consegui abrir o arquivo (%s)", why);
         length = d->file.size;
+        if (o->offset || o->length) {
+            if (o->offset > length || o->length > length - o->offset)
+                return fail(err, "%s", "o modelo embutido passa do fim do arquivo");
+            offset = o->offset;
+            length = o->length ? o->length : length - o->offset;
+            *path = NULL;  /* self-contained: nothing beside it to look for */
+        }
     } else if (!map_own_model(d, &offset, &length, &beside)) {
         if (sm_failed()) return fail_msg(err, sm_last_error());
         return fail(err, "%s", "este programa não traz um modelo: escolha um arquivo .smoe");
@@ -242,7 +249,7 @@ static void desktop_open_body(OpenArgs *a) {
     }
     d->mem.limit = mul_size(DESKTOP_MEMORY_MIB, 1048576);
     path = resolve_desktop_path(d, o->path);
-    if (!map_model(d, &path, err) || !load_metadata(d, path, err)) {
+    if (!map_model(d, &path, o, err) || !load_metadata(d, path, err)) {
         desktop_close(d);
         a->opened = NULL;
         return;

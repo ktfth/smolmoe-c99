@@ -53,6 +53,7 @@ size_t complete_utf8(const std::string &s);
 struct SessionOptions {
     uint32_t context = 0;  // 0: desktop.h's default
     uint32_t threads = 0;  // 0: the physical cores
+    std::string name;      // shown above the chat; empty: taken from the model's path
 };
 
 class ChatSession {
@@ -65,8 +66,9 @@ public:
     ChatSession &operator=(const ChatSession &) = delete;
 
     // Starts loading a model (path empty: the one inside this executable).
-    // Ignored unless the phase is NoModel.
-    void open(const std::string &path);
+    // offset and length: a self-contained model stored inside path's file
+    // (desktop.h); 0 and 0 read the whole file. Ignored unless the phase is NoModel.
+    void open(const std::string &path, uint64_t offset = 0, uint64_t length = 0);
     // Queues a message; false when no model is ready for it.
     bool send(const std::string &text);
     // Ends the reply being written at the next token.
@@ -90,7 +92,7 @@ private:
         std::string text;
     };
 
-    void run(std::string path);
+    void run(std::string path, uint64_t offset, uint64_t length);
     void serve(Desktop *desktop);
     void changed();  // with the lock held
 

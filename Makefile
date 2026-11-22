@@ -9,6 +9,7 @@
 #   make wasi            build/wasi/*.wasm: WebAssembly (WASI) runtime and kernel tests, for bun (needs zig)
 #   make web             build/web: the browser page (needs zig and bun)
 #   make gui             build/smolmoe-gui[.exe]: the desktop window (C++17; GLFW on Linux/macOS)
+#   make apk             dist/smolmoe-qwen-pt.apk: the Android app (needs ANDROID_HOME and a JDK)
 #   make inventario      build/smolmoe-inventario and its tests: the read-only defensive inventory (collects on Linux)
 
 # PowerShell and cmd: the recipes need a POSIX shell, and native Windows make
@@ -86,7 +87,7 @@ OBJ        := $(SOURCES:%=$(BUILD)/obj/%.o)
 OBJ_SCALAR := $(SOURCES:%=$(BUILD)/scalar/%.o)
 OBJ_LIB    := $(LIB:%=$(BUILD)/obj/%.o)
 
-.PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui \
+.PHONY: all scalar tools test test-unit test-integration sanitize release release-gui clean bench models qwen-pt wasi web gui apk \
 	qwen qwen-gui qwen-q5 qwen-q5-gui qwen-1.5b qwen-1.5b-gui qwen-1.5b-weights gemma gemma-gui gemma-weights phi phi-gui dolphin dolphin-gui dolphin-q5 dolphin-weights stories all-models phi-weights \
 	chat run-gui run-web help inventario fuzz fuzz-run bench-kernels
 
@@ -359,6 +360,7 @@ help:
 	$(info )
 	$(info $(EMPTY)  make                 programa de terminal: build/smolmoe, smolmoe-bundle, smolmoe-quantize)
 	$(info $(EMPTY)  make gui             janela: build/smolmoe-gui)
+	$(info $(EMPTY)  make apk             app Android: $(DIST)/smolmoe-qwen-pt.apk (APK_MODEL=qwen-q5, APK_ABI=x86_64))
 	$(info $(EMPTY)  make chat            abre o chat no terminal (MODEL=qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin))
 	$(info $(EMPTY)  make run-gui         abre a janela desktop (MODEL=qwen|qwen-q5|qwen-1.5b|gemma|phi|dolphin))
 	$(info $(EMPTY)  make run-web         abre a interface web em http://localhost:8080)
@@ -498,6 +500,18 @@ $(GUI): $(GUI_OBJ) $(BUILD)/obj/desktop.o $(OBJ_LIB)
 	$(CXX) $(OPT) $(PLATFORM) $(LDFLAGS) $^ -o $@ $(GUI_LIBS) $(LDLIBS)
 
 gui: $(GUI)
+
+# The Android app (android/, docs/ANDROID.md): dist/smolmoe-qwen-pt.apk with the
+# Qwen Q8 inside (APK_MODEL=qwen-q5 for Q5). Built by android/android.mk with
+# the NDK, aapt and apksigner from ANDROID_HOME; no Gradle.
+APK_MODEL ?= qwen
+APK_SRC   := $(if $(filter qwen-q5,$(APK_MODEL)),$(QWEN)/model-q5.smoe,$(QWEN)/model.smoe)
+APK_NAME  := $(if $(filter qwen-q5,$(APK_MODEL)),qwen-pt-q5,qwen-pt)
+APK_SMOE  := $(BUILD)/android-$(APK_NAME).smoe
+$(APK_SMOE): $(BUNDLE) $(APK_SRC) $(QWEN)/tokenizer.qbp
+	$(BUNDLE) --model $(APK_SRC) --config $(QWEN)/config.ini --tokenizer $(QWEN)/tokenizer.qbp --out $@
+apk: $(APK_SMOE)
+	$(MAKE) -f android/android.mk LIB="$(LIB)" BUNDLE_MODEL=$(APK_SMOE) MODEL_NAME=$(APK_NAME) DIST=$(DIST) APK_ABI=$(or $(APK_ABI),arm64-v8a) apk
 
 bench: $(BIN)
 	bun scripts/bench.ts

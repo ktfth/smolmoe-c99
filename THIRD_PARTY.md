@@ -68,10 +68,22 @@ No upstream inference code is included.
 under the MIT license kept in `third_party/imgui/LICENSE.txt`. Source:
 https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9b.tar.gz, SHA-256
 `8e1bbc76c71d74fef2fb85db7e7ca8eba13d6a86623c54992b60162db554ffdb`. Only the
-core, `misc/cpp/imgui_stdlib` and the Win32, Direct3D 11, GLFW and OpenGL 3
-backends are copied, unmodified. It is compiled only into `smolmoe-gui`; the
+core, `misc/cpp/imgui_stdlib` and the Win32, Direct3D 11, GLFW, OpenGL 3 and Android
+backends are copied, unmodified. It is compiled only into `smolmoe-gui` and the
+Android app's `libsmolmoe.so`; the
 runtime and the terminal chat do not use it. On Linux and macOS the window links
 the system's GLFW (zlib/libpng license), which is not bundled.
+
+## Android NDK native_app_glue (Android app)
+
+The Android app (`make apk`, docs/ANDROID.md) compiles
+`sources/android/native_app_glue/android_native_app_glue.c` from the Android NDK
+installed on the build machine, under the Apache License 2.0 (Copyright The
+Android Open Source Project). It is not copied into this repository; it is
+linked into `libsmolmoe.so` inside the APK, whose distribution must keep that
+license's notice. The app also links the system's libandroid, liblog, libEGL
+and libGLESv3, and statically links the NDK's libc++ (Apache 2.0 with LLVM
+exceptions).
 
 ## Unicode data
 

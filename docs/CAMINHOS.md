@@ -9,6 +9,7 @@ indicados.
 | Você quer... | Caminho | Sistemas |
 |---|---|---|
 | Clicar e conversar | [Janela com o modelo dentro](#1-janela) | Windows (no Release desde a v0.4.0); Linux e macOS compilando |
+| Conversar no celular, sem terminal | [App para Android](ANDROID.md) | Android 10+, ARM64 |
 | Conversar no terminal, sem instalar nada | [Chat no terminal, arquivo único](#2-chat-no-terminal-arquivo-único) | Windows, Linux, macOS, Termux |
 | Usar outro modelo (Gemma 3 1B, Phi-4-mini, Q5) | [Programa e modelo separados](#3-programa-e-modelo-separados) | Todos |
 | Uma resposta para um script | [Uma resposta e sai](#4-uma-resposta-e-sai-scripts) | Todos |
@@ -43,7 +44,7 @@ O chat numa janela, com a resposta chegando aos poucos, botão de parar e as fer
   `smolmoe-gui-windows-x64.exe` e escolha o `.smoe` na janela, ou arraste o arquivo para cima dela.
 - **Linux:** `sudo apt install g++ make pkg-config libglfw3-dev`, `make gui` e depois `build/smolmoe-gui modelo.smoe`.
 - **macOS:** `brew install glfw`, `make gui` e depois `build/smolmoe-gui modelo.smoe`.
-- **Termux:** não tem; use o chat no terminal.
+- **Android:** o [app](ANDROID.md) é a mesma tela, com o modelo dentro do APK (`make apk`).
 
 A janela está no Release desde a v0.4.0.
 
