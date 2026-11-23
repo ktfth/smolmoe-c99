@@ -9,7 +9,12 @@ import android.app.NativeActivity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.graphics.Insets;
+import android.os.Build;
+import android.os.Bundle;
 import android.text.InputType;
+import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.Toast;
@@ -25,6 +30,27 @@ public class MainActivity extends NativeActivity {
 
     // The text box closed: send is true for "Enviar", false keeps the draft.
     static native void onText(String text, boolean send);
+
+    // The status and navigation bars' heights, in pixels. NativeActivity's
+    // contentRect does not shrink for them on every phone (a moto g86 on
+    // Android 15 reports the whole screen), so the window's own insets count too.
+    static native void onInsets(int top, int bottom);
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        View decor = getWindow().getDecorView();
+        decor.setOnApplyWindowInsetsListener((v, insets) -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                onInsets(bars.top, bars.bottom);
+            } else {
+                onInsets(insets.getSystemWindowInsetTop(), insets.getSystemWindowInsetBottom());
+            }
+            return v.onApplyWindowInsets(insets);
+        });
+        decor.requestApplyInsets();
+    }
 
     // Called from the native thread with the current draft.
     public void editText(final String draft) {

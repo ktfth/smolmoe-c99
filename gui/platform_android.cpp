@@ -11,6 +11,7 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
@@ -41,6 +42,8 @@ constexpr float kDensityBase = 160.0f;  // Android's 1x density (dpi)
 std::mutex g_inbox_mutex;
 std::vector<std::pair<std::string, bool>> g_inbox;
 android_app *g_app = nullptr;
+// The system bars' heights from MainActivity.onInsets, in pixels.
+std::atomic<int> g_inset_top{0}, g_inset_bottom{0};
 
 struct Display {
     EGLDisplay display = EGL_NO_DISPLAY;
@@ -280,14 +283,18 @@ void draw_frame(Window *w, android_app *app) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplAndroid_NewFrame();
     ImGui::NewFrame();
-    // NativeActivity draws behind the status and navigation bars; contentRect
-    // is the part they leave free.
+    // NativeActivity draws behind the status and navigation bars. contentRect
+    // should be the part they leave free, but some phones report the whole
+    // screen there, so the window insets from Java win when they are larger.
     const ARect &free = app->contentRect;
     const float height = ImGui::GetIO().DisplaySize.y;
+    float top = 0.0f, bottom = 0.0f;
     if (free.bottom > free.top && free.bottom <= height) {
-        w->look.inset_top = static_cast<float>(free.top);
-        w->look.inset_bottom = height - static_cast<float>(free.bottom);
+        top = static_cast<float>(free.top);
+        bottom = height - static_cast<float>(free.bottom);
     }
+    w->look.inset_top = std::max(top, static_cast<float>(g_inset_top.load()));
+    w->look.inset_bottom = std::max(bottom, static_cast<float>(g_inset_bottom.load()));
     w->view->draw(w->look);
     ImGui::Render();
     const ImGuiIO &io = ImGui::GetIO();
@@ -314,6 +321,13 @@ extern "C" JNIEXPORT void JNICALL Java_io_smolmoe_app_MainActivity_onText(JNIEnv
         std::lock_guard<std::mutex> lock(g_inbox_mutex);
         g_inbox.emplace_back(std::move(message), send == JNI_TRUE);
     }
+    if (g_app) ALooper_wake(g_app->looper);
+}
+
+// MainActivity.onInsets: the status and navigation bars changed.
+extern "C" JNIEXPORT void JNICALL Java_io_smolmoe_app_MainActivity_onInsets(JNIEnv *, jclass, jint top, jint bottom) {
+    g_inset_top.store(std::max(0, static_cast<int>(top)));
+    g_inset_bottom.store(std::max(0, static_cast<int>(bottom)));
     if (g_app) ALooper_wake(g_app->looper);
 }
 
