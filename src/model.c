@@ -79,6 +79,8 @@ static void load_layer(Layer *l, const ModelFile *f, const Config *c, uint32_t i
     if (c->gemma3) {
         l->post_attn_norm = fvec(f, layer_name(name, i, "post_attn_norm"), c->dim, mem);
         l->post_ffn_norm = fvec(f, layer_name(name, i, "post_ffn_norm"), c->dim, mem);
+    }
+    if (c->qk_norm) {
         l->q_norm = fvec(f, layer_name(name, i, "q_norm"), c->head_dim, mem);
         l->k_norm = fvec(f, layer_name(name, i, "k_norm"), c->head_dim, mem);
     }
@@ -124,7 +126,8 @@ static void model_init_body(Model *m, const Config *c, const ModelFile *f, uint3
     m->nb_hidden = (c->hidden + QK - 1) / QK;
     nb_max = m->nb_dim > m->nb_q ? m->nb_dim : m->nb_q;
     half = c->rotary_dim / 2;
-    expected = 3 + (uint64_t)c->layers * (7 + 3 * c->qkv_bias + 4 * c->gemma3 + 3 * (uint64_t)(c->experts + c->shared));
+    expected = 3 + (uint64_t)c->layers * (7 + 3 * c->qkv_bias + 2 * c->gemma3 + 2 * c->qk_norm +
+                                          3 * (uint64_t)(c->experts + c->shared));
     if (expected != f->count - f->blobs) sm_fail(SM_ERR_FORMAT, "tensor count does not match config");
 
     m->embed = qmat(f, "embed", c->vocab, c->dim);
@@ -560,8 +563,10 @@ static void expert_mlp(Model *m, const Expert *e, const float *xd, const int8_t 
     m->expert_calls += ntok;
 }
 
-/* Exact top-k, lower expert index wins ties; sigmoid weights renormalized
- * over the selected experts only. */
+/* Exact top-k, lower expert index wins ties. The weights are renormalized
+ * over the selected experts only: sigmoids, or (router_softmax) a softmax of
+ * the selected logits, which equals a softmax over all experts renormalized
+ * over the top_k (Qwen3-MoE). The first selected logit is the largest. */
 static void route_tokens(Model *m, uint32_t n) {
     if (sm_failed()) return;
     const Config *c = &m->c;
@@ -578,7 +583,7 @@ static void route_tokens(Model *m, uint32_t n) {
                 if (!taken && (best == UINT32_MAX || r[e] > r[best])) best = e;
             }
             sel[k] = best;
-            w[k] = 1.0f / (1.0f + exp_det(-r[best]));
+            w[k] = c->router_softmax ? exp_det(r[best] - r[sel[0]]) : 1.0f / (1.0f + exp_det(-r[best]));
             total += w[k];
         }
         if (!(total > 0) || !sm_finite(total)) sm_fail(SM_ERR_NUMERIC, "router underflow/overflow");

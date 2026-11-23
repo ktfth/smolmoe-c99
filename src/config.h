@@ -13,6 +13,9 @@
 typedef struct Config {
     uint32_t dim, hidden, layers, heads, kv_heads, experts, top_k, vocab;
     uint32_t max_context, shared, bos, eos, qkv_bias, gemma3;
+    uint32_t qk_norm;        /* per-head RMSNorm on Q and K before RoPE (Gemma 3, Qwen3) */
+    uint32_t router_softmax; /* experts' weights: softmax of the top_k router logits (Qwen3-MoE's
+                                renormalized top-k) instead of renormalized sigmoids */
     uint32_t head_dim;       /* per-head dimension (default: dim / heads) */
     uint32_t rotary_dim;     /* leading coordinates of each head that RoPE rotates (default: head_dim) */
     uint32_t sliding_window; /* local attention window for non-global layers (default: 0 = full) */

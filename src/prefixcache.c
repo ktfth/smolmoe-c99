@@ -60,6 +60,10 @@ static uint64_t model_hash(const Model *m) {
     h = fnv(FNV_BASIS, ints, sizeof(ints));
     h = fnv(h, reals, sizeof(reals));
     h = fnv(h, &c->rope_factor, sizeof(c->rope_factor));
+    if (c->router_softmax) { /* only Qwen3: the other models keep their keys */
+        const uint32_t qwen3[2] = {c->qk_norm, c->router_softmax};
+        h = fnv(h, qwen3, sizeof(qwen3));
+    }
     h = fnv(h, &c->llama3_factor, sizeof(c->llama3_factor));
     h = fnv(h, &c->llama3_low, sizeof(c->llama3_low));
     h = fnv(h, &c->llama3_high, sizeof(c->llama3_high));

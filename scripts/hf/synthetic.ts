@@ -209,3 +209,61 @@ export function writeLlamaSynthetic(dir: string, seed = 3, tied = false,
   }
   writeSafetensors(join(dir, "model.safetensors"), tensors);
 }
+
+export const QWEN3MOE_SHAPE = { dim: 64, heads: 4, kvHeads: 2, headDim: 32, layers: 2, hidden: 48, experts: 8, topK: 2,
+  vocab: 300 } as const;
+
+/**
+ * A Qwen3-MoE-shaped directory: decoupled head_dim, per-head Q/K norms, a
+ * router and 8 experts (2 per token) per layer, an untied head, two shards.
+ */
+export function writeQwen3MoeSynthetic(dir: string, seed = 4, patch: (config: Record<string, unknown>) => void = () => {}): void {
+  const s = QWEN3MOE_SHAPE, rnd = seeded(seed), qd = s.heads * s.headDim, kd = s.kvHeads * s.headDim;
+  mkdirSync(dir, { recursive: true });
+  const config: Record<string, unknown> = {
+    model_type: "qwen3_moe", hidden_act: "silu", hidden_size: s.dim, moe_intermediate_size: s.hidden,
+    intermediate_size: 4 * s.hidden, num_hidden_layers: s.layers, num_attention_heads: s.heads,
+    num_key_value_heads: s.kvHeads, head_dim: s.headDim, num_experts: s.experts, num_experts_per_tok: s.topK,
+    norm_topk_prob: true, decoder_sparse_step: 1, mlp_only_layers: [], vocab_size: s.vocab, max_position_embeddings: 128,
+    rms_norm_eps: 1e-6, rope_theta: 1000000.0, tie_word_embeddings: false, attention_bias: false,
+    use_sliding_window: false, rope_scaling: null,
+  };
+  patch(config);
+  writeFileSync(join(dir, "config.json"), JSON.stringify(config));
+  const model = bpeModel([]);
+  const base = Object.keys(model.vocab).length;
+  writeFileSync(join(dir, "tokenizer.json"), JSON.stringify({
+    normalizer: { type: "NFC" },
+    pre_tokenizer: { type: "Sequence", pretokenizers: [
+      { type: "Split", pattern: { Regex: QWEN_REGEX }, behavior: "Isolated", invert: false },
+      { type: "ByteLevel", add_prefix_space: false, trim_offsets: false, use_regex: false }] },
+    model: { type: "BPE", vocab: model.vocab, merges: model.merges.map((m) => m.join(" ")) },
+    added_tokens: ["<|endoftext|>", "<|im_start|>", "<|im_end|>"].map((content, i) => ({ id: base + i, content, special: true })),
+  }));
+  const t = (name: string, shape: number[], scale = 0.2): SyntheticTensor =>
+    ({ name, dtype: "BF16", shape, values: Float32Array.from({ length: shape.reduce((a, b) => a * b, 1) }, () => rnd(scale)) });
+  const norm = (name: string, n: number): SyntheticTensor =>
+    ({ name, dtype: "BF16", shape: [n], values: Float32Array.from({ length: n }, () => 1 + rnd(0.2)) });
+  const shards: SyntheticTensor[][] = [[t("model.embed_tokens.weight", [s.vocab, s.dim], 2), norm("model.norm.weight", s.dim),
+    t("lm_head.weight", [s.vocab, s.dim])], []];
+  for (let l = 0; l < s.layers; l++) {
+    const p = `model.layers.${l}.`, out = shards[l % 2]!;
+    out.push(norm(`${p}input_layernorm.weight`, s.dim), norm(`${p}post_attention_layernorm.weight`, s.dim),
+      t(`${p}self_attn.q_proj.weight`, [qd, s.dim]), t(`${p}self_attn.k_proj.weight`, [kd, s.dim]),
+      t(`${p}self_attn.v_proj.weight`, [kd, s.dim]), t(`${p}self_attn.o_proj.weight`, [s.dim, qd]),
+      norm(`${p}self_attn.q_norm.weight`, s.headDim), norm(`${p}self_attn.k_norm.weight`, s.headDim),
+      /* A spread router and strong experts: the routing weights then move the output, so a wrong rule shows. */
+      t(`${p}mlp.gate.weight`, [s.experts, s.dim], 2));
+    for (let e = 0; e < s.experts; e++)
+      out.push(t(`${p}mlp.experts.${e}.gate_proj.weight`, [s.hidden, s.dim], 0.6),
+        t(`${p}mlp.experts.${e}.up_proj.weight`, [s.hidden, s.dim], 0.6),
+        t(`${p}mlp.experts.${e}.down_proj.weight`, [s.dim, s.hidden], 0.6));
+  }
+  const names = ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"];
+  const weightMap: Record<string, string> = {};
+  shards.forEach((tensors, i) => {
+    writeSafetensors(join(dir, names[i]!), tensors);
+    for (const x of tensors) weightMap[x.name] = names[i]!;
+  });
+  writeFileSync(join(dir, "model.safetensors.index.json"), JSON.stringify({ metadata: {}, weight_map: weightMap }));
+}

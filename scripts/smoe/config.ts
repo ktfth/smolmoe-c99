@@ -8,7 +8,10 @@
  */
 import { compareNames } from "./format";
 
-export type Architecture = "smolmoe_v1" | "smolmoe_qwen2" | "smolmoe_gemma3";
+/** smolmoe_qwen3: Qwen3 (no QKV bias, per-head Q/K RMSNorm), routed by a softmax over the experts whose top_k
+ * are renormalized (Qwen3-MoE's norm_topk_prob). */
+export type Architecture = "smolmoe_v1" | "smolmoe_qwen2" | "smolmoe_gemma3" | "smolmoe_qwen3";
+const ARCHITECTURES: ReadonlySet<string> = new Set<Architecture>(["smolmoe_v1", "smolmoe_qwen2", "smolmoe_gemma3", "smolmoe_qwen3"]);
 
 export interface ModelConfig {
   readonly architecture: Architecture;
@@ -86,8 +89,7 @@ const isU32 = (n: number, max: number) => Number.isSafeInteger(n) && n >= 0 && n
 
 /** The checks of config_parse (src/config.c) plus the optional RoPE/head_dim/sliding_window keys. Throws on failure. */
 export function validateConfig(c: ModelConfig): ModelConfig {
-  if (c.architecture !== "smolmoe_v1" && c.architecture !== "smolmoe_qwen2" && c.architecture !== "smolmoe_gemma3")
-    throw new Error(`unsupported architecture: ${String(c.architecture)}`);
+  if (!ARCHITECTURES.has(c.architecture)) throw new Error(`unsupported architecture: ${String(c.architecture)}`);
   for (const k of REQUIRED_INT_KEYS) if (!isU32(c[k], MAX_CONTEXT)) throw new Error(`invalid ${k}: ${c[k]}`);
   for (const k of ["rms_eps", "rope_theta"] as const) {
     if (typeof c[k] !== "number") throw new Error(`invalid ${k}: ${String(c[k])}`);
@@ -183,8 +185,7 @@ export function parseConfig(text: string | Uint8Array): ModelConfig {
     if (!known.has(key)) throw new Error(`unknown config key: ${key}`);
     if (values.has(key)) throw new Error(`duplicate config key: ${key}`);
     if (key === "architecture") {
-      if (value !== "smolmoe_v1" && value !== "smolmoe_qwen2" && value !== "smolmoe_gemma3")
-        throw new Error(`unsupported architecture: ${value}`);
+      if (!ARCHITECTURES.has(value)) throw new Error(`unsupported architecture: ${value}`);
       values.set(key, value);
     } else values.set(key, REAL_KEYS.has(key) ? parseReal(value, key) : parseU32(value, key));
   }
@@ -214,6 +215,7 @@ export function tensorSpecs(c: ModelConfig): readonly TensorSpec[] {
     if (c.architecture === "smolmoe_qwen2") specs.push(v(`${p}q_bias`, qd), v(`${p}k_bias`, kd), v(`${p}v_bias`, kd));
     if (c.architecture === "smolmoe_gemma3")
       specs.push(v(`${p}post_attn_norm`, d), v(`${p}post_ffn_norm`, d), v(`${p}q_norm`, hd), v(`${p}k_norm`, hd));
+    if (c.architecture === "smolmoe_qwen3") specs.push(v(`${p}q_norm`, hd), v(`${p}k_norm`, hd));
     for (const [kind, count] of [["e", c.experts], ["s", c.shared_experts]] as const) {
       for (let e = 0; e < count; e++)
         specs.push(m(`${p}${kind}.${e}.gate`, h, d), m(`${p}${kind}.${e}.up`, h, d), m(`${p}${kind}.${e}.down`, d, h));
@@ -225,5 +227,6 @@ export function tensorSpecs(c: ModelConfig): readonly TensorSpec[] {
 export function expectedTensorCount(c: ModelConfig): number {
   const qkvBias = c.architecture === "smolmoe_qwen2" ? 1 : 0;
   const gemma3 = c.architecture === "smolmoe_gemma3" ? 1 : 0;
-  return 3 + c.layers * (7 + 3 * qkvBias + 4 * gemma3 + 3 * (c.experts + c.shared_experts));
+  const qwen3 = c.architecture === "smolmoe_qwen3" ? 1 : 0;
+  return 3 + c.layers * (7 + 3 * qkvBias + 4 * gemma3 + 2 * qwen3 + 3 * (c.experts + c.shared_experts));
 }

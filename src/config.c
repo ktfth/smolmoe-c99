@@ -82,7 +82,8 @@ static void config_parse_body(const unsigned char *text, size_t size, Config *ou
         seen |= 1u << k;
         if (k == 0) {
             if (!strcmp(value, "smolmoe_qwen2")) c.qkv_bias = 1;
-            else if (!strcmp(value, "smolmoe_gemma3")) c.gemma3 = 1;
+            else if (!strcmp(value, "smolmoe_gemma3")) c.gemma3 = c.qk_norm = 1;
+            else if (!strcmp(value, "smolmoe_qwen3")) c.qk_norm = c.router_softmax = 1;
             else if (strcmp(value, "smolmoe_v1")) sm_fail(SM_ERR_FORMAT, "unsupported architecture: %s", value);
         } else if (k < 13) {
             *fields[k - 1] = parse_u32(value, MAX_CONTEXT, s);

@@ -10,11 +10,14 @@
  *       Phi-4-mini-instruct (pinned revision and tokenizer).
  *   llama SOURCE OUTDIR [--container v2|v3] [--threads N]
  *       Llama 3.x (LlamaForCausalLM): Dolphin 3.0 Llama 3.2 1B (pinned by fetch-llama), 3B, Llama 3.1 8B...
+ *   qwen3moe SOURCE OUTDIR [--container v2|v3] [--threads N]
+ *       Qwen3-30B-A3B-Instruct-2507 (pinned): 128 experts, 8 per token; ~32 GB in Q8.
  *   fetch-qwen2 DIR [--size 0.5b|1.5b]
- *                       download the pinned Qwen2.5 source files into DIR (SHA-256 verified; 1.5b: 3.1 GB)
+ *               download the pinned Qwen2.5 source files into DIR (SHA-256 verified; 1.5b: 3.1 GB)
  *   fetch-phi3 DIR      download the pinned Phi-4-mini source files into DIR (SHA-256 verified, 7.7 GB)
  *   fetch-gemma3 DIR    download the pinned Gemma 3 1B source files into DIR (SHA-256 verified)
  *   fetch-llama DIR     download the pinned Dolphin 3.0 Llama 3.2 1B source files into DIR (SHA-256 verified, 2.5 GB)
+ *   fetch-qwen3moe DIR  download the pinned Qwen3-30B-A3B-Instruct-2507 source files into DIR (SHA-256 verified, 61 GB)
  *   bundle MODEL CONFIG TOKENIZER OUT
  *       repackage a model into a single-file v3 container (same bytes as smolmoe-bundle)
  *   check MODEL [--config C] [--tokenizer T]
@@ -32,13 +35,14 @@ import { GEMMA3_1B, GEMMA3_FILES, convertGemma3 } from "./hf/gemma3";
 import { DOLPHIN3_1B, DOLPHIN3_1B_FILES, convertLlama } from "./hf/llama";
 import { PHI4_MINI, PHI4_MINI_FILES, convertPhi3 } from "./hf/phi3";
 import { QWEN2_PINS, type Qwen2Size, convertQwen2, isQwen2Size, qwen2Files } from "./hf/qwen2";
+import { QWEN3_30B_A3B, convertQwen3Moe, qwen3MoeFiles } from "./hf/qwen3moe";
 import { bundleSingleFile } from "./smoe/bundle";
 import { checkFiles } from "./smoe/check";
 import { assertLittleEndian, message } from "./smoe/format";
 
-const USAGE = "usage: bun scripts/convert.ts qwen2|phi3|gemma3|llama SOURCE OUTDIR [--container v2|v3] [--threads N]\n" +
+const USAGE = "usage: bun scripts/convert.ts qwen2|phi3|gemma3|llama|qwen3moe SOURCE OUTDIR [--container v2|v3] [--threads N]\n" +
   "       bun scripts/convert.ts fetch-qwen2 DIR [--size 0.5b|1.5b]\n" +
-  "       bun scripts/convert.ts fetch-phi3|fetch-gemma3|fetch-llama DIR\n" +
+  "       bun scripts/convert.ts fetch-phi3|fetch-gemma3|fetch-llama|fetch-qwen3moe DIR\n" +
   "       bun scripts/convert.ts bundle MODEL CONFIG TOKENIZER OUT\n" +
   "       bun scripts/convert.ts check MODEL [--config C] [--tokenizer T]";
 
@@ -88,18 +92,20 @@ export async function main(argv: readonly string[]): Promise<void> {
   const [command, ...rest] = positionals;
   if (values.help || !command) throw new UsageError(USAGE);
   if (values.size !== undefined && command !== "fetch-qwen2") throw new UsageError(`--size is for fetch-qwen2\n${USAGE}`);
-  if (command === "qwen2" || command === "phi3" || command === "gemma3" || command === "llama") {
+  if (command === "qwen2" || command === "phi3" || command === "gemma3" || command === "llama" || command === "qwen3moe") {
     if (rest.length !== 2) throw new UsageError(USAGE);
     const options: ConvertOptions = { source: rest[0]!, output: rest[1]!, container: container(values.container),
-      threads: threadCount(values.threads), pinned: command === "qwen2" || command === "phi3", log };
-    printReport(await (command === "qwen2" ? convertQwen2(options)
+      threads: threadCount(values.threads), pinned: command === "qwen2" || command === "phi3" || command === "qwen3moe", log };
+    printReport(await (command === "qwen2" ? convertQwen2(options) : command === "qwen3moe" ? convertQwen3Moe(options)
       : command === "phi3" ? convertPhi3(options) : command === "llama" ? convertLlama(options) : convertGemma3(options)));
-  } else if (command === "fetch-qwen2" || command === "fetch-phi3" || command === "fetch-gemma3" || command === "fetch-llama") {
+  } else if (command === "fetch-qwen2" || command === "fetch-phi3" || command === "fetch-gemma3" || command === "fetch-llama" ||
+    command === "fetch-qwen3moe") {
     if (rest.length !== 1) throw new UsageError(USAGE);
     const qwen = QWEN2_PINS[qwenSize(values.size)];
     const { fetched } = command === "fetch-qwen2" ? await fetchPinned(qwen.repo, qwen2Files(qwen), rest[0]!, log)
       : command === "fetch-phi3" ? await fetchPinned(PHI4_MINI.repo, PHI4_MINI_FILES, rest[0]!, log)
       : command === "fetch-llama" ? await fetchPinned(DOLPHIN3_1B.repo, DOLPHIN3_1B_FILES, rest[0]!, log)
+      : command === "fetch-qwen3moe" ? await fetchPinned(QWEN3_30B_A3B.repo, qwen3MoeFiles(QWEN3_30B_A3B), rest[0]!, log)
       : await fetchPinned(GEMMA3_1B.repo, GEMMA3_FILES, rest[0]!, log);
     log(`${fetched.length} file(s) downloaded, the rest already present and verified`);
   } else if (command === "bundle") {

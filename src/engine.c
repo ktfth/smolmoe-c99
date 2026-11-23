@@ -554,6 +554,7 @@ static int system_kv_key(const Engine *e, const uint32_t *ids, uint32_t n, unsig
     hash_u32(&s, c->shared);
     hash_u32(&s, c->qkv_bias);
     hash_u32(&s, c->gemma3);
+    if (c->router_softmax) hash_u32(&s, c->qk_norm * 2 + c->router_softmax); /* only Qwen3: older hashes stay */
     hash_u32(&s, c->head_dim);
     hash_u32(&s, c->rotary_dim);
     hash_u32(&s, c->sliding_window);
