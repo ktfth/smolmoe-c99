@@ -118,6 +118,10 @@ static void model_init_body(Model *m, const Config *c, const ModelFile *f, uint3
     m->batch = batch;
     m->logit_rows = logit_rows;
     m->pool = pool;
+    {
+        char flag[8];
+        m->prefetch_experts = c->experts > 1 && !(env_utf8("SMOLMOE_PREFETCH", flag, sizeof(flag)) && !strcmp(flag, "0"));
+    }
     m->head_dim = c->head_dim;
     m->q_dim = c->heads * m->head_dim;
     m->kv_dim = c->kv_heads * m->head_dim;
@@ -591,6 +595,23 @@ static void route_tokens(Model *m, uint32_t n) {
     }
 }
 
+/* One read request per chosen expert, all issued before the first one runs:
+ * the system then reads them in large blocks, in parallel, while the
+ * resident ones compute. An expert's three matrices are adjacent in the file
+ * (names sort as e.N.down, e.N.gate, e.N.up). */
+static void prefetch_routed(const Model *m, const Layer *L, uint32_t n) {
+    const Config *c = &m->c;
+    uint32_t t, e;
+    for (e = 0; e < c->experts; ++e) {
+        const Expert *x = &L->experts[e];
+        for (t = 0; t < n * c->top_k && m->selected[t] != e; ++t) {}
+        if (t == n * c->top_k) continue;
+        prefetch_range(x->gate.data, (size_t)x->gate.rows * x->gate.row_bytes);
+        prefetch_range(x->up.data, (size_t)x->up.rows * x->up.row_bytes);
+        prefetch_range(x->down.data, (size_t)x->down.rows * x->down.row_bytes);
+    }
+}
+
 static void routed_experts(Model *m, const Layer *L, uint32_t n) {
     if (sm_failed()) return;
     const Config *c = &m->c;
@@ -599,6 +620,7 @@ static void routed_experts(Model *m, const Layer *L, uint32_t n) {
     double clock = clock_start(m);
     matmul(m, &router, 1, m->xd, m->xq, n);
     route_tokens(m, n);
+    if (m->prefetch_experts) prefetch_routed(m, L, n);
     for (e = 0; e < c->experts; ++e) {
         uint32_t g = 0;
         for (t = 0; t < n * c->top_k; ++t)

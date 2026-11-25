@@ -22,6 +22,17 @@ void map_file(const char *path, MappedFile *out);
 /* Same, but reports failure (message in err) instead of exiting. */
 int try_map_file(const char *path, MappedFile *out, char *err, size_t errlen);
 void unmap_file(MappedFile *m);
+/* Asks the system to start reading [p, p + n) of a mapping now, in the
+ * background, so a later access does not stop on page faults one page at a
+ * time (PrefetchVirtualMemory on Windows 8+, madvise(MADV_WILLNEED) on POSIX).
+ * Only a hint: does nothing where unsupported. */
+void prefetch_range(const void *p, size_t n);
+/* Tells the system this process is done with [p, p + n) of a read-only file
+ * mapping for now: the pages leave its working set but stay in the file cache
+ * while memory allows, and a later access reads them again. Keeps a pass over
+ * a file larger than the free RAM from crowding out everything else
+ * (VirtualUnlock on Windows, madvise(MADV_DONTNEED) on POSIX). Only a hint. */
+void release_range(const void *p, size_t n);
 
 /* Atomically replaces `to` with `from` (rename; MoveFileEx on Windows). Returns 1 on success. */
 int replace_file(const char *from, const char *to);

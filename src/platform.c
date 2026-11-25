@@ -168,6 +168,37 @@ int replace_file(const char *from, const char *to) {
     return ok != 0;
 }
 
+/* PrefetchVirtualMemory exists from Windows 8; looked up at run time so the
+ * program still starts on Windows 7, where prefetch_range does nothing. */
+typedef struct PrefetchEntry {
+    PVOID address;
+    SIZE_T bytes;
+} PrefetchEntry;
+typedef BOOL(WINAPI *PrefetchFn)(HANDLE, ULONG_PTR, PrefetchEntry *, ULONG);
+
+void prefetch_range(const void *p, size_t n) {
+    static PrefetchFn prefetch;
+    static int looked;
+    PrefetchEntry entry;
+    if (!p || !n) return;
+    if (!looked) {
+        HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+        FARPROC found = kernel ? GetProcAddress(kernel, "PrefetchVirtualMemory") : NULL;
+        memcpy(&prefetch, &found, sizeof(prefetch));
+        looked = 1;
+    }
+    if (!prefetch) return;
+    entry.address = (PVOID)p;
+    entry.bytes = n;
+    prefetch(GetCurrentProcess(), 1, &entry, 0);
+}
+
+/* On pages that are not locked, VirtualUnlock removes them from the working
+ * set and fails with ERROR_NOT_LOCKED, which is the documented intent here. */
+void release_range(const void *p, size_t n) {
+    if (p && n) VirtualUnlock((LPVOID)p, n);
+}
+
 void unmap_file(MappedFile *m) {
     if (m->handle[0]) UnmapViewOfFile(m->handle[0]);
     if (m->handle[1]) CloseHandle((HANDLE)m->handle[1]);
@@ -451,6 +482,43 @@ int try_map_file(const char *path, MappedFile *m, char *err, size_t errlen) {
 
 int replace_file(const char *from, const char *to) {
     return rename(from, to) == 0; /* atomic replacement on POSIX */
+}
+
+void prefetch_range(const void *p, size_t n) {
+#if defined(__wasm__)
+    (void)p;
+    (void)n;
+#else
+    static size_t page;
+    uintptr_t start, end;
+    if (!p || !n) return;
+    if (!page) {
+        long size = sysconf(_SC_PAGESIZE);
+        page = size > 0 ? (size_t)size : 4096u;
+    }
+    start = (uintptr_t)p & ~(uintptr_t)(page - 1);
+    end = (uintptr_t)p + n;
+    madvise((void *)start, (size_t)(end - start), MADV_WILLNEED);
+#endif
+}
+
+/* The mapping is read-only and file-backed, so dropped pages come back from the file. */
+void release_range(const void *p, size_t n) {
+#if defined(__wasm__)
+    (void)p;
+    (void)n;
+#else
+    static size_t page;
+    uintptr_t start, end;
+    if (!p || !n) return;
+    if (!page) {
+        long size = sysconf(_SC_PAGESIZE);
+        page = size > 0 ? (size_t)size : 4096u;
+    }
+    start = (uintptr_t)p & ~(uintptr_t)(page - 1);
+    end = (uintptr_t)p + n;
+    madvise((void *)start, (size_t)(end - start), MADV_DONTNEED);
+#endif
 }
 
 void unmap_file(MappedFile *m) {

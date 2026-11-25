@@ -26,14 +26,25 @@ typedef struct Options {
     int simulate_bits; /* 0: real Q5. 3..7: keep Q8 storage, restrict values to an N-bit grid */
 } Options;
 
+#define CHUNK_ROWS 256u /* rows converted in parallel before one sequential write */
+
 /* Per-tensor conversion job handed to the payload writer. */
 typedef struct Convert {
     const Tensor *t;
     int simulate_bits;
+    Pool *pool;
 } Convert;
 
-static float row_buffer[MAX_COLS];
-static unsigned char packed_buffer[(MAX_COLS / 32) * 36];
+/* CHUNK_ROWS rows of one tensor, split across the pool. Rows are independent,
+ * so the output bytes do not depend on the thread count. */
+typedef struct RowChunk {
+    const Convert *c;
+    uint32_t first, rows;
+    size_t out_row; /* bytes per output row */
+} RowChunk;
+
+static float *row_buffers;          /* MAX_COLS floats per pool thread */
+static unsigned char *chunk_buffer; /* CHUNK_ROWS output rows */
 
 static void usage(void) {
     fputs("usage: smolmoe-quantize --in Q8.smoe --out Q5.smoe [--keep NAME ...] [--simulate-bits N]\n"
@@ -104,20 +115,37 @@ static void quantize_grid_row(const float *x, uint32_t cols, int bits, unsigned 
     }
 }
 
+static void convert_rows(void *ctx, uint32_t index, uint32_t count) {
+    const RowChunk *k = (const RowChunk *)ctx;
+    const Tensor *t = k->c->t;
+    const size_t in_row = (size_t)((t->cols + QK - 1) / QK) * Q8_BLOCK_BYTES;
+    float *row = row_buffers + (size_t)index * MAX_COLS;
+    uint32_t r, begin, end;
+    split_range(k->rows, index, count, &begin, &end);
+    for (r = begin; r < end; ++r) {
+        unsigned char *out = chunk_buffer + (size_t)r * k->out_row;
+        dequantize_q8_row(t->data + (size_t)(k->first + r) * in_row, t->cols, row);
+        if (k->c->simulate_bits) quantize_grid_row(row, t->cols, k->c->simulate_bits, out);
+        else quantize_q5_row(row, t->cols, out);
+    }
+}
+
 static void write_converted(FILE *f, const void *ctx) {
     const Convert *c = (const Convert *)ctx;
     const Tensor *t = c->t;
-    uint32_t r, nb = (t->cols + QK - 1) / QK;
-    for (r = 0; r < t->rows; ++r) {
-        dequantize_q8_row(t->data + (size_t)r * nb * Q8_BLOCK_BYTES, t->cols, row_buffer);
-        if (c->simulate_bits) {
-            quantize_grid_row(row_buffer, t->cols, c->simulate_bits, packed_buffer);
-            write_bytes(f, packed_buffer, (size_t)nb * Q8_BLOCK_BYTES);
-        } else {
-            quantize_q5_row(row_buffer, t->cols, packed_buffer);
-            write_bytes(f, packed_buffer, (size_t)nb * Q5_BLOCK_BYTES);
-        }
+    RowChunk chunk;
+    uint32_t nb = (t->cols + QK - 1) / QK;
+    chunk.c = c;
+    chunk.out_row = (size_t)nb * (c->simulate_bits ? Q8_BLOCK_BYTES : Q5_BLOCK_BYTES);
+    /* One read request per tensor, and its pages let go once written: the
+     * source can be larger than the free RAM (Qwen3-30B-A3B is 34 GB). */
+    prefetch_range(t->data, (size_t)t->bytes);
+    for (chunk.first = 0; chunk.first < t->rows; chunk.first += chunk.rows) {
+        chunk.rows = t->rows - chunk.first < CHUNK_ROWS ? t->rows - chunk.first : CHUNK_ROWS;
+        pool_run(c->pool, convert_rows, &chunk);
+        write_bytes(f, chunk_buffer, chunk.rows * chunk.out_row);
     }
+    release_range(t->data, (size_t)t->bytes);
 }
 
 /* Re-reads the written file through the runtime parser and validator. */
@@ -152,6 +180,8 @@ int main(int argc, char **argv) {
     map_file(o.in, &mapped);
     sm_check(modelfile_parse(&mf, mapped.data, mapped.size, &mem));
     sm_check(modelfile_verify_payload(&mf, pool));
+    row_buffers = (float *)mem_alloc(&mem, (size_t)pool_threads(pool) * MAX_COLS, sizeof(float));
+    chunk_buffer = (unsigned char *)mem_alloc(&mem, (size_t)CHUNK_ROWS * (MAX_COLS / QK), Q8_BLOCK_BYTES);
 
     records = (OutRecord *)mem_alloc(&mem, mf.count, sizeof(OutRecord));
     jobs = (Convert *)mem_alloc(&mem, mf.count, sizeof(Convert));
@@ -162,6 +192,7 @@ int main(int argc, char **argv) {
         if (t->dtype == DTYPE_Q8 && !keep_q8(&o, t->name) && !t->alias) {
             jobs[i].t = t;
             jobs[i].simulate_bits = o.simulate_bits;
+            jobs[i].pool = pool;
             records[i].write = write_converted;
             records[i].ctx = &jobs[i];
             if (!o.simulate_bits) {

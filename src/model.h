@@ -63,6 +63,10 @@ typedef struct Model {
     uint64_t checkpoint_bytes;
     float *scores;
     uint64_t expert_calls;
+    /* Routed experts are fetched from the mapping as soon as a layer is
+     * routed (prefetch_range), instead of page by page while they run.
+     * SMOLMOE_PREFETCH=0 turns it off. */
+    int prefetch_experts;
     int profiling;
     double phase_seconds[MODEL_PHASES];
     /* Per-thread scratch for the prefill repack (gemm_scratch_bytes). */

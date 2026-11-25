@@ -3,10 +3,12 @@
 #include "compat.h"
 #include "f16.h"
 #include "kernels.h"
+#include "platform.h"
 
 #include <math.h>
 #include <string.h>
 
+#define RELEASE_ABOVE_BYTES ((uint64_t)8 << 30) /* see verify_slice */
 #define HEADER_BYTES 16u
 #define RECORD_BYTES 72u
 #define MAX_TENSORS 2000000u
@@ -159,6 +161,22 @@ static int verify_units(const Tensor *t, uint64_t begin, uint64_t end) {
     return 1;
 }
 
+/* On a big file (a 30B mixture of experts is 34 GB in Q8, more than the free
+ * RAM of a 32 GB laptop) each slice is read in one request and let go after,
+ * so the check neither faults one page at a time nor fills the working set
+ * with experts the forward pass may never use. A small model stays resident. */
+static int verify_slice(const Tensor *t, uint64_t begin, uint64_t end, int release) {
+    const uint64_t unit = t->dtype == DTYPE_F32 ? 4 : block_bytes(t->dtype);
+    const unsigned char *from = t->data + begin * unit;
+    const size_t len = (size_t)((end - begin) * unit);
+    int ok;
+    if (!release) return verify_units(t, begin, end);
+    prefetch_range(from, len);
+    ok = verify_units(t, begin, end);
+    release_range(from, len);
+    return ok;
+}
+
 static void verify_task(void *ctx, uint32_t index, uint32_t count) {
     VerifyTask *v = (VerifyTask *)ctx;
     uint32_t i;
@@ -167,7 +185,7 @@ static void verify_task(void *ctx, uint32_t index, uint32_t count) {
         uint64_t units = t->dtype == DTYPE_F32 ? t->bytes / 4 : t->bytes / block_bytes(t->dtype);
         uint64_t begin = units * index / count, end = units * (index + 1) / count;
         if (t->alias || t->dtype == DTYPE_BLOB) continue;
-        if (!verify_units(t, begin, end)) {
+        if (!verify_slice(t, begin, end, v->mf->size >= RELEASE_ABOVE_BYTES)) {
             uint32_t expected = sm_load_u32(&v->bad, SM_ATOMIC_RELAXED);
             while ((!expected || i + 1 < expected) &&
                    !sm_cas_u32(&v->bad, &expected, i + 1, SM_ATOMIC_RELAXED)) {}
