@@ -5,6 +5,7 @@
 #include "kernels.h"
 #include "modelfile.h"
 #include "platform.h"
+#include "recipes.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -303,6 +304,22 @@ int desktop_send(Desktop *d, const char *text, size_t len) {
     }
     memcpy(d->message, text, n);
     d->message[n] = 0;
+    {
+        Recipe r;
+        RecipeOS os = recipe_host_os();
+        ShellKind sh = os == RECIPE_WINDOWS ? SHELL_POWERSHELL : SHELL_POSIX;
+        if (recipe_find(d->message, sh, os, &r)) {
+            char reply[1024];
+            const char *lang = sh == SHELL_POWERSHELL ? "powershell" : "bash";
+            int rn = snprintf(reply, sizeof(reply), "```%s\n%s\n```", lang, r.command);
+            if (rn > 0 && (size_t)rn < sizeof(reply)) {
+                e->stopped = 0;
+                e->sink.text(e->sink.ctx, (const unsigned char *)reply, (uint32_t)rn);
+                if (e->sink.reply_end) e->sink.reply_end(e->sink.ctx);
+                return 1;
+            }
+        }
+    }
     return engine_send(e, d->message, (uint32_t)n);
 }
 

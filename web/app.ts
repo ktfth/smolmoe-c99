@@ -2,6 +2,7 @@
  * worker (web/engine-worker.ts); this file only touches the DOM. Model text
  * is always inserted as text, never as HTML. */
 import { readableNotice } from "./format";
+import { renderMarkdown } from "./markdown";
 import type { FromWorker, LoadPhase, ModelEntry, ToWorker } from "./protocol";
 import type { EngineStats } from "./wasm-host";
 
@@ -31,9 +32,41 @@ const ui = {
 
 const params = new URLSearchParams(location.search);
 const worker = new Worker(new URL("./engine-worker.js", import.meta.url), { type: "module" });
-let reply: HTMLElement | undefined;
+let reply: { box: HTMLElement; body: HTMLElement; raw: string } | undefined;
 let busy = false;
 let backend = "";
+
+function copyText(value: string, button: HTMLButtonElement): void {
+  const prev = button.textContent ?? "Copiar";
+  const done = () => {
+    button.textContent = "Copiado!";
+    button.classList.add("copied");
+    window.setTimeout(() => {
+      button.textContent = prev;
+      button.classList.remove("copied");
+    }, 1500);
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(value).then(done).catch(() => fallbackCopy(value, done));
+  } else {
+    fallbackCopy(value, done);
+  }
+}
+
+function fallbackCopy(value: string, onDone: () => void): void {
+  const ta = document.createElement("textarea");
+  ta.value = value;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+    onDone();
+  } finally {
+    ta.remove();
+  }
+}
 
 function post(message: ToWorker): void {
   worker.postMessage(message);
@@ -91,13 +124,32 @@ function showStats(s: EngineStats): void {
   ui.stats.textContent = parts.join(" · ");
 }
 
-function addMessage(kind: "user" | "bot" | "notice", text: string): HTMLElement {
+function addMessage(kind: "user" | "bot" | "notice", text: string): { box: HTMLElement; body: HTMLElement; raw: string } {
   const div = document.createElement("div");
   div.className = `msg ${kind}`;
-  div.textContent = text;
+  const body = document.createElement("div");
+  body.className = kind === "bot" ? "msg-body md" : "msg-body";
+  const entry = { box: div, body, raw: text };
+  if (kind === "bot") {
+    body.replaceChildren(renderMarkdown(text, copyText));
+  } else {
+    body.textContent = text;
+  }
+  div.appendChild(body);
+  if (kind === "bot" || kind === "user") {
+    const bar = document.createElement("div");
+    bar.className = "msg-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn";
+    btn.textContent = "Copiar";
+    btn.onclick = () => copyText(entry.raw, btn);
+    bar.appendChild(btn);
+    div.appendChild(bar);
+  }
   ui.log.append(div);
   ui.log.scrollTop = ui.log.scrollHeight;
-  return div;
+  return entry;
 }
 
 function setBusy(on: boolean): void {
@@ -129,7 +181,8 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
       break;
     case "text":
       reply ??= addMessage("bot", "");
-      reply.textContent = (reply.textContent ?? "") + m.chunk;
+      reply.raw += m.chunk;
+      reply.body.replaceChildren(renderMarkdown(reply.raw, copyText));
       ui.log.scrollTop = ui.log.scrollHeight;
       break;
     case "notice":
@@ -137,7 +190,10 @@ worker.onmessage = (event: MessageEvent<FromWorker>) => {
       addMessage("notice", readableNotice(m.line));
       break;
     case "done":
-      if (reply) reply.textContent = (reply.textContent ?? "").trimEnd();
+      if (reply) {
+        reply.raw = reply.raw.trimEnd();
+        reply.body.replaceChildren(renderMarkdown(reply.raw, copyText));
+      }
       reply = undefined;
       setBusy(false);
       showStats(m.stats);

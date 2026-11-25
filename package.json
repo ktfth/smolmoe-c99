@@ -6,6 +6,11 @@
   "description": "Test suite and tooling for the smolmoe C99 inference runtime",
   "scripts": {
     "test": "bun test --timeout 30000",
-    "bench": "bun scripts/bench.ts"
+    "bench": "bun scripts/bench.ts",
+    "gentoo:image": "bun scripts/podman-gentoo.ts image",
+    "gentoo:win": "bun scripts/podman-gentoo.ts build",
+    "web:build": "bun scripts/podman-gentoo.ts build wasm",
+    "web:serve": "bun scripts/serve-web.ts",
+    "web": "bun scripts/podman-gentoo.ts build wasm && bun scripts/serve-web.ts"
   }
 }

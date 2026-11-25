@@ -16,7 +16,8 @@ const option = (name: string, shortName: string, fallback: string, allowPosition
   return fallback;
 };
 const root = resolve(option("--dir", "-d", "build/web"));
-const port = Number(option("--port", "-p", process.env.PORT ?? "8080", true));
+const explicitPort = option("--port", "-p", process.env.PORT ?? "", true);
+const requestedPort = explicitPort ? Number(explicitPort) : 8080;
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -48,63 +49,77 @@ if (!existsSync(localBundled) && existsSync(join(qwenDir, "model.smoe")) && exis
   ], { stdio: "inherit" });
 }
 
-Bun.serve({
-  port,
-  hostname: "localhost", /* a development server: not for the rest of the network */
-  fetch(request) {
-    let path: string;
+function handleRequest(request: Request): Response {
+  let path: string;
+  try {
+    path = decodeURIComponent(new URL(request.url).pathname);
+  } catch {
+    return new Response("bad request", { status: 400, headers: HEADERS });
+  }
+  if (path === "/models.json") {
+    const list = [
+      {
+        name: "Qwen 2.5 0.5B Instruct (Q8)",
+        file: "qwen2.5-0.5b-instruct-q8.smoe",
+        bytes: existsSync(localBundled) ? statSync(localBundled).size : 560052800,
+        sha256: "local",
+        url: existsSync(localBundled) ? "./qwen2.5-0.5b-instruct-q8.smoe" : "",
+      },
+      {
+        name: "Qwen 2.5 0.5B Instruct (Q5)",
+        file: "qwen2.5-0.5b-instruct-q5.smoe",
+        bytes: 343932928,
+        sha256: "",
+        url: existsSync(join(root, "qwen2.5-0.5b-instruct-q5.smoe")) ? "./qwen2.5-0.5b-instruct-q5.smoe" : "",
+      },
+      {
+        name: "Gemma 3 1B Instruct (Q8)",
+        file: "gemma-3-1b-it-q8.smoe",
+        bytes: 1073741824,
+        sha256: "",
+        url: existsSync(join(root, "gemma-3-1b-it-q8.smoe")) ? "./gemma-3-1b-it-q8.smoe" : "",
+      },
+      {
+        name: "Gemma 3 270M Instruct (Q8)",
+        file: "gemma-3-270m-it-q8.smoe",
+        bytes: 293601280,
+        sha256: "",
+        url: existsSync(join(root, "gemma-3-270m-it-q8.smoe")) ? "./gemma-3-270m-it-q8.smoe" : "",
+      },
+      {
+        name: "Phi-4-mini Instruct 3.8B (Q8)",
+        file: "phi-4-mini-instruct-q8.smoe",
+        bytes: 4080218931,
+        sha256: "",
+        url: existsSync(join(root, "phi-4-mini-instruct-q8.smoe")) ? "./phi-4-mini-instruct-q8.smoe" : "",
+      },
+    ];
+    return new Response(JSON.stringify(list), { headers: { ...HEADERS, "Content-Type": TYPES[".json"]! } });
+  }
+  const file = resolve(join(root, path.endsWith("/") ? `${path}index.html` : path));
+  const inside = relative(root, file);
+  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside) || !existsSync(file) || !statSync(file).isFile())
+    return new Response("not found", { status: 404, headers: HEADERS });
+  return new Response(Bun.file(file), {
+    headers: { ...HEADERS, "Content-Type": TYPES[extname(file)] ?? "application/octet-stream" },
+  });
+}
+
+function startServer(): ReturnType<typeof Bun.serve> {
+  const candidates = explicitPort
+    ? [requestedPort]
+    : [...Array.from({ length: 20 }, (_, i) => requestedPort + i), 0];
+  let lastError: unknown;
+  for (const p of candidates) {
     try {
-      path = decodeURIComponent(new URL(request.url).pathname);
-    } catch {
-      return new Response("bad request", { status: 400, headers: HEADERS });
+      return Bun.serve({ port: p, hostname: "localhost", fetch: handleRequest });
+    } catch (err) {
+      lastError = err;
+      if ((err as { code?: string })?.code !== "EADDRINUSE") throw err;
     }
-    if (path === "/models.json") {
-      const list = [
-        {
-          name: "Qwen 2.5 0.5B Instruct (Q8)",
-          file: "qwen2.5-0.5b-instruct-q8.smoe",
-          bytes: existsSync(localBundled) ? statSync(localBundled).size : 560052800,
-          sha256: "local",
-          url: existsSync(localBundled) ? "./qwen2.5-0.5b-instruct-q8.smoe" : "",
-        },
-        {
-          name: "Qwen 2.5 0.5B Instruct (Q5)",
-          file: "qwen2.5-0.5b-instruct-q5.smoe",
-          bytes: 343932928,
-          sha256: "",
-          url: existsSync(join(root, "qwen2.5-0.5b-instruct-q5.smoe")) ? "./qwen2.5-0.5b-instruct-q5.smoe" : "",
-        },
-        {
-          name: "Gemma 3 1B Instruct (Q8)",
-          file: "gemma-3-1b-it-q8.smoe",
-          bytes: 1073741824,
-          sha256: "",
-          url: existsSync(join(root, "gemma-3-1b-it-q8.smoe")) ? "./gemma-3-1b-it-q8.smoe" : "",
-        },
-        {
-          name: "Gemma 3 270M Instruct (Q8)",
-          file: "gemma-3-270m-it-q8.smoe",
-          bytes: 293601280,
-          sha256: "",
-          url: existsSync(join(root, "gemma-3-270m-it-q8.smoe")) ? "./gemma-3-270m-it-q8.smoe" : "",
-        },
-        {
-          name: "Phi-4-mini Instruct 3.8B (Q8)",
-          file: "phi-4-mini-instruct-q8.smoe",
-          bytes: 4080218931,
-          sha256: "",
-          url: existsSync(join(root, "phi-4-mini-instruct-q8.smoe")) ? "./phi-4-mini-instruct-q8.smoe" : "",
-        },
-      ];
-      return new Response(JSON.stringify(list), { headers: { ...HEADERS, "Content-Type": TYPES[".json"]! } });
-    }
-    const file = resolve(join(root, path.endsWith("/") ? `${path}index.html` : path));
-    const inside = relative(root, file);
-    if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside) || !existsSync(file) || !statSync(file).isFile())
-      return new Response("not found", { status: 404, headers: HEADERS });
-    return new Response(Bun.file(file), {
-      headers: { ...HEADERS, "Content-Type": TYPES[extname(file)] ?? "application/octet-stream" },
-    });
-  },
-});
-console.log(`http://localhost:${port}/ (${root})`);
+  }
+  throw lastError;
+}
+
+const server = startServer();
+console.log(`http://localhost:${server.port}/ (${root})`);

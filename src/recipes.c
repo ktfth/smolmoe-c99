@@ -26,6 +26,7 @@ typedef struct Entry {
 #define PS_MEMORY                                                                                                 \
     "Get-CimInstance Win32_OperatingSystem | Select-Object "                                                      \
     "@{n='Total(GB)';e={[math]::Round($_.TotalVisibleMemorySize / 1MB, 1)}}, "                                    \
+    "@{n='Usada(GB)';e={[math]::Round(($_.TotalVisibleMemorySize - $_.FreePhysicalMemory) / 1MB, 1)}}, "          \
     "@{n='Livre(GB)';e={[math]::Round($_.FreePhysicalMemory / 1MB, 1)}}"
 #define PS_PROCESSES(key)                                                                                         \
     "Get-Process | Sort-Object " key " -Descending | Select-Object -First 10 Name, Id, "                         \

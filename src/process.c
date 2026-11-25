@@ -146,24 +146,29 @@ int stdin_is_terminal(void) {
 #endif
 
 static DWORD stderr_mode_before;
+static DWORD stdout_mode_before;
 
 /* The console is shared with the shell that started us: it gets its mode back. */
 static void restore_stderr_mode(void) { SetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), stderr_mode_before); }
+static void restore_stdout_mode(void) { SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), stdout_mode_before); }
 
-int stderr_color(void) {
-    HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+static int handle_color(DWORD std_id, DWORD *saved, void (*restore)(void)) {
+    HANDLE h = GetStdHandle(std_id);
     DWORD mode;
     const char *no_color = getenv("NO_COLOR");
     if (no_color && no_color[0]) return 0;
-    if (GetConsoleMode(err, &mode)) { /* a console: the colors need its VT processing on */
+    if (GetConsoleMode(h, &mode)) { /* a console: the colors need its VT processing on */
         if (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) return 1;
-        if (!SetConsoleMode(err, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) return 0;
-        stderr_mode_before = mode;
-        atexit(restore_stderr_mode);
+        if (!SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) return 0;
+        *saved = mode;
+        atexit(restore);
         return 1;
     }
-    return msys_terminal(err);
+    return msys_terminal(h);
 }
+
+int stderr_color(void) { return handle_color(STD_ERROR_HANDLE, &stderr_mode_before, restore_stderr_mode); }
+int stdout_color(void) { return handle_color(STD_OUTPUT_HANDLE, &stdout_mode_before, restore_stdout_mode); }
 
 void terminal_input_unbuffered(void) {
     /* The console is read with ReadConsoleW, which stdio does not buffer. */
@@ -541,6 +546,12 @@ int stderr_color(void) {
     const char *no_color = getenv("NO_COLOR");
     if (no_color && no_color[0]) return 0;
     return isatty(STDERR_FILENO);
+}
+
+int stdout_color(void) {
+    const char *no_color = getenv("NO_COLOR");
+    if (no_color && no_color[0]) return 0;
+    return isatty(STDOUT_FILENO);
 }
 
 void terminal_input_unbuffered(void) {

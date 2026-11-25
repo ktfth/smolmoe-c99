@@ -95,12 +95,16 @@ bool light_theme() {
     return status == ERROR_SUCCESS && value == 1;
 }
 
-std::vector<std::string> font_candidates() {
+FontCandidates font_candidates() {
     wchar_t dir[MAX_PATH];
     const UINT n = GetWindowsDirectoryW(dir, MAX_PATH);
     if (!n || n >= MAX_PATH) return {};
     const std::string fonts = narrow(dir) + "\\Fonts\\";
-    return {fonts + "segoeui.ttf", fonts + "arial.ttf", fonts + "tahoma.ttf"};
+    return {
+        {fonts + "segoeui.ttf", fonts + "arial.ttf", fonts + "tahoma.ttf"},
+        {fonts + "segoeuib.ttf", fonts + "arialbd.ttf", fonts + "tahomabd.ttf"},
+        {fonts + "consola.ttf", fonts + "CascadiaMono.ttf", fonts + "lucon.ttf", fonts + "cour.ttf"},
+    };
 }
 
 std::optional<std::string> pick_file(HWND owner) {
@@ -256,7 +260,7 @@ Look make_look(float scale, bool light, bool renderer_ready) {
     Look look;
     look.scale = scale;
     look.light = light;
-    look.large = load_fonts(scale, font_candidates());
+    load_fonts(scale, font_candidates(), look);
     apply_style(look);
     if (renderer_ready) ImGui_ImplDX11_InvalidateDeviceObjects();
     return look;

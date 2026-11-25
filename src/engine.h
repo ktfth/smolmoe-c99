@@ -17,7 +17,10 @@
 #include "util.h"
 
 /* The chat's system prompt unless the user gives one (--system). */
-#define CHAT_DEFAULT_SYSTEM "Responda somente em português do Brasil. Não misture outros idiomas. Seja breve e direto."
+#define CHAT_DEFAULT_SYSTEM                                                                                   \
+    "Responda somente em português do Brasil. Seja breve e direto. Quando pedirem um comando, devolva "       \
+    "apenas o comando pronto para copiar e colar em um bloco de código, com saída legível (GB/MB quando "     \
+    "couber), sem explicar a menos que peçam."
 /* Room for the "# Tools" section the chat appends to the system prompt. */
 #define TOOLS_PROMPT_BYTES 4096u
 

@@ -30,15 +30,26 @@ constexpr int kWindowWidth = 960, kWindowHeight = 720;
 ChatView *g_view = nullptr;
 float g_pending_scale = 0;  // set when the window moves to a monitor with another scale
 
-std::vector<std::string> font_candidates() {
+FontCandidates font_candidates() {
 #if defined(__APPLE__)
-    return {"/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial Unicode.ttf",
-            "/System/Library/Fonts/Supplemental/Verdana.ttf"};
+    return {
+        {"/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial Unicode.ttf",
+         "/System/Library/Fonts/Supplemental/Verdana.ttf"},
+        {"/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/System/Library/Fonts/Supplemental/Verdana Bold.ttf"},
+        {"/System/Library/Fonts/Supplemental/Courier New.ttf", "/System/Library/Fonts/Menlo.ttc"},
+    };
 #else
-    return {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"};
+    return {
+        {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf",
+         "/usr/share/fonts/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+         "/usr/share/fonts/noto/NotoSans-Regular.ttf", "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"},
+        {"/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"},
+        {"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+         "/usr/share/fonts/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"},
+    };
 #endif
 }
 
@@ -50,11 +61,11 @@ Look make_look(float content_scale, bool renderer_ready) {
     look.light = theme_is_light(false);
 #if defined(__APPLE__)
     look.scale = 1.0f;
-    look.large = load_fonts(content_scale, font_candidates());
+    load_fonts(content_scale, font_candidates(), look);
     ImGui::GetIO().FontGlobalScale = 1.0f / content_scale;
 #else
     look.scale = content_scale;
-    look.large = load_fonts(content_scale, font_candidates());
+    load_fonts(content_scale, font_candidates(), look);
 #endif
     apply_style(look);
     if (renderer_ready) ImGui_ImplOpenGL3_DestroyFontsTexture();

@@ -17,6 +17,7 @@ namespace {
 
 constexpr float kFontPixels = 17.0f;       // body text at 96 DPI
 constexpr float kTitlePixels = 26.0f;
+constexpr float kMonoPixels = 15.5f;
 constexpr float kBubbleShare = 0.78f;      // a message bubble takes at most this much of the width
 constexpr float kColumnPixels = 560.0f;    // width of the centered screens
 constexpr int kInputLines = 3;
@@ -34,14 +35,19 @@ const ImWchar kGlyphRanges[] = {0x0020, 0x00FF, 0x0100, 0x017F, 0x2000, 0x206F, 
 
 struct Palette {
     ImVec4 text, dim, error, accent, bubble, background;
+    ImVec4 code_bg, code_border, inline_code_bg, quote_bar;
 };
 
 Palette palette(bool light) {
     if (light)
         return {ImVec4(0.11f, 0.12f, 0.14f, 1), ImVec4(0.42f, 0.45f, 0.50f, 1), ImVec4(0.75f, 0.16f, 0.16f, 1),
-                ImVec4(0.13f, 0.42f, 0.80f, 1), ImVec4(0.86f, 0.91f, 0.98f, 1), ImVec4(0.97f, 0.97f, 0.96f, 1)};
+                ImVec4(0.13f, 0.42f, 0.80f, 1), ImVec4(0.86f, 0.91f, 0.98f, 1), ImVec4(0.97f, 0.97f, 0.96f, 1),
+                ImVec4(0.92f, 0.93f, 0.95f, 1), ImVec4(0.80f, 0.82f, 0.86f, 1), ImVec4(0.89f, 0.91f, 0.94f, 1),
+                ImVec4(0.68f, 0.72f, 0.78f, 1)};
     return {ImVec4(0.90f, 0.91f, 0.93f, 1), ImVec4(0.56f, 0.59f, 0.64f, 1), ImVec4(0.96f, 0.45f, 0.42f, 1),
-            ImVec4(0.42f, 0.66f, 1.00f, 1), ImVec4(0.17f, 0.24f, 0.36f, 1), ImVec4(0.09f, 0.10f, 0.11f, 1)};
+            ImVec4(0.42f, 0.66f, 1.00f, 1), ImVec4(0.17f, 0.24f, 0.36f, 1), ImVec4(0.09f, 0.10f, 0.11f, 1),
+            ImVec4(0.13f, 0.14f, 0.17f, 1), ImVec4(0.24f, 0.27f, 0.32f, 1), ImVec4(0.18f, 0.20f, 0.25f, 1),
+            ImVec4(0.35f, 0.42f, 0.52f, 1)};
 }
 
 bool file_exists(const std::string &path) {
@@ -146,22 +152,38 @@ void apply_style(const Look &look) {
     ImGui::GetStyle() = style;
 }
 
-ImFont *load_fonts(float pixel_scale, const std::vector<std::string> &candidates) {
+void load_fonts(float pixel_scale, const FontCandidates &candidates, Look &look) {
     ImGuiIO &io = ImGui::GetIO();
     io.Fonts->Clear();
-    std::vector<std::string> paths;
-    if (const char *chosen = std::getenv("SMOLMOE_GUI_FONT")) paths.push_back(chosen);
-    paths.insert(paths.end(), candidates.begin(), candidates.end());
-    for (const std::string &path : paths) {
-        // Dear ImGui asserts on a missing file, so look first.
-        if (path.empty() || !file_exists(path)) continue;
-        if (!io.Fonts->AddFontFromFileTTF(path.c_str(), kFontPixels * pixel_scale, nullptr, kGlyphRanges)) continue;
-        return io.Fonts->AddFontFromFileTTF(path.c_str(), kTitlePixels * pixel_scale, nullptr, kGlyphRanges);
+    look.large = nullptr;
+    look.bold = nullptr;
+    look.mono = nullptr;
+
+    auto first_existing = [](const std::vector<std::string> &list, const char *env_override) -> std::string {
+        if (env_override && env_override[0] && file_exists(env_override)) return env_override;
+        for (const std::string &path : list) {
+            if (!path.empty() && file_exists(path)) return path;
+        }
+        return {};
+    };
+
+    const std::string reg = first_existing(candidates.regular, std::getenv("SMOLMOE_GUI_FONT"));
+    if (!reg.empty() && io.Fonts->AddFontFromFileTTF(reg.c_str(), kFontPixels * pixel_scale, nullptr, kGlyphRanges)) {
+        look.large = io.Fonts->AddFontFromFileTTF(reg.c_str(), kTitlePixels * pixel_scale, nullptr, kGlyphRanges);
+    } else {
+        ImFontConfig config;
+        config.SizePixels = std::round(13.0f * pixel_scale);
+        io.Fonts->AddFontDefault(&config);
     }
-    ImFontConfig config;
-    config.SizePixels = std::round(13.0f * pixel_scale);
-    io.Fonts->AddFontDefault(&config);
-    return nullptr;
+
+    const std::string bold = first_existing(candidates.bold, nullptr);
+    if (!bold.empty()) {
+        look.bold = io.Fonts->AddFontFromFileTTF(bold.c_str(), kFontPixels * pixel_scale, nullptr, kGlyphRanges);
+    }
+    const std::string mono = first_existing(candidates.mono, nullptr);
+    if (!mono.empty()) {
+        look.mono = io.Fonts->AddFontFromFileTTF(mono.c_str(), kMonoPixels * pixel_scale, nullptr, kGlyphRanges);
+    }
 }
 
 ChatView::ChatView(ChatSession &session, Platform platform) : session_(session), platform_(std::move(platform)) {}
@@ -277,7 +299,10 @@ void ChatView::draw_chat() {
     // reply and never undoes a draft; Ctrl+N starts a new conversation.
     const ImGuiInputFlags over_field = ImGuiInputFlags_RouteGlobal | ImGuiInputFlags_RouteOverActive;
     if (ImGui::Shortcut(ImGuiKey_Escape, over_field) && state_.phase == Phase::Busy) session_.stop();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, over_field) && state_.phase == Phase::Ready) session_.reset();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, over_field) && state_.phase == Phase::Ready) {
+        select_entry_ = -1;
+        session_.reset();
+    }
     draw_header();
     const float input_height = ImGui::GetTextLineHeight() * kInputLines + style.FramePadding.y * 2;
     const float footer = input_height + ImGui::GetTextLineHeightWithSpacing() + style.ItemSpacing.y * 3;
@@ -301,7 +326,10 @@ void ChatView::draw_header() {
     ImGui::TextColored(p.dim, "%s", details);
     ImGui::SameLine(std::max(right - reset_width, ImGui::GetCursorPosX()));
     ImGui::BeginDisabled(state_.phase != Phase::Ready || state_.entries.empty());
-    if (ImGui::Button(reset_label)) session_.reset();
+    if (ImGui::Button(reset_label)) {
+        select_entry_ = -1;
+        session_.reset();
+    }
     ImGui::SetItemTooltip(SHORTCUT_KEY "+N");
     ImGui::EndDisabled();
     ImGui::Separator();
@@ -319,7 +347,7 @@ void ChatView::draw_transcript(float height) {
     }
     for (size_t i = 0; i < state_.entries.size(); ++i) {
         ImGui::PushID(static_cast<int>(i));
-        draw_entry(state_.entries[i], i + 1 == state_.entries.size());
+        draw_entry(state_.entries[i], i, i + 1 == state_.entries.size());
         ImGui::PopID();
     }
     const bool waiting = state_.phase == Phase::Busy &&
@@ -330,19 +358,73 @@ void ChatView::draw_transcript(float height) {
     ImGui::EndChild();
 }
 
-void ChatView::draw_entry(const Entry &entry, bool last) {
+void ChatView::draw_entry(const Entry &entry, size_t index, bool last) {
     const Palette p = palette(look_.light);
     const float gap = 10.0f * look_.scale;
+    const int idx = static_cast<int>(index);
     if (entry.role == Role::Assistant && entry.text.empty()) return;
+
+    auto action_button = [&](const char *label, bool active = false) -> bool {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, p.inline_code_bg);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, p.code_border);
+        ImGui::PushStyleColor(ImGuiCol_Text, active ? p.accent : p.dim);
+        const bool clicked = ImGui::SmallButton(label);
+        ImGui::PopStyleColor(4);
+        return clicked;
+    };
+
     if (entry.role == Role::Notice) {
         text(entry.text, &p.dim);
         copy_menu(entry.text);
+        const std::string key = "notice_" + std::to_string(idx);
+        const bool is_copied = copied_.id == key && ImGui::GetTime() < copied_.until;
+        if (action_button(is_copied ? "Copiado!" : "Copiar", is_copied)) {
+            ImGui::SetClipboardText(entry.text.c_str());
+            copied_.id = key;
+            copied_.until = ImGui::GetTime() + 1.5;
+        }
     } else if (entry.role == Role::Assistant) {
         const size_t shown = last && state_.phase == Phase::Busy ? complete_utf8(entry.text) : entry.text.size();
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted(entry.text.data(), entry.text.data() + shown);
-        ImGui::PopTextWrapPos();
-        copy_menu(entry.text);
+        const std::string_view sv(entry.text.data(), shown);
+        if (select_entry_ == idx) {
+            const float avail = std::max(ImGui::GetContentRegionAvail().x, 120.0f * look_.scale);
+            const ImVec2 measured = ImGui::CalcTextSize(sv.data(), sv.data() + sv.size(), false, avail - 16.0f * look_.scale);
+            const float box_h = std::clamp(measured.y + 24.0f * look_.scale,
+                                           ImGui::GetTextLineHeight() * 2.0f, 480.0f * look_.scale);
+            std::string mutable_copy(sv);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, p.code_bg);
+            ImGui::InputTextMultiline("##selecionar", mutable_copy.data(), mutable_copy.size() + 1,
+                                      ImVec2(-FLT_MIN, box_h), ImGuiInputTextFlags_ReadOnly);
+            ImGui::PopStyleColor();
+        } else {
+            MarkdownStyle md;
+            md.large = look_.large;
+            md.bold = look_.bold;
+            md.mono = look_.mono;
+            md.text = p.text;
+            md.dim = p.dim;
+            md.accent = p.accent;
+            md.code_bg = p.code_bg;
+            md.code_border = p.code_border;
+            md.inline_code_bg = p.inline_code_bg;
+            md.quote_bar = p.quote_bar;
+            md.scale = look_.scale;
+            draw_markdown(sv, md, idx, copied_);
+            copy_menu(entry.text);
+        }
+        const std::string key = "msg_" + std::to_string(idx);
+        const bool is_copied = copied_.id == key && ImGui::GetTime() < copied_.until;
+        if (action_button(is_copied ? "Copiado!" : "Copiar", is_copied)) {
+            ImGui::SetClipboardText(entry.text.c_str());
+            copied_.id = key;
+            copied_.until = ImGui::GetTime() + 1.5;
+        }
+        ImGui::SameLine(0.0f, 8.0f * look_.scale);
+        const bool selecting = (select_entry_ == idx);
+        if (action_button(selecting ? "Ver formatado" : "Selecionar texto", selecting)) {
+            select_entry_ = selecting ? -1 : idx;
+        }
     } else {
         // The user's message: a bubble on the right.
         const ImVec2 pad = ImVec2(12, 8) * look_.scale;
@@ -360,6 +442,16 @@ void ChatView::draw_entry(const Entry &entry, bool last) {
         ImGui::SetCursorScreenPos(start);
         ImGui::Dummy(box);
         copy_menu(entry.text);
+        const std::string key = "usr_" + std::to_string(idx);
+        const bool is_copied = copied_.id == key && ImGui::GetTime() < copied_.until;
+        const char *lbl = is_copied ? "Copiado!" : "Copiar";
+        const float lw = ImGui::CalcTextSize(lbl).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(avail - lw, 0.0f));
+        if (action_button(lbl, is_copied)) {
+            ImGui::SetClipboardText(entry.text.c_str());
+            copied_.id = key;
+            copied_.until = ImGui::GetTime() + 1.5;
+        }
     }
     ImGui::Dummy(ImVec2(0, gap));
 }

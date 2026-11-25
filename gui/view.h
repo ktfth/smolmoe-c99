@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "markdown.h"
 #include "session.h"
 
 struct Platform {
@@ -22,8 +23,16 @@ struct Platform {
 // Fonts and colors, rebuilt when the window's scale changes.
 struct Look {
     ImFont *large = nullptr;  // titles; nullptr: the regular font
+    ImFont *bold = nullptr;   // bold text and headings; nullptr: regular
+    ImFont *mono = nullptr;   // inline code and code blocks; nullptr: regular
     float scale = 1.0f;       // sizes in pixels at 96 DPI are multiplied by this
     bool light = false;
+};
+
+struct FontCandidates {
+    std::vector<std::string> regular;
+    std::vector<std::string> bold;
+    std::vector<std::string> mono;
 };
 
 // Theme and spacing for `scale`, light or dark.
@@ -32,11 +41,10 @@ void apply_style(const Look &look);
 // SMOLMOE_GUI_THEME=light or dark (claro, escuro) wins over the system's choice.
 bool theme_is_light(bool system_light);
 
-// Loads the first TrueType font that exists (SMOLMOE_GUI_FONT first), at
-// `pixel_scale` times the base size, with the Latin, punctuation and symbol
-// ranges a Portuguese chat needs; Dear ImGui's own font when none does.
-// Returns the large font (or nullptr). Call before the renderer builds the atlas.
-ImFont *load_fonts(float pixel_scale, const std::vector<std::string> &candidates);
+// Loads the first TrueType font that exists for regular, bold and monospace
+// (SMOLMOE_GUI_FONT wins for regular), at `pixel_scale` times the base size,
+// with the Latin, punctuation and symbol ranges a Portuguese chat needs.
+void load_fonts(float pixel_scale, const FontCandidates &candidates, Look &look);
 
 class ChatView {
 public:
@@ -55,7 +63,7 @@ private:
     void draw_chat();
     void draw_header();
     void draw_transcript(float height);
-    void draw_entry(const Entry &entry, bool last);
+    void draw_entry(const Entry &entry, size_t index, bool last);
     void draw_input();
     void draw_status();
     void send_input();
@@ -72,6 +80,8 @@ private:
     bool scroll_to_bottom_ = false;
     bool focus_input_ = true;
     bool close_requested_ = false;
+    int select_entry_ = -1;
+    CopyFeedback copied_;
 };
 
 #endif

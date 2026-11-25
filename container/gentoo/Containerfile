@@ -1,0 +1,25 @@
+# Gentoo toolchains for smolmoe (docs/GENTOO.md):
+# - toolchain: stage3 GCC (Linux) + dev-util/mingw64-toolchain (Windows x64)
+# - wasm:      stage3 + dev-lang/zig-bin (WebAssembly WASI + SIMD128 + threads)
+# Built by `bun scripts/podman-gentoo.ts image`; every part of the build then
+# runs in its own throwaway container from its corresponding image.
+ARG STAGE3=docker.io/gentoo/stage3:latest
+ARG PORTAGE=docker.io/gentoo/portage:latest
+
+FROM ${PORTAGE} AS portage
+
+FROM ${STAGE3} AS base
+COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+
+FROM base AS toolchain
+RUN emerge --getbinpkg --usepkgonly --quiet-build=y --nospinner dev-util/mingw64-toolchain && \
+    rm -rf /var/cache/binpkgs/* /var/cache/distfiles/* && \
+    x86_64-w64-mingw32-gcc --version | head -1 && \
+    x86_64-w64-mingw32-g++ --version | head -1 && \
+    make --version | head -1
+
+FROM base AS wasm
+RUN emerge --getbinpkg --usepkgonly --quiet-build=y --nospinner dev-lang/zig-bin && \
+    rm -rf /var/cache/binpkgs/* /var/cache/distfiles/* && \
+    zig version && \
+    make --version | head -1

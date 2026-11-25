@@ -44,6 +44,7 @@ interface Exports {
   readonly sm_open: (data: number, size: number, context: number, threads: number) => number;
   readonly sm_message: () => number;
   readonly sm_message_cap: () => number;
+  readonly sm_set_os?: (os: number) => void;
   readonly sm_send: (len: number, year: number, month: number, day: number, hour: number, minute: number) => number;
   readonly sm_reset: () => void;
   readonly sm_stats: () => number;
@@ -99,6 +100,14 @@ export class WasmEngine {
           fd_read: () => EBADF,
           fd_seek: () => EBADF,
           fd_close: () => EBADF,
+          fd_prestat_get: () => EBADF,
+          environ_sizes_get: (countPtr: number, bufPtr: number) => {
+            const view = new DataView(memory.buffer);
+            view.setUint32(countPtr, 0, true);
+            view.setUint32(bufPtr, 0, true);
+            return 0;
+          },
+          environ_get: () => 0,
         } as Record<string, (...args: never[]) => number>,
         { get: (target, name: string) => target[name] ?? (() => ENOSYS) },
       ),
@@ -111,6 +120,11 @@ export class WasmEngine {
     });
     engine = new WasmEngine(memory, instance.exports as unknown as Exports, workers);
     engine.call(() => engine!.exports._initialize());
+    if (engine.exports.sm_set_os) {
+      const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+      const os = /Windows/i.test(ua) ? 0 : /Mac OS|Macintosh/i.test(ua) ? 1 : /Linux/i.test(ua) ? 2 : 0;
+      engine.exports.sm_set_os(os);
+    }
     return engine;
   }
 

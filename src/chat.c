@@ -1,6 +1,7 @@
 #include "chat.h"
 #include "cmdcheck.h"
 #include "config.h"
+#include "mdterm.h"
 #include "papel.h"
 #include "platform.h"
 #include "process.h"
@@ -175,7 +176,7 @@ static int command_line(const ChatContext *c, int truncated, int pasted) {
 
 /* The reply as it is written, kept for the command check at its end. */
 typedef struct Reply {
-    Output *out;
+    MdTerm md;
     CmdChecker *checker; /* NULL: no check */
     char *text;
     size_t len;
@@ -184,8 +185,8 @@ typedef struct Reply {
 
 static void reply_text(void *ctx, const unsigned char *bytes, uint32_t n) {
     Reply *r = (Reply *)ctx;
-    output_bytes(r->out, bytes, n);
-    if (fflush(r->out->f)) die("output flush failed");
+    mdterm_bytes(&r->md, bytes, n);
+    if (fflush(r->md.out->f)) die("output flush failed");
     if (!r->checker || r->full) return;
     if (n > REPLY_KEPT - r->len) {
         r->full = 1;
@@ -198,7 +199,7 @@ static void reply_text(void *ctx, const unsigned char *bytes, uint32_t n) {
 static void reply_end(void *ctx) {
     Reply *r = (Reply *)ctx;
     char notice[CMDCHECK_NOTICE_MAX];
-    output_finish(r->out);
+    mdterm_finish(&r->md);
     if (r->checker && r->len && cmdcheck_reply(r->checker, r->text, r->len, notice, sizeof(notice)))
         fprintf(stderr, "\n%s", notice);
     r->len = 0;
@@ -254,7 +255,7 @@ void chat_run(const ChatContext *c) {
     int checking;
     papel_do_ambiente(&papel);
     memset(&reply, 0, sizeof(reply));
-    reply.out = c->out;
+    mdterm_init(&reply.md, c->out, c->terminal && stdout_color());
     e->sink.ctx = &reply;
     e->sink.text = reply_text;
     e->sink.reply_end = reply_end;

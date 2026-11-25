@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { readableNotice } from "../web/format";
+import { parseInline, parseMarkdown } from "../web/markdown";
 import { cacheKey, type Fetch, forget, type ModelCache, openSource, remember, SourceError } from "../web/model-source";
 import { EngineError, INITIAL_PAGES, MAX_MODEL_BYTES, MAXIMUM_PAGES, type PoolWorker, utf8Prefix, WasmEngine } from "../web/wasm-host";
 import { BINARY, BUNDLE_BINARY, bundledModel, modelArgs, ROOT, run, runWithInput, tempDir } from "./support/run";
@@ -45,6 +46,32 @@ describe("page text", () => {
     expect(utf8Prefix(bytes, 100)).toBe(bytes.length);
     expect(utf8Prefix(bytes, 2)).toBe(1); /* "a" + half of "ç" -> "a" */
     expect(utf8Prefix(bytes, 3)).toBe(3);
+  });
+
+  test("markdown parser handles headings, inline styles, lists, tables and code blocks", () => {
+    const md = [
+      "# Título",
+      "Texto com **negrito**, *itálico* e `código`.",
+      "- item 1",
+      "- item 2",
+      "```bash",
+      "df -h",
+      "```",
+      "| A | B |",
+      "|---|---|",
+      "| 1 | 2 |",
+    ].join("\n");
+    const blocks = parseMarkdown(md);
+    expect(blocks.map((b) => b.type)).toEqual(["heading", "p", "ul", "code", "table"]);
+    expect(blocks[3]).toEqual({ type: "code", lang: "bash", code: "df -h" });
+    expect(parseInline("a **b** `c` *d*")).toEqual([
+      { type: "text", value: "a " },
+      { type: "bold", value: "b" },
+      { type: "text", value: " " },
+      { type: "code", value: "c" },
+      { type: "text", value: " " },
+      { type: "italic", value: "d" },
+    ]);
   });
 });
 

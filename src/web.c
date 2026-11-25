@@ -9,8 +9,10 @@
 #include "engine.h"
 #include "kernels.h"
 #include "modelfile.h"
+#include "recipes.h"
 #include "util.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,6 +44,7 @@ static struct {
     char *message;
     uint32_t message_cap;
     const char *backend;
+    RecipeOS os;
     double stats[6];
 } web;
 
@@ -132,6 +135,11 @@ WEB_EXPORT("sm_open") int sm_open(const unsigned char *data, uint32_t size, uint
 WEB_EXPORT("sm_message") char *sm_message(void) { return web.message; }
 WEB_EXPORT("sm_message_cap") uint32_t sm_message_cap(void) { return web.message_cap; }
 
+/* Host OS reported by the browser (0: Windows/PowerShell, 1: macOS/sh, 2: Linux/sh). */
+WEB_EXPORT("sm_set_os") void sm_set_os(int os) {
+    web.os = os == 1 ? RECIPE_MACOS : os == 2 ? RECIPE_LINUX : RECIPE_WINDOWS;
+}
+
 /* Answers the message in sm_message()[0..len). The tools answer from the
  * page's local time (WebAssembly has no time zone). Returns 0 when nothing
  * is open or the message alone does not fit in the context. */
@@ -144,6 +152,20 @@ WEB_EXPORT("sm_send") int sm_send(uint32_t len, int year, int month, int day, in
     web.clock.day = day;
     web.clock.hour = hour;
     web.clock.minute = minute;
+    {
+        Recipe r;
+        ShellKind sh = web.os == RECIPE_WINDOWS ? SHELL_POWERSHELL : SHELL_POSIX;
+        if (recipe_find(web.message, sh, web.os, &r)) {
+            char reply[1024];
+            const char *lang = sh == SHELL_POWERSHELL ? "powershell" : "bash";
+            int rn = snprintf(reply, sizeof(reply), "```%s\n%s\n```", lang, r.command);
+            if (rn > 0 && (size_t)rn < sizeof(reply)) {
+                host_text((const unsigned char *)reply, (uint32_t)rn);
+                host_reply_end();
+                return 1;
+            }
+        }
+    }
     {
         int rc = engine_send(&web.engine, web.message, len);
         if (rc < 0) die("%s", sm_last_error());

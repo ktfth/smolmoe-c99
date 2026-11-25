@@ -41,7 +41,7 @@ CFLAGS  ?=
 LDFLAGS ?=
 BUILD   ?= build
 
-SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output textfold calendar calc tools shell cmdcheck cmdcheck_sh book recipes sha256 prefixcache papel regex engine chat main
+SOURCES := util platform process threadpool kernels kernels_x86 kernels_neon vecmath config tokenizer tokenizer_qwen modelfile container bundle model sampler output mdterm textfold calendar calc tools shell cmdcheck cmdcheck_sh book recipes sha256 prefixcache papel regex engine chat main
 LIB     := $(filter-out main,$(SOURCES))
 
 ifeq ($(OS),Windows_NT)
@@ -422,9 +422,10 @@ $(WASI)/test-kernels.wasm: $(WASI)/tests/test_kernels.o $(WASI_LIB)
 
 # The same with threads: shared memory imported from the host, which starts
 # worker instances on it (src/threadpool.c). zig 0.13 reads --max-memory as
-# hexadecimal: 7FFF0000 is 2 GiB - 64 KiB.
+# hexadecimal (7FFF0000 = 2 GiB - 64 KiB); zig 0.14+ reads decimal (2147418112).
+WASI_MAX_MEMORY ?= 7FFF0000
 WASI_MT_FLAGS = $(WASI_FLAGS) -mcpu=generic+atomics+bulk_memory+simd128
-WASI_MT_LINK := $(WASI_LINK) -Wl,--shared-memory -Wl,--import-memory -Wl,--max-memory=7FFF0000 \
+WASI_MT_LINK := $(WASI_LINK) -Wl,--shared-memory -Wl,--import-memory -Wl,--max-memory=$(WASI_MAX_MEMORY) \
 	-Wl,--export=__stack_pointer
 WASI_MT_OBJ  := $(SOURCES:%=$(WASI)/mt/%.o)
 
@@ -483,7 +484,7 @@ else
   GUI_CFLAGS      = $(shell pkg-config --cflags glfw3)
   GUI_LIBS        = $(shell pkg-config --libs glfw3) -lGL -ldl
 endif
-GUI_OBJ    := $(addprefix $(BUILD)/gui/,$(GUI_MAIN).o session.o view.o args.o) \
+GUI_OBJ    := $(addprefix $(BUILD)/gui/,$(GUI_MAIN).o session.o view.o markdown.o args.o) \
 	$(addprefix $(BUILD)/imgui/,$(addsuffix .o,$(IMGUI_CORE) $(IMGUI_BACKENDS)))
 
 $(BUILD)/gui/%.o: gui/%.cpp
